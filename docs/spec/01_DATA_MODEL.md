@@ -195,7 +195,10 @@ CREATE INDEX idx_escalation_department_status ON escalation(department_id, statu
 -- Catálogo de workflows de n8n (acción -> URL), editable sin redeploy vía /api/admin/n8n-workflows.
 -- Reemplaza el enfoque de una variable de entorno por acción (04_N8N_WORKFLOW_SPEC.md §7).
 CREATE TABLE n8n_workflow_registry (
-  action        TEXT PRIMARY KEY,              -- 'VALIDATE_CLIENT' | 'CHECK_BALANCE' | 'DIAGNOSTIC' | ...
+  action        TEXT PRIMARY KEY,              -- 'VALIDATE_CLIENT' | 'CHECK_BALANCE' | 'DIAGNOSTIC' | 'QUERY_KNOWLEDGE_BASE' | ...
+  -- 'case_action': paso de un WorkflowDefinition, lo llama el motor de workflow durante una conversación.
+  -- 'admin_action': herramienta de administración de contenido (ej. ingesta de documentos al RAG), nunca la llama el motor de workflow de un caso.
+  category      TEXT NOT NULL DEFAULT 'case_action' CHECK (category IN ('case_action','admin_action')),
   url           TEXT NOT NULL,
   description   TEXT,
   timeout_ms    INT NOT NULL DEFAULT 8000,
@@ -247,17 +250,25 @@ type SalesPackagesContext = {
   offer?: { planId: string; price: number };
 };
 
+type GeneralInquiryContext = {
+  question: string;
+  retrieved?: { found: boolean; answer?: string; sources?: string[] };
+};
+
 type CaseContext =
   | { workflowType: "SUPPORT_INTERNET"; data: SupportInternetContext }
   | { workflowType: "BILLING_BALANCE"; data: BillingBalanceContext }
-  | { workflowType: "SALES_PACKAGES"; data: SalesPackagesContext };
+  | { workflowType: "SALES_PACKAGES"; data: SalesPackagesContext }
+  | { workflowType: "GENERAL_INQUIRY"; data: GeneralInquiryContext };
 ```
 
 Cada `WorkflowDefinition` (ver `02_STATE_MACHINE.md`) declara su tipo de contexto asociado; el motor nunca manipula `context` como objeto genérico fuera de la frontera de (de)serialización.
 
 ## 5. Datos técnicos del cliente — regla de origen
 
-Campos como `sector`, `olt_name`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por `find_a_client_contract` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2).
+Campos como `sector`, `olt_name`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por la acción `VALIDATE_CLIENT` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2, `04_N8N_WORKFLOW_SPEC.md` §3.1).
+
+**Nota de mapeo (Anti-Corruption Layer, `docs/skills/design-patterns-backend.md`)**: el workflow real de n8n (`find-client-contract`) devuelve los datos técnicos anidados bajo `contract.router.{sector, olt_name, pon, serial}` (snake_case) y puede devolver **más de un contrato** si la búsqueda por cédula no es única. El `n8n-gateway` (adapter) es responsable de traducir esa forma externa al `SupportInternetContext.contract` interno, y el paso `VALIDATE_CLIENT` del workflow debe contemplar el caso de múltiples contratos (pedir dato de desambiguación: dirección o nombre) antes de continuar — el dominio nunca trabaja directamente con la forma cruda de n8n.
 
 ## 6. Campos calculados (no persistidos)
 

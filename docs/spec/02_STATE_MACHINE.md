@@ -109,6 +109,7 @@ Todo error no recuperable tiene ruta definida; no todo error escala.
 SUPPORT_INTERNET  → SUPPORT
 BILLING_BALANCE   → BILLING
 SALES_PACKAGES    → SALES
+GENERAL_INQUIRY   → null   (sin departamento; solo se le asigna uno si no se encuentra respuesta y se decide escalar — candidato por defecto: SALES, a confirmar con el negocio)
 ```
 
 Con override explícito cuando el negocio lo requiera (ej. `SALES_PACKAGES` que escala nunca cae en `SUPPORT`, va siempre a `SALES` — caso E del negocio original). Esto reemplaza cualquier heurística de keywords sobre el texto del mensaje (el problema detectado en el sistema legacy, `docs/spec/historical/ARCHITECTURE_CURRENT.md`).

@@ -77,24 +77,61 @@ Si más adelante se decide que alguna pieza de IA sí conviene ejecutarla en n8n
 - **Sin URLs hardcodeadas en nodos.** Las URLs que n8n necesita llamar hacia la API (si alguna vez las hay) van en variable de entorno/credencial.
 - **Sin usar `/webhook-test/…`.** Todos los workflows de acción se publican en su URL de producción.
 
-## 6. Registro de acciones → URL (catálogo en base de datos, no `.env`)
+## 6. Categorías de workflows de n8n (`n8n_workflow_registry.category`)
+
+No todos los workflows de n8n son pasos de un `Case`. Se distinguen tres usos, y solo el primero lo llama el motor de workflow durante una conversación:
+
+### 6.1 `case_action` — pasos de un `WorkflowDefinition`, compartidos entre workflows
+Confirmado con tus flujos reales: `VALIDATE_CLIENT` (`find-client-contract`) y `CHECK_BALANCE` (`check-balance`) son **genéricos** — no saben nada de "soporte" ni de ningún workflow en particular, solo reciben una cédula y devuelven datos. Se registran una sola vez en el catálogo y los usa cualquier `WorkflowDefinition` que los necesite (`SUPPORT_INTERNET` hoy; `BILLING_BALANCE`/`SALES_PACKAGES` más adelante sin duplicar nada).
+
+`DIAGNOSTIC`/`CONTINUE_DIAGNOSTIC` sí son específicos de `SUPPORT_INTERNET` (proxies hacia tu microservicio de diagnóstico), pero siguen siendo `case_action` — la diferencia entre "compartida" y "específica" no es estructural, es solo cuántos `WorkflowDefinition` la referencian.
+
+### 6.2 `case_action` — consulta general (nuevo, a construir)
+**`QUERY_KNOWLEDGE_BASE`**: nuevo workflow de n8n (aún no existe, es el que planteas construir) — recibe una pregunta, busca en el vector store (reutilizando el `Postgres PGVector Store1` de `Upload files RAG.json`, en modo `retrieve-as-tool` ya configurado ahí), y responde con el resultado. Mismo patrón síncrono `Webhook → Respond to Webhook` que el resto.
+
+```json
+// Request
+{ "correlationId": "...", "executionId": "...", "idempotencyKey": "...", "caseId": "...", "conversationId": "...",
+  "input": { "question": "¿qué paquetes de 500 megas tienen?" } }
+// Response
+{ "success": true, "result": { "found": true, "answer": "...", "sources": ["catalogo-2026.pdf"] }, "error": null }
+```
+
+Se asocia a un `workflow_type` nuevo, **`GENERAL_INQUIRY`** (`01_DATA_MODEL.md` §4) — un workflow de un solo paso (`RETRIEVE_KNOWLEDGE → COMPLETED`), sin la máquina de estados de soporte/facturación. Se diferencia explícitamente de `SUPPORT_INTERNET`/`BILLING_BALANCE`/`SALES_PACKAGES` en intención (`intent: "general.inquiry"`), en workflow, y normalmente **sin `department_id`** salvo que no se encuentre respuesta y se decida escalar (candidato razonable por defecto: `SALES`, ya que la mayoría de consultas generales son sobre paquetes/cobertura — a confirmar contigo).
+
+### 6.3 `admin_action` — administración de contenido (RAG), no es parte de una conversación de cliente
+El flujo `Upload files RAG.json` (form trigger + extracción de PDF + embeddings + inserción en PGVector) es una **herramienta administrativa**: la usas tú (o el frontend, más adelante, para un panel de gestión de la base de conocimiento) para cargar documentos — el motor de workflow de un `Case` **nunca** la invoca. Se registra en el catálogo con `category = 'admin_action'` para que quede claro que no aparece como opción al construir un `WorkflowDefinition` nuevo, y para que la Etapa 3/futuro admin endpoint pueda listar/filtrar por categoría.
+
+## 7. Registro de acciones → URL (catálogo en base de datos, no `.env`)
 
 Tabla `n8n_workflow_registry` (`01_DATA_MODEL.md` §2), gestionable en caliente vía `PUT/DELETE /api/admin/n8n-workflows/:action` (`03_API_CONTRACT.md` §C.2) — agregar o cambiar una URL de acción no requiere redeploy ni tocar variables de entorno.
 
-Seed inicial (migración, no hardcodeado en código de aplicación):
+Seed inicial (migración, no hardcodeado en código de aplicación) — nombres de campo en `snake_case` porque así los devuelven/reciben tus flujos reales, no se renombran a mitad de camino:
 
 ```sql
-INSERT INTO n8n_workflow_registry (action, url, description) VALUES
-  ('VALIDATE_CLIENT',       'https://n8n.example.com/webhook/validate-client',       'Busca contrato y datos técnicos del cliente'),
-  ('CHECK_BALANCE',         'https://n8n.example.com/webhook/check-balance',         'Consulta saldo/deuda'),
-  ('DIAGNOSTIC',            'https://n8n.example.com/webhook/diagnostic',            'Diagnóstico técnico inicial (MikroTik)'),
-  ('CONTINUE_DIAGNOSTIC',   'https://n8n.example.com/webhook/continue-diagnostic',   'Continúa diagnóstico con respuesta del usuario'),
-  ('RECORD_PAYMENT',        'https://n8n.example.com/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey)'),
-  ('APPLY_BANK_ACCOUNT',    'https://n8n.example.com/webhook/apply-bank-account',    'Solicitud de cuenta bancaria asociada');
+INSERT INTO n8n_workflow_registry (action, category, url, description) VALUES
+  ('VALIDATE_CLIENT',       'case_action',  'https://free-roses-enjoy.loca.lt/webhook/find-client-contract', 'Busca contrato(s) y datos técnicos por cédula; puede devolver más de uno'),
+  ('CHECK_BALANCE',         'case_action',  'https://free-roses-enjoy.loca.lt/webhook/check-balance',         'Consulta saldo/deuda'),
+  ('DIAGNOSTIC',            'case_action',  'https://free-roses-enjoy.loca.lt/webhook/do-diagnostic',         'Diagnóstico técnico inicial (proxy a microservicio propio)'),
+  ('CONTINUE_DIAGNOSTIC',   'case_action',  'https://free-roses-enjoy.loca.lt/webhook/continue-diagnostic',   'Continúa diagnóstico con el mensaje textual del usuario'),
+  ('RECORD_PAYMENT',        'case_action',  'https://free-roses-enjoy.loca.lt/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey) — pendiente de construir'),
+  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://free-roses-enjoy.loca.lt/webhook/apply-bank-account',    'Solicitud de cuenta bancaria asociada — pendiente de construir'),
+  ('QUERY_KNOWLEDGE_BASE',  'case_action',  'https://free-roses-enjoy.loca.lt/webhook/query-knowledge-base',  'Consulta la base de conocimiento (RAG) — pendiente de construir'),
+  ('UPLOAD_RAG_DOCUMENT',   'admin_action', 'https://free-roses-enjoy.loca.lt/form/cargar-documentos',        'Ingesta de documentos al RAG — herramienta administrativa, ya existe');
 ```
+
+### 7.1 Ejemplo — `DIAGNOSTIC` (input real, confirmado contra tu workflow)
+```json
+{ "input": { "sector": "pomasqui", "olt_name": "bicentenario", "pon": "3", "serial": "D011A66CB67C", "conversationId": "conv_456" } }
+```
+### 7.2 Ejemplo — `CONTINUE_DIAGNOSTIC` (input real)
+```json
+{ "input": { "conversationId": "conv_456", "message": "la luz está en rojo" } }
+```
+El texto de `message` aquí es el **mensaje crudo del cliente**, no entidades interpretadas — tu microservicio de diagnóstico hace sus propias preguntas técnicas de seguimiento, así que el paso `WAITING_USER_DIAGNOSTIC` de `SUPPORT_INTERNET` reenvía el texto tal cual llegó, no una versión reinterpretada por el `AIProviderPort`.
 
 Agregar una acción nueva = una fila nueva (por API o por migración de seed) — nunca implica tocar el motor de workflow de la API (Open/Closed, `docs/skills/solid-principles.md`).
 
-## 7. Corrección de las tools legacy detectadas en la auditoría
+## 8. Corrección de las tools legacy detectadas en la auditoría
 
 El workflow legacy (`initial-whatsapp-api.json`) tenía `record_full_payment`, `record_incomplete_payment` y `apply_for_bank_accounts` apuntando por error al mismo sub-workflow `Check_Balance`. Al reconstruir cada uno como workflow independiente (§2), cada uno debe tener su propia URL real registrada en `n8n_workflow_registry` y probarse contra el sistema de pagos antes de dar por completa esta pieza.
