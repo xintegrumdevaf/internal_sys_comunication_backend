@@ -1,6 +1,7 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
+import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
@@ -18,22 +19,19 @@ export type ReplyAsHumanDeps = {
   whatsappSender: WhatsAppSenderPort;
   auditRepo: AuditRepositoryPort;
   logger: Logger;
+  /** Etapa 6: deshabilita automation del caso activo al responder como humano. */
+  caseRepo?: CaseRepositoryPort;
 };
 
 /**
  * Respuesta humana (docs/spec/03_API_CONTRACT.md §C.2 `POST /api/conversations/:id/reply`).
- *
- * Desviacion documentada: el contrato indica que ademas debe forzar
- * `automation.enabled=false` si no lo estaba. `automation_state` pertenece
- * a `Case` (01_DATA_MODEL.md §2), que todavia no existe (nace en la Etapa 2).
- * Este caso de uso persiste y envia la respuesta; el toggle de automatizacion
- * se conecta cuando el modulo `cases` este disponible.
+ * Fuerza `automation.enabled=false` en el caso activo si no lo estaba.
  */
 export class ReplyAsHumanUseCase {
   constructor(private readonly deps: ReplyAsHumanDeps) {}
 
   async execute(input: ReplyAsHumanInput): Promise<Message> {
-    const { conversationRepo, messageRepo, whatsappSender, auditRepo, logger } = this.deps;
+    const { conversationRepo, messageRepo, whatsappSender, auditRepo, logger, caseRepo } = this.deps;
 
     const conversation = await conversationRepo.findById(input.conversationId);
     if (!conversation) {
@@ -59,6 +57,19 @@ export class ReplyAsHumanUseCase {
     });
 
     await conversationRepo.touchLastActivity(conversation.id);
+
+    if (caseRepo && conversation.activeCaseId) {
+      const automation = await caseRepo.getAutomationState(conversation.activeCaseId);
+      if (automation?.enabled) {
+        await caseRepo.setAutomationEnabled(conversation.activeCaseId, false, {
+          reason: "HUMAN_REPLY",
+          changedBy: input.agentUserId,
+        });
+        await caseRepo.appendEvent(conversation.activeCaseId, "AUTOMATION_DISABLED", {
+          reason: "HUMAN_REPLY",
+        });
+      }
+    }
 
     await auditRepo.record({
       action: "CONVERSATION_REPLY",

@@ -10,6 +10,7 @@ import type { Message } from "../../../conversations/domain/message.entity";
 import type { ComposeCustomerReplyUseCase } from "../../../ai/application/use-cases/compose-customer-reply.use-case";
 import type { ExtractReceiptDataUseCase } from "../../../ai/application/use-cases/extract-receipt-data.use-case";
 import type { TranscribeAudioUseCase } from "../../../ai/application/use-cases/transcribe-audio.use-case";
+import type { EscalationService } from "../../../escalation/application/services/escalation.service";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { InterpretationPort } from "../ports/interpretation.port";
 import { CaseArbitrationService } from "../services/case-arbitration.service";
@@ -32,6 +33,7 @@ export type ProcessBufferedMessagesDeps = {
   transcribeAudio: TranscribeAudioUseCase;
   extractReceiptData: ExtractReceiptDataUseCase;
   logger: Logger;
+  escalationService?: EscalationService;
 };
 
 export type ProcessBufferedMessagesInput = {
@@ -101,6 +103,19 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     if (decision.action === "REQUEST_HUMAN") {
+      if (decision.caseId && this.deps.escalationService) {
+        const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
+          caseId: decision.caseId,
+          reason: "REQUEST_HUMAN",
+        });
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: customerMessage,
+          log,
+        });
+        return;
+      }
       if (decision.caseId) {
         await this.escalateToHuman(decision.caseId, log);
       }
@@ -138,10 +153,24 @@ export class ProcessBufferedMessagesUseCase {
       await this.pauseCase(decision.pauseCaseId, log);
     }
 
-    // Si el workflow no esta registrado (ej. BILLING_BALANCE Etapa 8), no romper:
-    // la decision de negocio ya quedo (entities/intent); informar al cliente.
+    // Si el workflow no esta registrado (UNSUPPORTED / Etapa 8 pendiente):
+    // pool de triage sin departamento (02_STATE_MACHINE.md §10).
     if (!decision.resumeCaseId && !this.deps.engine.getDefinition(decision.workflowType)) {
-      log.warn({ workflowType: decision.workflowType }, "workflow_type sin definicion; no se avanza el motor");
+      log.warn({ workflowType: decision.workflowType }, "workflow_type sin definicion; triage");
+      if (this.deps.escalationService) {
+        const { customerMessage } = await this.deps.escalationService.sendToTriage({
+          conversationId,
+          reason: `UNSUPPORTED:${decision.workflowType}`,
+          correlationId,
+        });
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: customerMessage,
+          log,
+        });
+        return;
+      }
       await this.sendCustomerReply({
         conversationId,
         correlationId,
@@ -232,6 +261,35 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     return { text: parts.join("\n"), receiptEntities, primaryMessageId };
+  }
+
+  private async deliverFixedReply(input: {
+    conversationId: string;
+    correlationId: string;
+    body: string;
+    log: Logger;
+  }): Promise<void> {
+    const conversation = await this.deps.conversationRepo.findById(input.conversationId);
+    if (!conversation) {
+      input.log.warn("conversacion no encontrada al enviar reply fijo");
+      return;
+    }
+    let externalId: string | null = null;
+    try {
+      const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, input.body);
+      externalId = sent.externalId;
+    } catch (error) {
+      input.log.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        "fallo al enviar reply fijo por WhatsApp",
+      );
+    }
+    await this.deps.messageRepo.insertOutbound({
+      conversationId: input.conversationId,
+      author: "ai",
+      body: input.body,
+      externalId,
+    });
   }
 
   private async sendCustomerReply(input: {

@@ -5,6 +5,7 @@ import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
 import type { N8nGatewayPort } from "../ports/n8n-gateway.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
+import type { EscalationService } from "../../../escalation/application/services/escalation.service";
 import type { WorkflowStepOutcome } from "../engine/workflow-definition";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
@@ -19,6 +20,8 @@ export type AdvanceCaseDeps = {
   engine: WorkflowEngine;
   gateway: N8nGatewayPort;
   logger: Logger;
+  /** Etapa 6: persiste resumen estructurado al escalar. */
+  escalationService?: EscalationService;
 };
 
 export type AdvanceCaseInput = {
@@ -142,6 +145,12 @@ export class AdvanceCaseUseCase {
       await caseRepo.setAutomationEnabled(aggregate.case.id, false, { reason: outcome.reason });
       await caseRepo.appendEvent(aggregate.case.id, "CASE_ESCALATED", { reason: outcome.reason });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+      if (this.deps.escalationService) {
+        await this.deps.escalationService.ensureEscalationRecord({
+          caseId: result.case.id,
+          reason: outcome.reason,
+        });
+      }
       log.warn({ status: "ESCALATED", reason: outcome.reason }, "caso escalado, automatizacion deshabilitada");
       return { case: result.case, outcome };
     }

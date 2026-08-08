@@ -296,4 +296,22 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       payload,
     ]);
   }
+
+  async listEvents(
+    caseId: string,
+  ): Promise<Array<{ type: string; payload: Record<string, unknown>; occurredAt: Date }>> {
+    const { rows } = await this.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+      occurred_at: Date;
+    }>(
+      `SELECT type, payload, occurred_at FROM workflow_event WHERE case_id = $1 ORDER BY occurred_at ASC`,
+      [caseId],
+    );
+    return rows.map((row) => ({
+      type: row.type,
+      payload: row.payload ?? {},
+      occurredAt: row.occurred_at,
+    }));
+  }
 }

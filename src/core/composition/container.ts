@@ -53,6 +53,22 @@ import { ListN8nWorkflowsUseCase } from "../modules/cases/application/use-cases/
 import { UpsertN8nWorkflowUseCase } from "../modules/cases/application/use-cases/upsert-n8n-workflow.use-case";
 import { DeactivateN8nWorkflowUseCase } from "../modules/cases/application/use-cases/deactivate-n8n-workflow.use-case";
 import { createN8nWorkflowsRouter } from "../modules/cases/presentation/admin/n8n-workflows.router";
+import { createCasesRouter } from "../modules/cases/presentation/cases.router";
+
+import { EscalationRepositoryPg } from "../modules/escalation/infrastructure/postgres/escalation.repository.pg";
+import { CaseSummaryBuilderService } from "../modules/escalation/application/services/case-summary-builder.service";
+import { EscalationService } from "../modules/escalation/application/services/escalation.service";
+import { ClaimCaseUseCase } from "../modules/escalation/application/use-cases/claim-case.use-case";
+import { AssignCaseUseCase } from "../modules/escalation/application/use-cases/assign-case.use-case";
+import {
+  DisableAutomationUseCase,
+  ReactivateAutomationUseCase,
+} from "../modules/escalation/application/use-cases/disable-automation.use-case";
+import {
+  GetCaseSummaryUseCase,
+  ListEscalationsUseCase,
+} from "../modules/escalation/application/use-cases/list-escalations.use-case";
+import { createEscalationsRouter } from "../modules/escalation/presentation/escalations.router";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -82,6 +98,7 @@ export function createContainer(): Container {
   const conversationsLogger = logger.child({ module: "conversations" });
   const ingestionLogger = logger.child({ module: "ingestion" });
   const casesLogger = logger.child({ module: "cases" });
+  const escalationLogger = logger.child({ module: "escalation" });
 
   // --- Repositorios (infrastructure) ---
   const auditRepo = new AuditRepositoryPg(pgPool);
@@ -93,6 +110,7 @@ export function createContainer(): Container {
   const caseRepo = new CaseRepositoryPg(pgPool);
   const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
+  const escalationRepo = new EscalationRepositoryPg(pgPool);
 
   // --- Motor de workflow (Etapa 2) ---
   // Unico workflow implementado por ahora (docs/spec/05_BUILD_PLAN.md Etapa 2);
@@ -121,6 +139,60 @@ export function createContainer(): Container {
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
 
+  // --- Escalacion / triage (Etapa 6) ---
+  const summaryBuilder = new CaseSummaryBuilderService();
+  const escalationService = new EscalationService({
+    caseRepo,
+    escalationRepo,
+    workflowExecutionRepo,
+    conversationRepo,
+    departmentRepo,
+    summaryBuilder,
+    logger: escalationLogger,
+  });
+  const claimCase = new ClaimCaseUseCase({
+    caseRepo,
+    escalationRepo,
+    agentRepo,
+    departmentRepo,
+    auditRepo,
+    logger: escalationLogger,
+  });
+  const assignCase = new AssignCaseUseCase({
+    caseRepo,
+    escalationRepo,
+    agentRepo,
+    departmentRepo,
+    auditRepo,
+    logger: escalationLogger,
+  });
+  const disableAutomation = new DisableAutomationUseCase({
+    caseRepo,
+    agentRepo,
+    departmentRepo,
+    auditRepo,
+    logger: escalationLogger,
+  });
+  const reactivateAutomation = new ReactivateAutomationUseCase({
+    caseRepo,
+    agentRepo,
+    departmentRepo,
+    auditRepo,
+    logger: escalationLogger,
+  });
+  const getCaseSummary = new GetCaseSummaryUseCase({
+    caseRepo,
+    escalationRepo,
+    workflowExecutionRepo,
+    departmentRepo,
+    summaryBuilder,
+  });
+  const listEscalations = new ListEscalationsUseCase({
+    escalationRepo,
+    agentRepo,
+    departmentRepo,
+  });
+
   // --- Casos de uso (application) ---
   const advanceCase = new AdvanceCaseUseCase({
     caseRepo,
@@ -129,6 +201,7 @@ export function createContainer(): Container {
     engine: workflowEngine,
     gateway: n8nGateway,
     logger: casesLogger,
+    escalationService,
   });
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({
     caseRepo,
@@ -144,6 +217,7 @@ export function createContainer(): Container {
     transcribeAudio,
     extractReceiptData,
     logger: casesLogger,
+    escalationService,
   });
   const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: casesLogger });
 
@@ -177,6 +251,7 @@ export function createContainer(): Container {
     whatsappSender,
     auditRepo,
     logger: conversationsLogger,
+    caseRepo,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
@@ -219,6 +294,17 @@ export function createContainer(): Container {
       deactivateN8nWorkflow,
     }),
   );
+  app.use(
+    createCasesRouter({
+      caseRepo,
+      claimCase,
+      assignCase,
+      disableAutomation,
+      reactivateAutomation,
+      getCaseSummary,
+    }),
+  );
+  app.use(createEscalationsRouter({ listEscalations }));
 
   app.use(createErrorHandler(logger));
 

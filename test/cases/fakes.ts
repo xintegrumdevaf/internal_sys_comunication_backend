@@ -186,6 +186,14 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
   async appendEvent(caseId: string, type: string, payload: Record<string, unknown>): Promise<void> {
     this.events.push({ caseId, type, payload });
   }
+
+  async listEvents(
+    caseId: string,
+  ): Promise<Array<{ type: string; payload: Record<string, unknown>; occurredAt: Date }>> {
+    return this.events
+      .filter((e) => e.caseId === caseId)
+      .map((e) => ({ type: e.type, payload: e.payload, occurredAt: new Date() }));
+  }
 }
 
 export class WorkflowExecutionRepositoryFake implements WorkflowExecutionRepositoryPort {

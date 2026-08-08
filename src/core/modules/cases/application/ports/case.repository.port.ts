@@ -65,4 +65,7 @@ export interface CaseRepositoryPort {
   ): Promise<AutomationState>;
 
   appendEvent(caseId: string, type: string, payload: Record<string, unknown>): Promise<void>;
+
+  /** Eventos de `workflow_event` para timeline / resumen §D. */
+  listEvents(caseId: string): Promise<Array<{ type: string; payload: Record<string, unknown>; occurredAt: Date }>>;
 }
