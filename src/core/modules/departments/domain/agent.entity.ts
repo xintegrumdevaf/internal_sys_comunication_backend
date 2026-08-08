@@ -1,8 +1,10 @@
+export type AgentRole = "agent" | "manager" | "admin";
+
 export interface Agent {
   id: string;
   name: string;
   email: string;
-  isGlobalAdmin: boolean;
+  role: AgentRole;
   primaryDepartmentId: string | null;
   active: boolean;
   createdAt: Date;

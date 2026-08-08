@@ -1,9 +1,9 @@
-import type { Agent } from "../../domain/agent.entity";
+import type { Agent, AgentRole } from "../../domain/agent.entity";
 
 export type CreateAgentInput = {
   name: string;
   email: string;
-  isGlobalAdmin?: boolean;
+  role?: AgentRole;
   primaryDepartmentId?: string | null;
 };
 

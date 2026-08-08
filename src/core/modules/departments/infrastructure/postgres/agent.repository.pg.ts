@@ -1,12 +1,12 @@
 import type { Pool } from "pg";
-import type { Agent } from "../../domain/agent.entity";
+import type { Agent, AgentRole } from "../../domain/agent.entity";
 import type { AgentRepositoryPort, CreateAgentInput } from "../../application/ports/agent.repository.port";
 
 type AgentRow = {
   id: string;
   name: string;
   email: string;
-  is_global_admin: boolean;
+  role: AgentRole;
   primary_department_id: string | null;
   active: boolean;
   created_at: Date;
@@ -17,7 +17,7 @@ function mapRow(row: AgentRow): Agent {
     id: row.id,
     name: row.name,
     email: row.email,
-    isGlobalAdmin: row.is_global_admin,
+    role: row.role,
     primaryDepartmentId: row.primary_department_id,
     active: row.active,
     createdAt: row.created_at,
@@ -39,11 +39,11 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
 
   async create(input: CreateAgentInput): Promise<Agent> {
     const { rows } = await this.pool.query<AgentRow>(
-      `INSERT INTO agent (name, email, is_global_admin, primary_department_id)
+      `INSERT INTO agent (name, email, role, primary_department_id)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING *`,
-      [input.name, input.email, input.isGlobalAdmin ?? false, input.primaryDepartmentId ?? null],
+      [input.name, input.email, input.role ?? "agent", input.primaryDepartmentId ?? null],
     );
     return mapRow(rows[0]!);
   }

@@ -20,7 +20,7 @@ async function run(): Promise<void> {
     const admin = await agentRepo.create({
       name: "Admin Global",
       email: "admin@isp.local",
-      isGlobalAdmin: true,
+      role: "admin",
     });
     const supportAgent = await agentRepo.create({
       name: "Agente de Soporte",
