@@ -25,11 +25,25 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
+    const modeMatches = mode === "subscribe";
+    const tokenMatches = token === env.WHATSAPP_VERIFY_TOKEN;
 
-    if (mode === "subscribe" && token === env.WHATSAPP_VERIFY_TOKEN) {
+    if (modeMatches && tokenMatches) {
+      req.log?.info({ challengeProvided: challenge !== undefined }, "webhook de whatsapp verificado");
       res.status(200).send(String(challenge ?? ""));
       return;
     }
+
+    req.log?.warn(
+      {
+        mode,
+        modeMatches,
+        verifyTokenProvided: typeof token === "string" && token.length > 0,
+        verifyTokenMatches: tokenMatches,
+        challengeProvided: challenge !== undefined,
+      },
+      "verificacion de webhook de whatsapp rechazada",
+    );
     res.sendStatus(403);
   });
 
