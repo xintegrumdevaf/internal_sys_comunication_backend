@@ -11,6 +11,7 @@ import type { ComposeCustomerReplyUseCase } from "../../../ai/application/use-ca
 import type { ExtractReceiptDataUseCase } from "../../../ai/application/use-cases/extract-receipt-data.use-case";
 import type { TranscribeAudioUseCase } from "../../../ai/application/use-cases/transcribe-audio.use-case";
 import type { EscalationService } from "../../../escalation/application/services/escalation.service";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { InterpretationPort } from "../ports/interpretation.port";
 import { CaseArbitrationService } from "../services/case-arbitration.service";
@@ -34,6 +35,7 @@ export type ProcessBufferedMessagesDeps = {
   extractReceiptData: ExtractReceiptDataUseCase;
   logger: Logger;
   escalationService?: EscalationService;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 export type ProcessBufferedMessagesInput = {
@@ -284,11 +286,17 @@ export class ProcessBufferedMessagesUseCase {
         "fallo al enviar reply fijo por WhatsApp",
       );
     }
-    await this.deps.messageRepo.insertOutbound({
+    const outbound = await this.deps.messageRepo.insertOutbound({
       conversationId: input.conversationId,
       author: "ai",
       body: input.body,
       externalId,
+    });
+    this.deps.broadcaster?.publish({
+      type: "MESSAGE_SENT",
+      conversationId: input.conversationId,
+      messageId: outbound.id,
+      author: "ai",
     });
   }
 
@@ -338,11 +346,17 @@ export class ProcessBufferedMessagesUseCase {
       );
     }
 
-    await this.deps.messageRepo.insertOutbound({
+    const outbound = await this.deps.messageRepo.insertOutbound({
       conversationId: input.conversationId,
       author: "ai",
       body,
       externalId,
+    });
+    this.deps.broadcaster?.publish({
+      type: "MESSAGE_SENT",
+      conversationId: input.conversationId,
+      messageId: outbound.id,
+      author: "ai",
     });
     input.log.info({ bodyPreview: body.slice(0, 80) }, "respuesta de IA enviada al cliente");
   }

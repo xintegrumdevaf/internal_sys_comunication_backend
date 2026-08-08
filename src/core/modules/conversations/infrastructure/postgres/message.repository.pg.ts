@@ -85,11 +85,25 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     return mapRow(rows[0]!);
   }
 
-  async listByConversation(conversationId: string): Promise<Message[]> {
-    const { rows } = await this.pool.query<MessageRow>(
-      `SELECT * FROM message WHERE conversation_id = $1 ORDER BY created_at ASC`,
-      [conversationId],
-    );
+  async listByConversation(
+    conversationId: string,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<Message[]> {
+    const params: unknown[] = [conversationId];
+    const clauses = [`conversation_id = $1`];
+    if (options.cursor) {
+      params.push(new Date(options.cursor));
+      clauses.push(`created_at < $${params.length}`);
+    }
+    let sql = `SELECT * FROM message WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC`;
+    if (options.limit && options.limit > 0) {
+      // Pedimos los últimos N: orden DESC + limit + reverse.
+      sql = `SELECT * FROM (
+               SELECT * FROM message WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT $${params.length + 1}
+             ) m ORDER BY created_at ASC`;
+      params.push(options.limit);
+    }
+    const { rows } = await this.pool.query<MessageRow>(sql, params);
     return rows.map(mapRow);
   }
 
@@ -102,5 +116,21 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       [ids],
     );
     return rows.map(mapRow);
+  }
+
+  async findLastByConversationIds(conversationIds: string[]): Promise<Map<string, Message>> {
+    const result = new Map<string, Message>();
+    if (conversationIds.length === 0) return result;
+    const { rows } = await this.pool.query<MessageRow>(
+      `SELECT DISTINCT ON (conversation_id) *
+       FROM message
+       WHERE conversation_id = ANY($1::uuid[])
+       ORDER BY conversation_id, created_at DESC`,
+      [conversationIds],
+    );
+    for (const row of rows) {
+      result.set(row.conversation_id, mapRow(row));
+    }
+    return result;
   }
 }

@@ -69,6 +69,12 @@ import {
   ListEscalationsUseCase,
 } from "../modules/escalation/application/use-cases/list-escalations.use-case";
 import { createEscalationsRouter } from "../modules/escalation/presentation/escalations.router";
+import { RealtimeBroadcaster } from "../modules/realtime/application/realtime-broadcaster";
+import { createRealtimeRouter } from "../modules/realtime/presentation/realtime.router";
+import { CompleteCaseUseCase } from "../modules/cases/application/use-cases/complete-case.use-case";
+import { TransferCaseUseCase } from "../modules/cases/application/use-cases/transfer-case.use-case";
+import { GetDashboardUseCase } from "../modules/cases/application/use-cases/get-dashboard.use-case";
+import { TakeControlUseCase } from "../modules/conversations/application/use-cases/take-control.use-case";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -139,6 +145,9 @@ export function createContainer(): Container {
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
 
+  // --- Realtime (Etapa 7) — antes de use cases que emiten eventos ---
+  const broadcaster = new RealtimeBroadcaster();
+
   // --- Escalacion / triage (Etapa 6) ---
   const summaryBuilder = new CaseSummaryBuilderService();
   const escalationService = new EscalationService({
@@ -149,6 +158,7 @@ export function createContainer(): Container {
     departmentRepo,
     summaryBuilder,
     logger: escalationLogger,
+    broadcaster,
   });
   const claimCase = new ClaimCaseUseCase({
     caseRepo,
@@ -218,8 +228,27 @@ export function createContainer(): Container {
     extractReceiptData,
     logger: casesLogger,
     escalationService,
+    broadcaster,
   });
   const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: casesLogger });
+  const completeCase = new CompleteCaseUseCase({
+    caseRepo,
+    conversationRepo,
+    auditRepo,
+    logger: casesLogger,
+  });
+  const transferCase = new TransferCaseUseCase({
+    caseRepo,
+    departmentRepo,
+    auditRepo,
+    logger: casesLogger,
+  });
+  const getDashboard = new GetDashboardUseCase({
+    conversationRepo,
+    caseRepo,
+    agentRepo,
+    escalationRepo,
+  });
 
   const inboundBuffer = new InboundBufferService(
     redisClient,
@@ -242,8 +271,9 @@ export function createContainer(): Container {
     redisClient,
     inboundBuffer,
     logger: conversationsLogger,
+    broadcaster,
   });
-  const listConversations = new ListConversationsUseCase(conversationRepo);
+  const listConversations = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
   const replyAsHuman = new ReplyAsHumanUseCase({
     conversationRepo,
@@ -252,6 +282,13 @@ export function createContainer(): Container {
     auditRepo,
     logger: conversationsLogger,
     caseRepo,
+  });
+  const takeControl = new TakeControlUseCase({
+    conversationRepo,
+    caseRepo,
+    claimCase,
+    logger: conversationsLogger,
+    broadcaster,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
@@ -283,7 +320,16 @@ export function createContainer(): Container {
 
   app.use(createHealthRouter({ pgPool, redisClient }));
   app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient }));
-  app.use(createConversationsRouter({ listConversations, listMessages, replyAsHuman }));
+  app.use(
+    createConversationsRouter({
+      listConversations,
+      listMessages,
+      replyAsHuman,
+      takeControl,
+      caseRepo,
+      broadcaster,
+    }),
+  );
   app.use(createDepartmentsRouter({ listDepartments, listAgents }));
   app.use(createAuditRouter(auditRepo));
   app.use(
@@ -297,14 +343,21 @@ export function createContainer(): Container {
   app.use(
     createCasesRouter({
       caseRepo,
+      workflowExecutionRepo,
       claimCase,
       assignCase,
       disableAutomation,
       reactivateAutomation,
       getCaseSummary,
+      completeCase,
+      cancelCase,
+      transferCase,
+      getDashboard,
+      broadcaster,
     }),
   );
   app.use(createEscalationsRouter({ listEscalations }));
+  app.use(createRealtimeRouter({ broadcaster, agentRepo }));
 
   app.use(createErrorHandler(logger));
 

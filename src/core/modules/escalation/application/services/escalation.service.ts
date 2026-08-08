@@ -10,6 +10,7 @@ import type { Escalation } from "../../domain/escalation.entity";
 import type { EscalationRepositoryPort } from "../ports/escalation.repository.port";
 import { CaseSummaryBuilderService } from "./case-summary-builder.service";
 import { businessReplyForReason } from "./business-reply-catalog";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 export type EscalationServiceDeps = {
   caseRepo: CaseRepositoryPort;
@@ -19,6 +20,7 @@ export type EscalationServiceDeps = {
   departmentRepo: DepartmentRepositoryPort;
   summaryBuilder: CaseSummaryBuilderService;
   logger: Logger;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 /**
@@ -103,6 +105,13 @@ export class EscalationService {
       { caseId: caseEntity.id, escalationId: escalation.id, reason: input.reason },
       "caso escalado con resumen estructurado",
     );
+    this.deps.broadcaster?.publish({
+      type: "CASE_ESCALATED",
+      caseId: caseEntity.id,
+      conversationId: caseEntity.conversationId,
+      departmentId: caseEntity.departmentId,
+      at: new Date().toISOString(),
+    });
     return { case: caseEntity, escalation, customerMessage };
   }
 
@@ -151,6 +160,13 @@ export class EscalationService {
       { caseId: transitioned.case.id, escalationId: escalation.id },
       "caso enviado al pool de triage",
     );
+    this.deps.broadcaster?.publish({
+      type: "CASE_ESCALATED",
+      caseId: transitioned.case.id,
+      conversationId: input.conversationId,
+      departmentId: null,
+      at: new Date().toISOString(),
+    });
     return { case: transitioned.case, escalation, customerMessage };
   }
 

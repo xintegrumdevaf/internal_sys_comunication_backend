@@ -6,6 +6,7 @@ import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
 import type { InboundBufferService } from "../../../ingestion/application/services/inbound-buffer.service";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 export type ReceiveInboundMessageInput = {
   waPhone: string;
@@ -33,6 +34,7 @@ export type ReceiveInboundMessageDeps = {
   logger: Logger;
   /** Opcional: si no se inyecta, el mensaje se persiste pero no se agrupa (tests de Etapa 1). */
   inboundBuffer?: InboundBufferService;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 /**
@@ -80,6 +82,11 @@ export class ReceiveInboundMessageUseCase {
     if (!isDuplicate) {
       await conversationRepo.touchLastActivity(conversation.id);
       await inboundBuffer?.push(conversation.id, message.id);
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_RECEIVED",
+        conversationId: conversation.id,
+        messageId: message.id,
+      });
     }
 
     return { conversation, message, isDuplicate };

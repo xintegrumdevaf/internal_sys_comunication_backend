@@ -18,6 +18,12 @@ export type InsertOutboundMessageInput = {
   externalId?: string | null;
 };
 
+export type ListMessagesOptions = {
+  limit?: number;
+  /** Cursor = createdAt ISO del último mensaje visto (paginación hacia atrás en el tiempo). */
+  cursor?: string;
+};
+
 export interface MessageRepositoryPort {
   /**
    * Idempotente por UNIQUE(conversation_id, external_id) — docs/spec/01_DATA_MODEL.md §3.
@@ -26,7 +32,10 @@ export interface MessageRepositoryPort {
    */
   insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
   insertOutbound(input: InsertOutboundMessageInput): Promise<Message>;
-  listByConversation(conversationId: string): Promise<Message[]>;
+  listByConversation(conversationId: string, options?: ListMessagesOptions): Promise<Message[]>;
   /** Usado por el buffer/debounce (docs/spec/02_STATE_MACHINE.md §12) para recuperar la unidad de trabajo agrupada. */
   findByIds(ids: string[]): Promise<Message[]>;
+  /** Último mensaje por conversación (01_DATA_MODEL.md §6 lastMessagePreview). */
+  findLastByConversationIds(conversationIds: string[]): Promise<Map<string, Message>>;
 }
+

@@ -136,13 +136,39 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     return message;
   }
 
-  async listByConversation(conversationId: string): Promise<Message[]> {
-    return this.messages.filter((m) => m.conversationId === conversationId);
+  async listByConversation(
+    conversationId: string,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<Message[]> {
+    let list = this.messages
+      .filter((m) => m.conversationId === conversationId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    if (options.cursor) {
+      const cursorTs = new Date(options.cursor).getTime();
+      list = list.filter((m) => m.createdAt.getTime() < cursorTs);
+    }
+    if (options.limit && options.limit > 0) {
+      list = list.slice(-options.limit);
+    }
+    return list;
   }
 
   async findByIds(ids: string[]): Promise<Message[]> {
     const set = new Set(ids);
     return this.messages.filter((m) => set.has(m.id));
+  }
+
+  async findLastByConversationIds(conversationIds: string[]): Promise<Map<string, Message>> {
+    const set = new Set(conversationIds);
+    const map = new Map<string, Message>();
+    for (const message of this.messages) {
+      if (!set.has(message.conversationId)) continue;
+      const prev = map.get(message.conversationId);
+      if (!prev || message.createdAt > prev.createdAt) {
+        map.set(message.conversationId, message);
+      }
+    }
+    return map;
   }
 }
 
