@@ -1,0 +1,42 @@
+version: "3.9"
+ 
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: isp
+      POSTGRES_PASSWORD: isp
+      POSTGRES_DB: isp_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+ 
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+ 
+  # Opcional: para probar el 04_N8N_WORKFLOW_SPEC.md en local antes de tocar el n8n de producción
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: isp_platform
+      DB_POSTGRESDB_USER: isp
+      DB_POSTGRESDB_PASSWORD: isp
+    depends_on:
+      - postgres
+ 
+volumes:
+  pgdata:
+ 
