@@ -266,9 +266,11 @@ Cada `WorkflowDefinition` (ver `02_STATE_MACHINE.md`) declara su tipo de context
 
 ## 5. Datos técnicos del cliente — regla de origen
 
-Campos como `sector`, `olt_name`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por la acción `VALIDATE_CLIENT` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2, `04_N8N_WORKFLOW_SPEC.md` §3.1).
+Campos como `sector`, `oltName`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por la acción `VALIDATE_CLIENT` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2, `04_N8N_WORKFLOW_SPEC.md` §3.1).
 
-**Nota de mapeo (Anti-Corruption Layer, `docs/skills/design-patterns-backend.md`)**: el workflow real de n8n (`find-client-contract`) devuelve los datos técnicos anidados bajo `contract.router.{sector, olt_name, pon, serial}` (snake_case) y puede devolver **más de un contrato** si la búsqueda por cédula no es única. El `n8n-gateway` (adapter) es responsable de traducir esa forma externa al `SupportInternetContext.contract` interno, y el paso `VALIDATE_CLIENT` del workflow debe contemplar el caso de múltiples contratos (pedir dato de desambiguación: dirección o nombre) antes de continuar — el dominio nunca trabaja directamente con la forma cruda de n8n.
+**Nota de mapeo (Anti-Corruption Layer, `docs/skills/design-patterns-backend.md`)**: el workflow real de n8n (`find-client-contract`) devuelve los datos técnicos anidados bajo `contract.router.{sector, olt_name, pon, serial}`. El `n8n-gateway` (adapter, del lado de la API) traduce esa forma externa al `SupportInternetContext.contract` interno — **siempre en `camelCase`**, es el formato estándar de todo el contrato de la API (`03_API_CONTRACT.md`), sin importar cómo nombre sus campos cada sistema externo. El paso `VALIDATE_CLIENT` del workflow también debe contemplar el caso de múltiples contratos (pedir dato de desambiguación: dirección o nombre) antes de continuar.
+
+La traducción inversa (de `camelCase` en el `input` que envía la API, a lo que cada sistema externo específico necesite — por ejemplo `olt_name` snake_case para el microservicio de diagnóstico) es responsabilidad del propio nodo de n8n (`HTTP Request`/`Set`) que ya hace ese mapeo campo por campo — no del contrato de la API. Esto mantiene el contrato de la API uniforme sin perseguir la convención de cada integración nueva.
 
 ## 6. Campos calculados (no persistidos)
 

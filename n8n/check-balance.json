@@ -1,0 +1,168 @@
+{
+  "name": "check-balance",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"id\": \"1205500216\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        -400
+      ],
+      "id": "d78a4425-8c44-4e80-a1a4-1872b5f54831",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1Eln1zxs-us-WCZGdUE7uIrsHoEIUv3cpIuFPiCm0ec4",
+          "mode": "list",
+          "cachedResultName": "Cartera",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Eln1zxs-us-WCZGdUE7uIrsHoEIUv3cpIuFPiCm0ec4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Eln1zxs-us-WCZGdUE7uIrsHoEIUv3cpIuFPiCm0ec4/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Identificacion",
+              "lookupValue": "={{ $json.body.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -192,
+        -80
+      ],
+      "id": "f1758c9e-2cfe-4cf2-8180-4cde31d88d7b",
+      "name": "Get identity",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cngOv6AjaW4TJ2lR",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\n\nreturn [\n  {\n    json: {\n      hasDebt: debt !== \"\",\n      debt: parseFloat((debt || \"0\").replace(\",\", \".\"))\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -80
+      ],
+      "id": "47c55391-7b68-45a8-a8d1-8ce32409355b",
+      "name": "Format data"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "check-balance",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -416,
+        -80
+      ],
+      "id": "52175665-75c9-4b98-b0a5-52b3c7fad562",
+      "name": "Webhook",
+      "webhookId": "81cbb851-c8eb-4f21-934b-4f47f6f4e775"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Format data').item.json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        224,
+        -80
+      ],
+      "id": "83177fec-513b-4576-9dcc-16dcde25c88b",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "id": 1724482722
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        []
+      ]
+    },
+    "Get identity": {
+      "main": [
+        [
+          {
+            "node": "Format data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format data": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "526ad120-9f77-457d-a560-b68d514d0335",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
+  },
+  "nodeGroups": [],
+  "id": "7qNzPKKR4ur3XNif",
+  "tags": []
+}

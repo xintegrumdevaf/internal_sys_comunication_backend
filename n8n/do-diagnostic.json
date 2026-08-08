@@ -1,0 +1,147 @@
+{
+  "name": "do-diagnostic",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"conversationId\": \"59356467474\",\n  \"sector\": \"pomasqui\",\n  \"olt_name\": \"main\",\n  \"pon\": \"3\",\n  \"serial\": \"D011A66CB67C\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1136,
+        -144
+      ],
+      "id": "a92fa6ff-89ff-4112-9067-a1e10eb5e268",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3001/api/v1/diagnostic",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "sector",
+              "value": "={{ $json.body.sector }}"
+            },
+            {
+              "name": "olt_name",
+              "value": "={{ $json.body.olt_name }}"
+            },
+            {
+              "name": "pon",
+              "value": "={{ $json.body.pon }}"
+            },
+            {
+              "name": "serial",
+              "value": "={{ $json.body.serial }}"
+            },
+            {
+              "name": "conversationId",
+              "value": "={{ $json.body.conversationId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -672,
+        160
+      ],
+      "id": "1337c406-490f-4562-87e8-0652f58bdfde",
+      "name": "Execute diagnostic onu"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "do-diagnostic",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -880,
+        160
+      ],
+      "id": "6414949e-3098-404a-9d83-67b216305a5b",
+      "name": "Webhook",
+      "webhookId": "d95288e9-36bc-4484-adc6-5512d99fab56"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Execute diagnostic onu').item.json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -464,
+        160
+      ],
+      "id": "a2cb3c9c-db17-45d2-b929-ba80f3f32e4d",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "conversationId": "593738398",
+          "sector": "sanAntonio",
+          "olt_name": "cDataSoles",
+          "pon": "9",
+          "serial": "4D4F4E550033AF69"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        []
+      ]
+    },
+    "Execute diagnostic onu": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute diagnostic onu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9f79a143-568a-4b1f-ae78-bc78e47094b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
+  },
+  "nodeGroups": [],
+  "id": "GbBd8Ge1TQszDZvb",
+  "tags": []
+}

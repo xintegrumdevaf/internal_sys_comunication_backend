@@ -1,0 +1,132 @@
+{
+  "name": "continue-diagnostic",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"conversationId\": \"59356467474\",\n  \"message\": \"aqui hay informacion importante\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1280,
+        -160
+      ],
+      "id": "72c1549f-e297-4770-9ccb-2cfc62850207",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3001/api/v1/diagnostic/continue",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "conversationId",
+              "value": "={{ $json.body.conversationId }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.body.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -672,
+        160
+      ],
+      "id": "5de42717-4ff7-4008-a0f1-30a1660df6ed",
+      "name": "Continue diagnostic onu"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "continue-diagnostic",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -864,
+        160
+      ],
+      "id": "3ac3fbaf-682f-45ff-81ee-787230bea708",
+      "name": "Webhook",
+      "webhookId": "13d4678d-13ae-4e5b-87c6-ec69a2c03230"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Continue diagnostic onu').item.json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -464,
+        160
+      ],
+      "id": "44136cf0-f0c4-41b3-be04-3cd8abeca40c",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "conversationId": "593738398",
+          "message": "aqui hay informacion importante"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        []
+      ]
+    },
+    "Continue diagnostic onu": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Continue diagnostic onu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "eec75dad-3b35-436c-8190-d0ad49d215b1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
+  },
+  "nodeGroups": [],
+  "id": "QQjk8MCcs1jw3Mnu",
+  "tags": []
+}
