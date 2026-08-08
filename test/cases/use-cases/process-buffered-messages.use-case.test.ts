@@ -44,10 +44,17 @@ function buildScenario() {
   const workflowExecutionRepo = new WorkflowExecutionRepositoryFake();
   const engine = new WorkflowEngine([supportInternetWorkflow, dummyBillingWorkflow]);
   const gateway = new N8nGatewayFake({
-    VALIDATE_CLIENT: () => ({ success: true, result: { client: { nationalId: "1", fullName: "Ana" } } }),
+    VALIDATE_CLIENT: () => ({
+      success: true,
+      result: {
+        found: true,
+        contractNumbers: 1,
+        contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } }],
+      },
+    }),
     CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
-    DIAGNOSTIC: () => ({ success: true, result: { resolved: false, question: "¿La luz ONU esta roja?" } }),
-    CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { resolved: true, result: "ONU reiniciada" } }),
+    DIAGNOSTIC: () => ({ success: true, result: { status: "WAITING_USER", question: "¿La luz ONU esta roja?" } }),
+    CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { status: "COMPLETED", diagnostic: "ONU reiniciada" } }),
   });
 
   const advanceCase = new AdvanceCaseUseCase({

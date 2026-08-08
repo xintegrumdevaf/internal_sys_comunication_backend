@@ -2,7 +2,9 @@ version: "3.9"
  
 services:
   postgres:
-    image: postgres:16
+    # pgvector/pgvector:pg16 = postgres:16 + extension "vector" ya compilada
+    # (necesaria para el vector store de RAG de n8n, docs/spec/04_N8N_WORKFLOW_SPEC.md §6.2).
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: isp

@@ -25,9 +25,16 @@ function buildUseCase(gateway: N8nGatewayFake) {
 describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
   it("inicia el workflow y encadena pasos sin intervencion del usuario hasta necesitar un dato", async () => {
     const gateway = new N8nGatewayFake({
-      VALIDATE_CLIENT: () => ({ success: true, result: { client: { nationalId: "1", fullName: "Ana" } } }),
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } }],
+        },
+      }),
       CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
-      DIAGNOSTIC: () => ({ success: true, result: { resolved: false, question: "¿ONU encendida?" } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "WAITING_USER", question: "¿ONU encendida?" } }),
     });
     const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
 
@@ -57,7 +64,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
   it("continua desde WAITING_USER_DIAGNOSTIC sin volver a VALIDATE_CLIENT/CHECK_BALANCE", async () => {
     const gateway = new N8nGatewayFake({
-      CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { resolved: true, result: "ONU reiniciada" } }),
+      CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { status: "COMPLETED", diagnostic: "ONU reiniciada" } }),
     });
     const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
 
@@ -94,9 +101,16 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
   it("completa un caso sin deuda y con diagnostico resuelto de una sola pasada", async () => {
     const gateway = new N8nGatewayFake({
-      VALIDATE_CLIENT: () => ({ success: true, result: { client: { nationalId: "1", fullName: "Ana" } } }),
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } }],
+        },
+      }),
       CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
-      DIAGNOSTIC: () => ({ success: true, result: { resolved: true, result: "Reinicio de ONU resolvio el problema" } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "COMPLETED", diagnostic: "Reinicio de ONU resolvio el problema" } }),
     });
     const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
 
@@ -117,7 +131,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
   it("escala y deshabilita la automatizacion cuando el diagnostico no es resoluble", async () => {
     const gateway = new N8nGatewayFake({
-      DIAGNOSTIC: () => ({ success: true, result: { unresolvable: true } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "ESCALATED" } }),
     });
     const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
 

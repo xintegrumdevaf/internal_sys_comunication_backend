@@ -18,10 +18,10 @@ function baseInput(currentState: string, context: CaseContext, gateway: N8nGatew
 }
 
 describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
-  it("VALIDATE_CLIENT pide datos del usuario cuando faltan (needsInput)", async () => {
+  it("VALIDATE_CLIENT re-pregunta la cedula cuando no se encuentra contrato (found:false)", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
-      VALIDATE_CLIENT: () => ({ success: true, result: { needsInput: true } }),
+      VALIDATE_CLIENT: () => ({ success: true, result: { found: false, contractNumbers: 0, contracts: [] } }),
     });
 
     const outcome = await engine.step("SUPPORT_INTERNET", baseInput("VALIDATE_CLIENT", emptyContext, gateway));
@@ -30,12 +30,38 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
   });
 
-  it("cliente validado sin deuda avanza a DIAGNOSTIC", async () => {
+  it("VALIDATE_CLIENT escala cuando hay mas de un contrato (ambiguo, sin dato de desambiguacion)", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
       VALIDATE_CLIENT: () => ({
         success: true,
-        result: { client: { nationalId: "123", fullName: "Juan" }, contract: { id: "c1", sector: "pomasqui", oltName: "olt1", pon: "3", serial: "S1", router: "r1" } },
+        result: {
+          found: true,
+          contractNumbers: 2,
+          contracts: [
+            { id: "1", name: "Juan", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } },
+            { id: "1", name: "Juan", router: { sector: "pifo", olt_name: "olt2", pon: "1", serial: "S2" } },
+          ],
+        },
+      }),
+    });
+
+    const outcome = await engine.step("SUPPORT_INTERNET", baseInput("VALIDATE_CLIENT", emptyContext, gateway));
+    expect(outcome.type).toBe("ESCALATED");
+  });
+
+  it("cliente validado sin deuda avanza a DIAGNOSTIC, traduciendo router.olt_name (snake_case) a oltName", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [
+            { id: "123", name: "Juan", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } },
+          ],
+        },
       }),
       CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
     });
@@ -44,6 +70,8 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
     expect(step1.type).toBe("CONTINUE");
     if (step1.type !== "CONTINUE") throw new Error("unreachable");
     expect(step1.nextState).toBe("CHECK_BALANCE");
+    if (step1.context.workflowType !== "SUPPORT_INTERNET") throw new Error("unreachable");
+    expect(step1.context.data.contract?.oltName).toBe("olt1");
 
     const step2 = await engine.step(
       "SUPPORT_INTERNET",
@@ -55,7 +83,7 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
   it("cliente con deuda: CHECK_BALANCE -> RESPOND_DEBT -> COMPLETED", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
-      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: true, amount: 25 } }),
+      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: true, debt: 25 } }),
     });
 
     const step1 = await engine.step("SUPPORT_INTERNET", baseInput("CHECK_BALANCE", emptyContext, gateway));
@@ -69,8 +97,8 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
   it("DIAGNOSTIC pide info -> WAITING_USER_DIAGNOSTIC, y al continuar llama CONTINUE_DIAGNOSTIC (nunca VALIDATE_CLIENT/CHECK_BALANCE)", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
-      DIAGNOSTIC: () => ({ success: true, result: { resolved: false, question: "¿La luz ONU esta roja?" } }),
-      CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { resolved: true, result: "Reinicio de ONU resolvio el problema" } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "WAITING_USER", question: "¿La luz ONU esta roja?" } }),
+      CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { status: "COMPLETED", diagnostic: "ONU_REINICIADA" } }),
     });
 
     const step1 = await engine.step("SUPPORT_INTERNET", baseInput("DIAGNOSTIC", emptyContext, gateway));
@@ -93,7 +121,7 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3)", () => {
   it("DIAGNOSTIC no resoluble automaticamente escala", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
-      DIAGNOSTIC: () => ({ success: true, result: { unresolvable: true } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "ESCALATED" } }),
     });
 
     const outcome = await engine.step("SUPPORT_INTERNET", baseInput("DIAGNOSTIC", emptyContext, gateway));

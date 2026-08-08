@@ -19,33 +19,39 @@ import type { WorkflowDefinition, WorkflowStateHandler, WorkflowStepInput } from
  * paso con el contexto ya actualizado por la respuesta del usuario.
  */
 
-// Formas de `result` esperadas de cada accion de n8n (docs/spec/04_N8N_WORKFLOW_SPEC.md §6).
-// Se afinan con datos reales en la Etapa 4; aqui documentan el contrato asumido.
+// Formas de `result` confirmadas contra los workflows reales de n8n
+// (docs/spec/04_N8N_WORKFLOW_SPEC.md §11 — fixtures de prueba por accion).
 //
-// TODO(Etapa 4): el workflow real `find-client-contract` devuelve los datos
-// tecnicos anidados bajo `contract.router.{sector, olt_name, pon, serial}`
-// (snake_case) y puede devolver mas de un contrato (01_DATA_MODEL.md §5,
-// Anti-Corruption Layer). Esta forma simplificada asume que el gateway ya
-// tradujo esa forma externa 1:1 y que hay un solo contrato — la traduccion
-// real y la desambiguacion por multiples contratos se implementan cuando
-// VALIDATE_CLIENT se pruebe contra el n8n real (Etapa 4), no antes, porque
-// no es verificable sin la respuesta real.
+// Anti-Corruption Layer (01_DATA_MODEL.md §5, docs/skills/design-patterns-backend.md):
+// `find-client-contract` devuelve los datos tecnicos anidados bajo
+// `contracts[].router.{sector, olt_name, pon, serial}` (snake_case) y puede
+// devolver mas de un contrato — el handler `validateClient` de abajo es quien
+// traduce esa forma externa al `SupportInternetContext.contract` interno
+// (camelCase), nunca el dominio trabaja con la forma cruda de n8n.
+type ValidateClientContractResult = {
+  id: string;
+  name: string;
+  address?: string;
+  status?: string;
+  router: { sector: string; olt_name: string; pon: string; serial: string };
+};
+
 type ValidateClientOutput = {
-  needsInput?: boolean;
-  client?: SupportInternetContext["client"];
-  contract?: SupportInternetContext["contract"];
+  found: boolean;
+  contractNumbers: number;
+  contracts: ValidateClientContractResult[];
 };
 
 type CheckBalanceOutput = {
   hasDebt: boolean;
-  amount?: number;
+  debt?: number;
 };
 
 type DiagnosticOutput = {
-  resolved?: boolean;
-  unresolvable?: boolean;
+  status: "WAITING_USER" | "COMPLETED" | "ESCALATED";
   question?: string;
-  result?: string;
+  /** Codigo de diagnostico final cuando `status === "COMPLETED"` (ej. "ONU_UNREACHABLE"). */
+  diagnostic?: string;
 };
 
 function requireSupportInternetContext(context: CaseContext): SupportInternetContext {
@@ -62,12 +68,13 @@ function withContext(data: SupportInternetContext): CaseContext {
 const validateClient: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
   const data = requireSupportInternetContext(context);
 
+  // Campo real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `id`, no `nationalId`.
   const result = await gateway.executeAction({
     action: "VALIDATE_CLIENT",
     caseId,
     conversationId,
     correlationId,
-    input: { nationalId: data.client?.nationalId ?? null },
+    input: { id: data.client?.nationalId ?? null },
   });
 
   if (!result.success) {
@@ -75,14 +82,36 @@ const validateClient: WorkflowStateHandler = async ({ caseId, conversationId, co
   }
 
   const output = result.result as ValidateClientOutput;
-  if (output.needsInput) {
+
+  if (!output.found || output.contracts.length === 0) {
+    // No es un error de transporte (04_N8N_WORKFLOW_SPEC.md §11): re-pregunta
+    // la cedula en vez de escalar directo a un humano por un posible typo.
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context };
   }
 
+  // TODO(post-Etapa 4): multiples contratos requieren desambiguacion por
+  // direccion/nombre (01_DATA_MODEL.md §5) — el flujo de conversacion todavia
+  // no recolecta ese dato del cliente, asi que se escala en vez de adivinar
+  // cual contrato es el correcto.
+  if (output.contracts.length > 1) {
+    return {
+      type: "ESCALATED",
+      reason: "Se encontro mas de un contrato para la cedula, requiere verificacion manual",
+      context,
+    };
+  }
+
+  const found = output.contracts[0]!;
   const nextData: SupportInternetContext = {
     ...data,
-    client: output.client ?? data.client,
-    contract: output.contract ?? data.contract,
+    client: { nationalId: found.id, fullName: found.name },
+    contract: {
+      id: found.id,
+      sector: found.router.sector,
+      oltName: found.router.olt_name,
+      pon: found.router.pon,
+      serial: found.router.serial,
+    },
   };
   return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData) };
 };
@@ -90,12 +119,13 @@ const validateClient: WorkflowStateHandler = async ({ caseId, conversationId, co
 const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
   const data = requireSupportInternetContext(context);
 
+  // Campo real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `id`, no `nationalId`.
   const result = await gateway.executeAction({
     action: "CHECK_BALANCE",
     caseId,
     conversationId,
     correlationId,
-    input: { nationalId: data.client?.nationalId ?? null },
+    input: { id: data.client?.nationalId ?? null },
   });
 
   if (!result.success) {
@@ -105,7 +135,7 @@ const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, corr
   const output = result.result as CheckBalanceOutput;
   const nextData: SupportInternetContext = {
     ...data,
-    balance: { hasDebt: output.hasDebt, amount: output.amount },
+    balance: { hasDebt: output.hasDebt, amount: output.debt },
   };
 
   if (output.hasDebt) {
@@ -158,27 +188,38 @@ const diagnostic: WorkflowStateHandler = async ({
     return { type: "ESCALATED", reason: result.error.message, context };
   }
 
+  // Shape real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `status` +
+  // `question` (WAITING_USER) o `diagnostic` (COMPLETED) — no `resolved`/
+  // `unresolvable`/`result` como se asumia antes de probar contra fixtures reales.
   const output = result.result as DiagnosticOutput;
-  const nextData: SupportInternetContext = {
-    ...data,
-    diagnostic: {
-      status: output.resolved ? "RESOLVED" : output.unresolvable ? "UNRESOLVABLE" : "PENDING",
-      lastQuestion: output.question,
-      result: output.result,
-    },
-  };
 
-  if (output.resolved) {
+  if (output.status === "WAITING_USER") {
+    const nextData: SupportInternetContext = {
+      ...data,
+      diagnostic: { status: "PENDING", lastQuestion: output.question },
+    };
+    return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: withContext(nextData) };
+  }
+
+  if (output.status === "COMPLETED") {
+    const nextData: SupportInternetContext = {
+      ...data,
+      diagnostic: { status: "RESOLVED", result: output.diagnostic },
+    };
     return { type: "COMPLETED", context: withContext(nextData) };
   }
-  if (output.unresolvable) {
-    return {
-      type: "ESCALATED",
-      reason: "Diagnostico no resoluble automaticamente",
-      context: withContext(nextData),
-    };
-  }
-  return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: withContext(nextData) };
+
+  // status === "ESCALATED" u otro valor no reconocido: nunca se deja el caso
+  // sin ruta de salida (AGENTS.md — "todo error no recuperable tiene una ruta definida").
+  const nextData: SupportInternetContext = {
+    ...data,
+    diagnostic: { status: "UNRESOLVABLE", result: output.diagnostic },
+  };
+  return {
+    type: "ESCALATED",
+    reason: "Diagnostico no resoluble automaticamente",
+    context: withContext(nextData),
+  };
 };
 
 export const supportInternetWorkflow: WorkflowDefinition = {

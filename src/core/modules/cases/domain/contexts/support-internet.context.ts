@@ -12,7 +12,8 @@ export type SupportInternetContext = {
     oltName: string;
     pon: string;
     serial: string;
-    router: string;
+    /** Modelo de router — el workflow real `find-client-contract` no lo devuelve hoy. */
+    router?: string;
   };
   balance?: { hasDebt: boolean; amount?: number };
   diagnostic?: { status: string; lastQuestion?: string; result?: string };
