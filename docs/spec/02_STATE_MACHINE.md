@@ -98,3 +98,44 @@ Todo error no recuperable tiene ruta definida; no todo error escala.
 ## 8. Expiración
 
 `case.expires_at = last_activity_at + expiration_hours(workflow_type)`, configurable por tipo de workflow (nunca hardcodeado). Un proceso periódico (o cálculo perezoso al leer el caso) mueve a `EXPIRED` los casos vencidos en estado no terminal. Un caso `EXPIRED` no bloquea abrir un `Case` nuevo del mismo `workflow_type` en la misma conversación más adelante.
+
+## 9. Departamento es ortogonal al motor de workflow
+
+**El departamento nunca determina qué acción de n8n se ejecuta.** El motor de workflow (`WorkflowDefinition`) decide el siguiente paso únicamente en función de `workflow_type` + `current_state` + resultado del paso anterior — nunca consulta `department_id`. Un mismo `Case` de `BILLING_BALANCE` puede, dentro de su propio flujo, terminar llamando a `RECORD_PAYMENT` y `APPLY_BANK_ACCOUNT` sin que eso implique "saltar a otro departamento": son pasos internos de ese workflow.
+
+`department_id` se resuelve por una tabla de mapeo simple `workflow_type → department_id` (configuración, no código):
+
+```
+SUPPORT_INTERNET  → SUPPORT
+BILLING_BALANCE   → BILLING
+SALES_PACKAGES    → SALES
+```
+
+Con override explícito cuando el negocio lo requiera (ej. `SALES_PACKAGES` que escala nunca cae en `SUPPORT`, va siempre a `SALES` — caso E del negocio original). Esto reemplaza cualquier heurística de keywords sobre el texto del mensaje (el problema detectado en el sistema legacy, `docs/spec/historical/ARCHITECTURE_CURRENT.md`).
+
+Si el `workflow_type` no puede determinarse (intención no clasificable, ver §10), el caso queda temporalmente **sin `department_id`** — no se le asigna un departamento por defecto a ciegas.
+
+## 10. Intención no clasificable — pool de triage
+
+Cuando la interpretación de IA es `UNCLEAR` de forma sostenida (reintento agotado, §7) o el `intent` no mapea a ningún `WorkflowDefinition` conocido (`UNSUPPORTED`, §5):
+
+1. Se crea (o se mantiene) el `Case` con `workflow_type = null`/`"UNCLASSIFIED"` y `department_id = NULL`.
+2. Se crea una `Escalation` con `department_id = NULL` — visible para todo agente con `role IN ('manager','admin')` (`01_DATA_MODEL.md` §7), no solo el admin global.
+3. Un manager/admin, al revisarlo, lo reclasifica: asigna `workflow_type`/`department_id` manualmente, o lo atiende directo como humano.
+4. Al cliente se le responde con un mensaje de negocio neutro ("un asesor revisará tu solicitud"), nunca "no pude entender tu mensaje" en crudo.
+
+## 11. Asignación humana y edición
+
+`case.assigned_agent_id` determina quién puede escribir (responder, ejecutar acciones de agente) sobre un caso una vez que pasó a `HUMAN_ACTIVE`/`ESCALATED`:
+- `NULL` → cualquier agente con visibilidad sobre ese caso puede **reclamarlo** (`POST /api/cases/:id/claim`, `03_API_CONTRACT.md` §C.2), lo que fija `assigned_agent_id`.
+- Asignado → solo ese agente (o un `manager`/`admin` de su departamento, vía `reassign`) puede actuar; el resto de agentes lo ve en modo lectura si `department.visibility='shared'`.
+- Un caso puede ser visible sin estar asignado (bandeja compartida); la asignación es lo que bloquea la edición, no la visibilidad.
+
+## 12. Buffer de mensajes (debounce) y composición de respuesta
+
+**Buffer/debounce**: vive en la API (Redis), no en n8n. Cada mensaje inbound de una conversación reprograma un temporizador corto (configurable, p. ej. 4-5s). Al vencer sin mensajes nuevos, se toman todos los mensajes acumulados desde el último procesamiento y se pasan **juntos** a interpretación (uno o varios mensajes concatenados/ordenados cronológicamente como una sola unidad de trabajo) — reemplaza el patrón de Data Table + `Wait` que existía en n8n.
+
+**Interpretación y composición de respuesta**: ambas viven en la API, vía `AIProviderPort` (no en n8n — ver `03_API_CONTRACT.md` §A y `04_N8N_WORKFLOW_SPEC.md` §1):
+- `interpretMessage(...)` → `{ type, intent, entities, confidence }`, usado por `CaseArbitrationService`/el motor para decidir transición.
+- `composeReply(...)` → texto final para el cliente. Cada estado de un `WorkflowDefinition` declara **o bien** un template estático con variables del `context` (preferido: determinista, fácil de auditar, cumple "el cliente nunca ve detalles internos" sin depender de que el LLM se comporte) **o bien** delega en `composeReply` para redactar naturalmente a partir del resultado estructurado del paso — nunca al revés (el LLM nunca decide *qué* decir, solo puede ayudar a decir *cómo* decirlo de forma más natural sobre una plantilla/resultado ya decidido por la API).
+

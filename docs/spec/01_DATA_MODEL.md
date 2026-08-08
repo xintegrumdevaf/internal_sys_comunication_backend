@@ -11,13 +11,18 @@ erDiagram
     CASE ||--|| WORKFLOW_INSTANCE : ejecuta
     WORKFLOW_INSTANCE ||--o{ WORKFLOW_EXECUTION : registra
     CASE ||--o{ WORKFLOW_EVENT : emite
-    CASE }o--|| DEPARTMENT : pertenece_a
+    CASE }o--o| DEPARTMENT : pertenece_a
+    CASE }o--o| AGENT : asignado_a
     CASE ||--o| ESCALATION : puede_tener
+    ESCALATION }o--o| DEPARTMENT : pertenece_a
     ESCALATION }o--o| AGENT : asignado_a
     CASE ||--|| AUTOMATION_STATE : tiene
     DEPARTMENT ||--o{ AGENT_MEMBERSHIP : agrupa
     AGENT ||--o{ AGENT_MEMBERSHIP : pertenece_a
+    N8N_WORKFLOW_REGISTRY }o--|| WORKFLOW_EXECUTION : resuelve_url_de
 ```
+
+**Nota**: `CASE.department_id` y `ESCALATION.department_id` son ahora **nullable** — un caso puede no tener departamento asignado todavía (recién creado, antes de que el motor de workflow lo determine) y una escalación puede caer en el *pool de triage* sin departamento (§7).
 
 ## 2. DDL PostgreSQL (referencia — el ORM elegido puede generar equivalente)
 
@@ -28,6 +33,9 @@ CREATE TABLE department (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slug          TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
+  -- 'shared': todos los agentes pueden VER (no editar) casos de este departamento (default).
+  -- 'restricted': solo agentes con membership en este departamento pueden verlo (ej. datos sensibles).
+  visibility    TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('shared','restricted')),
   active        BOOLEAN NOT NULL DEFAULT true,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -36,7 +44,10 @@ CREATE TABLE agent (
   id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name                  TEXT NOT NULL,
   email                 TEXT NOT NULL UNIQUE,
-  is_global_admin       BOOLEAN NOT NULL DEFAULT false,
+  -- 'agent': atiende casos de su(s) departamento(s).
+  -- 'manager': igual que agent + ve el pool de triage sin departamento (§7) + puede reasignar dentro de su área.
+  -- 'admin': acceso total, gestiona catálogo de n8n, departamentos, agentes.
+  role                  TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('agent','manager','admin')),
   primary_department_id UUID REFERENCES department(id),
   active                BOOLEAN NOT NULL DEFAULT true,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -103,7 +114,8 @@ CREATE INDEX idx_message_conversation ON message(conversation_id, created_at);
 CREATE TABLE case (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   conversation_id   UUID NOT NULL REFERENCES conversation(id),
-  department_id     UUID NOT NULL REFERENCES department(id),
+  department_id     UUID REFERENCES department(id),   -- nullable: se resuelve por reglas de negocio (02_STATE_MACHINE.md §9), no siempre desde el primer instante
+  assigned_agent_id UUID REFERENCES agent(id),         -- humano con derecho de edición (ver §7); null = sin asignar / lo maneja el bot
   workflow_type     TEXT NOT NULL,               -- 'SUPPORT_INTERNET' | 'BILLING_BALANCE' | 'SALES_PACKAGES' | ...
   status            TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN
                        ('NEW','ACTIVE','WAITING_USER','PAUSED','ESCALATED','HUMAN_ACTIVE','COMPLETED','EXPIRED','CANCELLED')),
@@ -116,6 +128,7 @@ CREATE TABLE case (
 );
 CREATE INDEX idx_case_conversation ON case(conversation_id);
 CREATE INDEX idx_case_department_status ON case(department_id, status);
+CREATE INDEX idx_case_assigned_agent ON case(assigned_agent_id) WHERE assigned_agent_id IS NOT NULL;
 
 ALTER TABLE conversation ADD CONSTRAINT fk_conversation_active_case
   FOREIGN KEY (active_case_id) REFERENCES case(id);
@@ -168,16 +181,29 @@ CREATE TABLE automation_state (
 CREATE TABLE escalation (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   case_id           UUID NOT NULL REFERENCES case(id),
-  department_id     UUID NOT NULL REFERENCES department(id),
+  department_id     UUID REFERENCES department(id),   -- NULL = pool de triage sin clasificar (02_STATE_MACHINE.md §9), visible a manager/admin
   priority          TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
   reason            TEXT NOT NULL,
-  summary           JSONB NOT NULL,               -- estructura de 03_API_CONTRACT.md §B.4
+  summary           JSONB NOT NULL,               -- estructura de 03_API_CONTRACT.md §D
   status            TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ASSIGNED','RESOLVED')),
   assigned_agent_id UUID REFERENCES agent(id),
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at       TIMESTAMPTZ
 );
 CREATE INDEX idx_escalation_department_status ON escalation(department_id, status);
+
+-- Catálogo de workflows de n8n (acción -> URL), editable sin redeploy vía /api/admin/n8n-workflows.
+-- Reemplaza el enfoque de una variable de entorno por acción (04_N8N_WORKFLOW_SPEC.md §7).
+CREATE TABLE n8n_workflow_registry (
+  action        TEXT PRIMARY KEY,              -- 'VALIDATE_CLIENT' | 'CHECK_BALANCE' | 'DIAGNOSTIC' | ...
+  url           TEXT NOT NULL,
+  description   TEXT,
+  timeout_ms    INT NOT NULL DEFAULT 8000,
+  max_retries   INT NOT NULL DEFAULT 2,
+  active        BOOLEAN NOT NULL DEFAULT true,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by    UUID REFERENCES agent(id)
+);
 
 CREATE TABLE audit_event (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -231,4 +257,23 @@ Cada `WorkflowDefinition` (ver `02_STATE_MACHINE.md`) declara su tipo de context
 
 ## 5. Datos técnicos del cliente — regla de origen
 
-Campos como `sector`, `olt_name`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por `find_a_client_contract` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §A.1).
+Campos como `sector`, `olt_name`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por `find_a_client_contract` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2).
+
+## 6. Campos calculados (no persistidos)
+
+Algunos campos que expone la API **no son columnas**, se calculan al leer:
+
+| Campo | De dónde sale |
+|---|---|
+| `ConversationDto.lastMessagePreview` | `SELECT` del último `message` de esa `conversation_id` (por `created_at DESC LIMIT 1`), no una columna en `conversation` |
+| `CaseDto.automation` | join a `automation_state` por `case_id` |
+
+Nunca dupliques estos datos con un `UPDATE` a `conversation`/`case` — la fuente sigue siendo `message`/`automation_state`.
+
+## 7. Visibilidad y roles (agentes)
+
+- **`agent.role`**: `agent | manager | admin`.
+- **Departamento (`department.visibility = 'shared'`, default)**: cualquier agente autenticado puede **ver** (lectura) casos/conversaciones de cualquier departamento — pero solo puede **escribir** (responder, tomar acciones) si `case.assigned_agent_id = self` o el caso está `assigned_agent_id IS NULL` (puede reclamarlo, ver `03_API_CONTRACT.md` §C.2 `claim`). Si `department.visibility = 'restricted'`, la lectura también se limita a agentes con `agent_membership` en ese departamento.
+- **Pool de triage**: casos/escalaciones con `department_id IS NULL` (intención no clasificable, ver `02_STATE_MACHINE.md` §9) son visibles para todo `role IN ('manager','admin')`, sin importar su departamento primario — hasta que alguno lo reclama y le asigna un `department_id`, momento en el que pasa a las reglas normales de arriba.
+- `admin` ve y puede actuar sobre todo, incluye gestión del catálogo `n8n_workflow_registry`.
+
