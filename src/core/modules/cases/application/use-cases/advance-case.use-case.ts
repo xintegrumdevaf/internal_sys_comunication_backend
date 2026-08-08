@@ -28,6 +28,11 @@ export type AdvanceCaseInput = {
   text?: string;
 };
 
+export type AdvanceCaseResult = {
+  case: Case;
+  outcome: WorkflowStepOutcome;
+};
+
 /**
  * Ejecuta el motor de workflow (docs/spec/02_STATE_MACHINE.md §1-3) sobre un
  * caso existente hasta que llegue a un estado estable (`WAITING_USER`,
@@ -38,7 +43,7 @@ export type AdvanceCaseInput = {
 export class AdvanceCaseUseCase {
   constructor(private readonly deps: AdvanceCaseDeps) {}
 
-  async execute(input: AdvanceCaseInput): Promise<Case> {
+  async execute(input: AdvanceCaseInput): Promise<AdvanceCaseResult> {
     const { caseRepo, conversationRepo, engine } = this.deps;
     const log = this.deps.logger.child({
       correlationId: input.correlationId,
@@ -105,7 +110,7 @@ export class AdvanceCaseUseCase {
       await caseRepo.appendEvent(aggregate.case.id, "WAITING_USER", { nextState: outcome.nextState });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
       log.info({ status: "WAITING_USER", currentState: outcome.nextState }, "caso a la espera del usuario");
-      return result.case;
+      return { case: result.case, outcome };
     }
 
     if (outcome.type === "COMPLETED") {
@@ -121,7 +126,7 @@ export class AdvanceCaseUseCase {
       await caseRepo.appendEvent(aggregate.case.id, "CASE_COMPLETED", {});
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
       log.info({ status: "COMPLETED" }, "caso completado");
-      return result.case;
+      return { case: result.case, outcome };
     }
 
     if (outcome.type === "ESCALATED") {
@@ -138,11 +143,10 @@ export class AdvanceCaseUseCase {
       await caseRepo.appendEvent(aggregate.case.id, "CASE_ESCALATED", { reason: outcome.reason });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
       log.warn({ status: "ESCALATED", reason: outcome.reason }, "caso escalado, automatizacion deshabilitada");
-      return result.case;
+      return { case: result.case, outcome };
     }
 
     // outcome.type === "CONTINUE": se agoto MAX_STEPS_PER_RUN sin estabilizar.
-    // Se persiste el ultimo estado alcanzado como ACTIVE en vez de perder el avance.
     log.warn(
       { workflowType: aggregate.case.workflowType, maxSteps: MAX_STEPS_PER_RUN },
       "se agoto el limite de pasos del motor sin llegar a un estado estable",
@@ -156,6 +160,6 @@ export class AdvanceCaseUseCase {
       currentState: outcome.nextState,
       expiresAt,
     });
-    return result.case;
+    return { case: result.case, outcome };
   }
 }

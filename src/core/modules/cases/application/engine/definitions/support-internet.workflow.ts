@@ -226,6 +226,20 @@ export const supportInternetWorkflow: WorkflowDefinition = {
   workflowType: "SUPPORT_INTERNET",
   initialState: "VALIDATE_CLIENT",
   expirationHours: 24,
+  replyTemplates: {
+    WAITING_USER_CLIENT:
+      "Para ayudarte con tu servicio de internet, ¿me confirmas tu número de cédula?",
+    WAITING_USER_DIAGNOSTIC:
+      "{{question}}",
+    RESPOND_DEBT:
+      "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
+    COMPLETED:
+      "Listo: revisamos tu conexión. {{diagnostic}} Si el problema continúa, escríbenos de nuevo.",
+    ESCALATED:
+      "Escalamos tu caso a un asesor de soporte. En breve te contactarán para ayudarte.",
+    ACTIVE:
+      "Seguimos trabajando en tu caso de internet. Un momento por favor.",
+  },
   states: {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,

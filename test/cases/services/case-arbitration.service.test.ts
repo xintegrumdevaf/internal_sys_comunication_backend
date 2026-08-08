@@ -109,7 +109,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
     });
   });
 
-  it("confianza insuficiente para el umbral del intent no pausa ni crea nada (CLARIFY)", async () => {
+  it("baja confianza con caso activo continua ese caso (02_STATE_MACHINE §7)", async () => {
     const caseRepo = new CaseRepositoryFake();
     const { case: active } = await caseRepo.create({
       conversationId: "conv-1",
@@ -130,13 +130,42 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
     });
     const service = new CaseArbitrationService(caseRepo, silentLogger);
 
-    // billing.* exige 0.8 de confianza (confidence-threshold.ts); 0.7 no alcanza.
+    // billing.* exige 0.8; 0.7 no alcanza → no pausa, CONTINUA el caso activo.
     const decision = await service.decide({
       conversationId: "conv-1",
       interpretation: interpretation({ type: "NEW_INTENT", intent: "billing.balance", confidence: 0.7 }),
     });
 
-    expect(decision).toEqual({ action: "CLARIFY" });
+    expect(decision).toEqual({ action: "CONTINUE_ACTIVE", caseId: active.id });
+  });
+
+  it("REQUEST_HUMAN escala directo con el caseId activo si existe", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const { case: active } = await caseRepo.create({
+      conversationId: "conv-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: active.id,
+      expectedCaseVersion: active.version,
+      expectedWorkflowVersion: 1,
+      status: "ACTIVE",
+      context: active.context,
+      currentState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
+
+    const decision = await service.decide({
+      conversationId: "conv-1",
+      interpretation: interpretation({ type: "REQUEST_HUMAN", intent: "unknown", confidence: 0.95 }),
+    });
+
+    expect(decision).toEqual({ action: "REQUEST_HUMAN", caseId: active.id });
   });
 
   it("reanuda un caso PAUSED no expirado del workflow_type destino en vez de crear uno nuevo", async () => {

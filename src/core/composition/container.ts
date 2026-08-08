@@ -34,7 +34,11 @@ import { InboundBufferService } from "../modules/ingestion/application/services/
 import { CaseRepositoryPg } from "../modules/cases/infrastructure/postgres/case.repository.pg";
 import { WorkflowExecutionRepositoryPg } from "../modules/cases/infrastructure/postgres/workflow-execution.repository.pg";
 import { N8nWorkflowRegistryRepositoryPg } from "../modules/cases/infrastructure/postgres/n8n-workflow-registry.repository.pg";
-import { UnclearInterpretationProvider } from "../modules/cases/infrastructure/synthetic/unclear-interpretation.provider";
+import { AiInterpretationAdapter } from "../modules/cases/infrastructure/ai/ai-interpretation.adapter";
+import { OllamaAdapter } from "../modules/ai/infrastructure/ollama/ollama-adapter";
+import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases/compose-customer-reply.use-case";
+import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
+import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
 import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.http";
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
@@ -102,11 +106,20 @@ export function createContainer(): Container {
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
   const n8nGateway = new N8nGatewayHttp(n8nWorkflowRegistryCache, env.API_INTERNAL_KEY, casesLogger);
 
-  // Placeholder explicito hasta que exista la Etapa 5: mientras la
-  // interpretacion siempre sea UNCLEAR, la arbitracion nunca crea ni avanza
-  // un caso real, asi que `n8nGateway` no se ejercita todavia en produccion
-  // (ver comentario en UnclearInterpretationProvider).
-  const interpretationProvider = new UnclearInterpretationProvider();
+  // --- AI (Etapa 5) ---
+  const aiLogger = logger.child({ module: "ai" });
+  const aiProvider = new OllamaAdapter(
+    {
+      baseUrl: env.OLLAMA_BASE_URL,
+      model: env.OLLAMA_MODEL,
+      timeoutMs: env.AI_CALL_TIMEOUT_MS,
+    },
+    aiLogger,
+  );
+  const interpretationProvider = new AiInterpretationAdapter(aiProvider, aiLogger);
+  const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
+  const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
+  const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
 
   // --- Casos de uso (application) ---
   const advanceCase = new AdvanceCaseUseCase({
@@ -120,11 +133,16 @@ export function createContainer(): Container {
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({
     caseRepo,
     conversationRepo,
+    messageRepo,
+    whatsappSender,
     departmentResolver,
     arbitrationService,
     interpretationProvider,
     engine: workflowEngine,
     advanceCase,
+    composeReply,
+    transcribeAudio,
+    extractReceiptData,
     logger: casesLogger,
   });
   const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: casesLogger });
@@ -132,17 +150,12 @@ export function createContainer(): Container {
   const inboundBuffer = new InboundBufferService(
     redisClient,
     async (conversationId, messageIds) => {
-      // Nueva unidad de trabajo: el correlationId de cada request HTTP que
-      // aporto un mensaje ya quedo logueado en ReceiveInboundMessageUseCase;
-      // de aqui en adelante (interpretacion -> caso -> ejecucion) todo se
-      // traza bajo este nuevo correlationId de lote (AGENTS.md end-to-end).
       const batchCorrelationId = randomUUID();
       const messages = await messageRepo.findByIds(messageIds);
-      const text = messages.map((message) => message.body).join("\n");
       await processBufferedMessages.execute({
         conversationId,
         correlationId: batchCorrelationId,
-        text,
+        messages,
       });
     },
     { debounceMs: env.MESSAGE_DEBOUNCE_MS },

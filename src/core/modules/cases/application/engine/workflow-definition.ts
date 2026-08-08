@@ -39,4 +39,9 @@ export interface WorkflowDefinition {
   /** docs/spec/02_STATE_MACHINE.md §8 — configurable por workflow_type, nunca hardcodeado en el motor. */
   expirationHours: number;
   states: Record<string, WorkflowStateHandler>;
+  /**
+   * Plantillas de respuesta de negocio por clave de estado/outcome
+   * (docs/spec/02_STATE_MACHINE.md §12). Variables: `{{clave}}` desde result/context.
+   */
+  replyTemplates?: Record<string, string>;
 }

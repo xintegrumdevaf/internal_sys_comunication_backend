@@ -51,7 +51,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
     const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-1" });
 
-    expect(result.status).toBe("WAITING_USER");
+    expect(result.case.status).toBe("WAITING_USER");
     const aggregate = await caseRepo.findById(created.id);
     expect(aggregate?.workflowInstance.currentState).toBe("WAITING_USER_DIAGNOSTIC");
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
@@ -90,7 +90,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
     const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-2" });
 
-    expect(result.status).toBe("COMPLETED");
+    expect(result.case.status).toBe("COMPLETED");
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
     expect(gateway.actionsCalledFor("CHECK_BALANCE")).toBe(0);
     expect(gateway.actionsCalledFor("CONTINUE_DIAGNOSTIC")).toBe(1);
@@ -126,7 +126,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
     const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-3" });
 
-    expect(result.status).toBe("COMPLETED");
+    expect(result.case.status).toBe("COMPLETED");
   });
 
   it("escala y deshabilita la automatizacion cuando el diagnostico no es resoluble", async () => {
@@ -148,7 +148,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
 
     const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-4" });
 
-    expect(result.status).toBe("ESCALATED");
+    expect(result.case.status).toBe("ESCALATED");
     const automation = await caseRepo.getAutomationState(created.id);
     expect(automation?.enabled).toBe(false);
     const conversationAfter = await conversationRepo.findById(conversation.id);

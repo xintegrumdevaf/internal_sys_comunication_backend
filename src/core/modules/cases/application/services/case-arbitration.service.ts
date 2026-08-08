@@ -15,14 +15,12 @@ export type ArbitrationDecision =
       /** Caso activo actual que hay que pausar antes de activar el destino, o null si no habia ninguno. */
       pauseCaseId: string | null;
     }
-  | { action: "CLARIFY" };
+  | { action: "CLARIFY" }
+  | { action: "REQUEST_HUMAN"; caseId: string | null };
 
 /**
- * docs/spec/02_STATE_MACHINE.md §4 — un solo caso automatizado activo por
- * conversacion. Servicio de solo lectura/decision: nunca escribe, quien
- * ejecuta la decision (`ProcessBufferedMessagesUseCase`) es responsable de
- * aplicarla de forma transaccional. Esto mantiene la logica de arbitraje
- * testeable con un `CaseRepositoryFake` en memoria, sin tocar Postgres.
+ * docs/spec/02_STATE_MACHINE.md §4 + §7 — un solo caso automatizado activo
+ * por conversacion. Servicio de solo lectura/decision: nunca escribe.
  */
 export class CaseArbitrationService {
   private readonly expirationService: ExpirationService;
@@ -37,12 +35,18 @@ export class CaseArbitrationService {
   async decide(input: { conversationId: string; interpretation: Interpretation }): Promise<ArbitrationDecision> {
     const { conversationId, interpretation } = input;
 
+    if (interpretation.type === "REQUEST_HUMAN") {
+      const active = await this.caseRepo.findActiveByConversation(conversationId);
+      return { action: "REQUEST_HUMAN", caseId: active?.case.id ?? null };
+    }
+
     if (interpretation.type === "UNCLEAR") {
       return { action: "CLARIFY" };
     }
 
     const targetWorkflowType = mapIntentToWorkflowType(interpretation.intent);
     const activeAggregate = await this.caseRepo.findActiveByConversation(conversationId);
+    const meetsConfidence = interpretation.confidence >= confidenceThreshold(interpretation.intent);
 
     if (activeAggregate) {
       const activeCase = activeAggregate.case;
@@ -56,14 +60,17 @@ export class CaseArbitrationService {
         interpretation.type === "ANSWER" ||
         interpretation.type === "CONFIRM"
       ) {
-        // Regla dura (§4.2): generico sobre el caso activo, nunca crea uno nuevo.
+        return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
+      }
+
+      // §7: baja confianza con caso activo → continuar ese caso (no pausar/crear).
+      if (!meetsConfidence) {
         return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
       }
 
       if (
         (interpretation.type === "NEW_INTENT" || interpretation.type === "CHANGE_TOPIC") &&
-        targetWorkflowType &&
-        interpretation.confidence >= confidenceThreshold(interpretation.intent)
+        targetWorkflowType
       ) {
         const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
         return {
@@ -77,7 +84,7 @@ export class CaseArbitrationService {
       return { action: "CLARIFY" };
     }
 
-    if (!targetWorkflowType || interpretation.confidence < confidenceThreshold(interpretation.intent)) {
+    if (!targetWorkflowType || !meetsConfidence) {
       return { action: "CLARIFY" };
     }
 

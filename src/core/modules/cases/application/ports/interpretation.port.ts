@@ -29,6 +29,8 @@ export type InterpretMessageInput = {
   correlationId: string;
   conversationId: string;
   text: string;
+  /** Id del mensaje principal del lote (opcional; Etapa 5 lo propaga a AIProviderPort). */
+  messageId?: string;
   activeCase: { workflowType: string; pendingQuestion?: string } | null;
 };
 

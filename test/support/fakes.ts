@@ -4,6 +4,13 @@ import type {
   ConversationRepositoryPort,
   ListConversationsFilter,
 } from "../../src/core/modules/conversations/application/ports/conversation.repository.port";
+import type { Message } from "../../src/core/modules/conversations/domain/message.entity";
+import type {
+  InsertInboundMessageInput,
+  InsertOutboundMessageInput,
+  MessageRepositoryPort,
+} from "../../src/core/modules/conversations/application/ports/message.repository.port";
+import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
 import type { Department } from "../../src/core/modules/departments/domain/department.entity";
 import type {
   CreateDepartmentInput,
@@ -11,10 +18,7 @@ import type {
 } from "../../src/core/modules/departments/application/ports/department.repository.port";
 
 /**
- * Fakes en memoria (docs/skills/testing-strategy.md: "preferir una
- * implementacion en memoria completa de un puerto sobre mockear metodo por
- * metodo"). Reutilizados por los tests de `cases`/`ingestion` que no
- * necesitan tocar Postgres real.
+ * Fakes en memoria (docs/skills/testing-strategy.md).
  */
 export class ConversationRepositoryFake implements ConversationRepositoryPort {
   readonly conversations = new Map<string, Conversation>();
@@ -69,6 +73,85 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     if (conversation) {
       this.conversations.set(id, { ...conversation, activeCaseId: caseId });
     }
+  }
+}
+
+export class MessageRepositoryFake implements MessageRepositoryPort {
+  readonly messages: Message[] = [];
+
+  seedText(conversationId: string, body: string, overrides: Partial<Message> = {}): Message {
+    const message: Message = {
+      id: randomUUID(),
+      conversationId,
+      caseId: null,
+      direction: "inbound",
+      author: "customer",
+      externalId: randomUUID(),
+      body,
+      type: "text",
+      mediaId: null,
+      mimeType: null,
+      caption: null,
+      filename: null,
+      createdAt: new Date(),
+      ...overrides,
+    };
+    this.messages.push(message);
+    return message;
+  }
+
+  async insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }> {
+    const existing = this.messages.find(
+      (m) => m.conversationId === input.conversationId && m.externalId === input.externalId,
+    );
+    if (existing) return { message: existing, isDuplicate: true };
+    const message = this.seedText(input.conversationId, input.body, {
+      externalId: input.externalId,
+      type: input.type,
+      mediaId: input.mediaId ?? null,
+      mimeType: input.mimeType ?? null,
+      caption: input.caption ?? null,
+      filename: input.filename ?? null,
+    });
+    return { message, isDuplicate: false };
+  }
+
+  async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
+    const message: Message = {
+      id: randomUUID(),
+      conversationId: input.conversationId,
+      caseId: null,
+      direction: "outbound",
+      author: input.author,
+      externalId: input.externalId ?? null,
+      body: input.body,
+      type: "text",
+      mediaId: null,
+      mimeType: null,
+      caption: null,
+      filename: null,
+      createdAt: new Date(),
+    };
+    this.messages.push(message);
+    return message;
+  }
+
+  async listByConversation(conversationId: string): Promise<Message[]> {
+    return this.messages.filter((m) => m.conversationId === conversationId);
+  }
+
+  async findByIds(ids: string[]): Promise<Message[]> {
+    const set = new Set(ids);
+    return this.messages.filter((m) => set.has(m.id));
+  }
+}
+
+export class WhatsAppSenderFake implements WhatsAppSenderPort {
+  readonly sent: Array<{ waPhone: string; body: string }> = [];
+
+  async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
+    this.sent.push({ waPhone, body });
+    return { externalId: `wamid.${randomUUID()}` };
   }
 }
 
