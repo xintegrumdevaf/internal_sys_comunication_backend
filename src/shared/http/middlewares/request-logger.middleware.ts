@@ -8,17 +8,29 @@ import { withCorrelationId, type Logger } from "../../logging/logger";
  * proxy) ya trae uno, se reutiliza en vez de generar uno nuevo.
  */
 export function createRequestLogger(logger: Logger) {
+  const httpLogger = logger.child({ module: "http" });
+
   return (req: Request, res: Response, next: NextFunction): void => {
     const correlationId = (req.header("x-correlation-id") ?? randomUUID()).toString();
     req.correlationId = correlationId;
-    req.log = withCorrelationId(logger, correlationId);
+    req.log = withCorrelationId(httpLogger, correlationId);
     res.setHeader("x-correlation-id", correlationId);
+
+    req.log.info(
+      { method: req.method, path: req.path },
+      "request recibida",
+    );
 
     const startedAt = Date.now();
     res.on("finish", () => {
       req.log.info(
-        { method: req.method, path: req.path, status: res.statusCode, durationMs: Date.now() - startedAt },
-        "request completed",
+        {
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          durationMs: Date.now() - startedAt,
+        },
+        "request completada",
       );
     });
 

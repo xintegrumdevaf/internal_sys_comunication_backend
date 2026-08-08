@@ -1,5 +1,7 @@
 export type { Logger, LogMeta } from "./logger.port";
 export { createLogger } from "./pino-logger.adapter";
+export { ColoredConsoleLogger } from "./colored-console.logger";
+export { PinoLoggerAdapter } from "./pino-logger.adapter";
 
 import type { Logger } from "./logger.port";
 

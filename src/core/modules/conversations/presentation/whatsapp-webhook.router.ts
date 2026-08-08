@@ -49,6 +49,8 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
 
   router.post("/api/webhooks/whatsapp", async (req, res, next) => {
     try {
+      req.log?.info({ path: req.path }, "webhook whatsapp POST");
+
       const signatureHeader = req.header("x-hub-signature-256");
       const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
       const signatureValid = verifyWhatsAppSignature(rawBody, signatureHeader, env.WHATSAPP_APP_SECRET);

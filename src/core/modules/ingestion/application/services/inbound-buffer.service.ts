@@ -37,7 +37,7 @@ export class InboundBufferService {
 
   async push(conversationId: string, messageId: string): Promise<void> {
     await this.redisClient.rpush(this.bufferKey(conversationId), messageId);
-    this.logger.debug({ conversationId, messageId }, "mensaje empujado al buffer, debounce reprogramado");
+    this.logger.info({ conversationId, messageId }, "mensaje empujado al buffer, debounce reprogramado");
     this.reschedule(conversationId);
   }
 

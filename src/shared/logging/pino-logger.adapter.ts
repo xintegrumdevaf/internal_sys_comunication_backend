@@ -1,5 +1,6 @@
 import pino from "pino";
 import type { Env } from "../config/env";
+import { ColoredConsoleLogger } from "./colored-console.logger";
 import type { Logger, LogMeta } from "./logger.port";
 
 type Level = "debug" | "info" | "warn" | "error";
@@ -38,11 +39,16 @@ export class PinoLoggerAdapter implements Logger {
 }
 
 /**
- * Fabrica del logger raiz de la aplicacion (AGENTS.md: "Logging estructurado
- * con correlationId propagado end-to-end"). Unico lugar donde se construye
- * un `pino.Logger` concreto — todo lo demas depende del puerto `Logger`.
+ * Fabrica del logger raiz (AGENTS.md: correlationId end-to-end).
+ * - development: `ColoredConsoleLogger` (colores por modulo/nivel, sync a consola)
+ * - production: Pino JSON estructurado
+ * - test: Pino silent (los tests usan SilentLogger cuando inyectan)
  */
 export function createLogger(env: Env): Logger {
+  if (env.NODE_ENV === "development") {
+    return new ColoredConsoleLogger({ module: "app" });
+  }
+
   const pinoLogger = pino({
     level: env.NODE_ENV === "test" ? "silent" : "info",
     base: undefined,
