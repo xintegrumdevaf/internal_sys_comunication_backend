@@ -34,6 +34,15 @@ export type ExecuteActionParams = {
   conversationId: string;
   correlationId: string;
   input: N8nActionInput;
+  /**
+   * Calculados y rellenados por `InstrumentedN8nGateway` antes de llegar al
+   * gateway real (docs/spec/03_API_CONTRACT.md §B: van en el body del POST a
+   * n8n). Un `WorkflowStateHandler` nunca los conoce ni los calcula — solo
+   * pide una accion con su `input`; el decorator de idempotencia es quien
+   * sabe traducir eso al contrato externo.
+   */
+  idempotencyKey?: string;
+  executionId?: string;
 };
 
 export interface N8nGatewayPort {

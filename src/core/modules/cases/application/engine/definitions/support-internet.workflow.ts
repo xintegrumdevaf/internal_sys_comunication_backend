@@ -21,6 +21,15 @@ import type { WorkflowDefinition, WorkflowStateHandler, WorkflowStepInput } from
 
 // Formas de `result` esperadas de cada accion de n8n (docs/spec/04_N8N_WORKFLOW_SPEC.md §6).
 // Se afinan con datos reales en la Etapa 4; aqui documentan el contrato asumido.
+//
+// TODO(Etapa 4): el workflow real `find-client-contract` devuelve los datos
+// tecnicos anidados bajo `contract.router.{sector, olt_name, pon, serial}`
+// (snake_case) y puede devolver mas de un contrato (01_DATA_MODEL.md §5,
+// Anti-Corruption Layer). Esta forma simplificada asume que el gateway ya
+// tradujo esa forma externa 1:1 y que hay un solo contrato — la traduccion
+// real y la desambiguacion por multiples contratos se implementan cuando
+// VALIDATE_CLIENT se pruebe contra el n8n real (Etapa 4), no antes, porque
+// no es verificable sin la respuesta real.
 type ValidateClientOutput = {
   needsInput?: boolean;
   client?: SupportInternetContext["client"];
@@ -116,21 +125,33 @@ const diagnostic: WorkflowStateHandler = async ({
   currentState,
   context,
   gateway,
+  text,
 }) => {
   const data = requireSupportInternetContext(context);
-  const action = currentState === "WAITING_USER_DIAGNOSTIC" ? "CONTINUE_DIAGNOSTIC" : "DIAGNOSTIC";
+  const isContinuation = currentState === "WAITING_USER_DIAGNOSTIC";
+  const action = isContinuation ? "CONTINUE_DIAGNOSTIC" : "DIAGNOSTIC";
+
+  // Nombres de campo confirmados contra el workflow real de n8n
+  // (docs/spec/04_N8N_WORKFLOW_SPEC.md §7.1/7.2) — snake_case hacia n8n
+  // (`olt_name`, no `oltName`, aunque el dominio interno SI use camelCase,
+  // ver 01_DATA_MODEL.md §4). CONTINUE_DIAGNOSTIC reenvia el mensaje crudo
+  // del cliente tal cual, nunca una version reinterpretada por la IA.
+  const input = isContinuation
+    ? { conversationId, message: text ?? "" }
+    : {
+        sector: data.contract?.sector ?? null,
+        olt_name: data.contract?.oltName ?? null,
+        pon: data.contract?.pon ?? null,
+        serial: data.contract?.serial ?? null,
+        conversationId,
+      };
 
   const result = await gateway.executeAction({
     action,
     caseId,
     conversationId,
     correlationId,
-    input: {
-      sector: data.contract?.sector ?? null,
-      oltName: data.contract?.oltName ?? null,
-      pon: data.contract?.pon ?? null,
-      serial: data.contract?.serial ?? null,
-    },
+    input,
   });
 
   if (!result.success) {

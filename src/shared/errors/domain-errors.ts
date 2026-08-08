@@ -10,7 +10,8 @@ export type DomainErrorType =
   | "EXTERNAL_SERVICE_ERROR"
   | "AI_ERROR"
   | "UNSUPPORTED"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  | "AUTHORIZATION_ERROR";
 
 export class DomainError extends Error {
   readonly type: DomainErrorType;
@@ -34,4 +35,8 @@ export function validationError(message: string): DomainError {
 
 export function businessError(message: string): DomainError {
   return new DomainError("BUSINESS_ERROR", message);
+}
+
+export function authorizationError(message: string): DomainError {
+  return new DomainError("AUTHORIZATION_ERROR", message);
 }

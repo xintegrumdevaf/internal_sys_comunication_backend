@@ -71,7 +71,7 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     if (decision.action === "CONTINUE_ACTIVE") {
-      await this.deps.advanceCase.execute({ caseId: decision.caseId, correlationId });
+      await this.deps.advanceCase.execute({ caseId: decision.caseId, correlationId, text });
       return;
     }
 
@@ -86,7 +86,7 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
-    await this.deps.advanceCase.execute({ caseId: targetCaseId, correlationId });
+    await this.deps.advanceCase.execute({ caseId: targetCaseId, correlationId, text });
   }
 
   private async pauseCase(caseId: string, log: Logger): Promise<void> {

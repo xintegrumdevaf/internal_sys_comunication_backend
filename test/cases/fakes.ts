@@ -20,6 +20,11 @@ import type {
   StartExecutionInput,
   WorkflowExecutionRepositoryPort,
 } from "../../src/core/modules/cases/application/ports/workflow-execution.repository.port";
+import type { N8nWorkflowCategory, N8nWorkflowRegistryEntry } from "../../src/core/modules/cases/domain/n8n-workflow-registry-entry.entity";
+import type {
+  N8nWorkflowRegistryRepositoryPort,
+  UpsertN8nWorkflowRegistryInput,
+} from "../../src/core/modules/cases/application/ports/n8n-workflow-registry.repository.port";
 
 /**
  * Fakes en memoria de los ports de `cases` (docs/skills/testing-strategy.md).
@@ -274,5 +279,42 @@ export class N8nGatewayFake implements N8nGatewayPort {
 
   actionsCalledFor(action: string): number {
     return this.calls.filter((call) => call.action === action).length;
+  }
+}
+
+/** Fake en memoria de `N8nWorkflowRegistryRepositoryPort` (docs/skills/testing-strategy.md). */
+export class N8nWorkflowRegistryRepositoryFake implements N8nWorkflowRegistryRepositoryPort {
+  readonly entries = new Map<string, N8nWorkflowRegistryEntry>();
+  findByActionCallCount = 0;
+
+  seed(entry: Partial<N8nWorkflowRegistryEntry> & { action: string; url: string }): N8nWorkflowRegistryEntry {
+    const full: N8nWorkflowRegistryEntry = {
+      category: entry.category ?? "case_action",
+      description: entry.description ?? null,
+      timeoutMs: entry.timeoutMs ?? 8000,
+      maxRetries: entry.maxRetries ?? 2,
+      active: entry.active ?? true,
+      updatedAt: entry.updatedAt ?? new Date(),
+      updatedBy: entry.updatedBy ?? null,
+      ...entry,
+    };
+    this.entries.set(full.action, full);
+    return full;
+  }
+
+  async findByAction(action: string): Promise<N8nWorkflowRegistryEntry | null> {
+    this.findByActionCallCount += 1;
+    return this.entries.get(action) ?? null;
+  }
+
+  async list(filter?: { category?: N8nWorkflowCategory }): Promise<N8nWorkflowRegistryEntry[]> {
+    const all = [...this.entries.values()];
+    return filter?.category ? all.filter((entry) => entry.category === filter.category) : all;
+  }
+
+  async upsert(input: UpsertN8nWorkflowRegistryInput): Promise<N8nWorkflowRegistryEntry> {
+    const entry: N8nWorkflowRegistryEntry = { ...input, updatedAt: new Date() };
+    this.entries.set(entry.action, entry);
+    return entry;
   }
 }

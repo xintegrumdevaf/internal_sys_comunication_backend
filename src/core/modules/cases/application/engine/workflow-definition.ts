@@ -21,6 +21,14 @@ export type WorkflowStepInput = {
   currentState: string;
   context: CaseContext;
   gateway: N8nGatewayPort;
+  /**
+   * Texto crudo del cliente que disparo este avance (unidad de trabajo del
+   * buffer, docs/spec/02_STATE_MACHINE.md §12). Algunos pasos lo reenvian tal
+   * cual a n8n en vez de una version reinterpretada (ej. `CONTINUE_DIAGNOSTIC`,
+   * docs/spec/04_N8N_WORKFLOW_SPEC.md §7.2) — `undefined` cuando el avance no
+   * fue disparado por un mensaje nuevo (ej. reintento interno).
+   */
+  text?: string;
 };
 
 export type WorkflowStateHandler = (input: WorkflowStepInput) => Promise<WorkflowStepOutcome>;

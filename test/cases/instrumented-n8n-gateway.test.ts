@@ -25,6 +25,12 @@ describe("InstrumentedN8nGateway (docs/spec/03_API_CONTRACT.md §B)", () => {
     expect(first).toEqual(second);
     expect(gateway.calls).toHaveLength(1); // el segundo intento no vuelve a tocar el gateway real
     expect(executionRepo.startedCallCount).toBe(1);
+
+    // docs/spec/03_API_CONTRACT.md §B: el gateway real (N8nGatewayHttp) necesita
+    // idempotencyKey/executionId para incluirlos en el body del POST a n8n.
+    const forwardedParams = gateway.calls[0]!;
+    expect(forwardedParams.idempotencyKey).toBeTruthy();
+    expect(forwardedParams.executionId).toBeTruthy();
   });
 
   it("registra el error estructurado cuando el gateway real falla", async () => {

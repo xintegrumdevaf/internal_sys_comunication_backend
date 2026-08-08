@@ -38,7 +38,7 @@ export class InstrumentedN8nGateway implements N8nGatewayPort {
       return { success: false, error: existing.error };
     }
 
-    await this.executionRepo.start({
+    const execution = await this.executionRepo.start({
       workflowInstanceId: this.workflowInstanceId,
       caseId: params.caseId,
       action: params.action,
@@ -46,10 +46,10 @@ export class InstrumentedN8nGateway implements N8nGatewayPort {
       idempotencyKey,
       correlationId: params.correlationId,
     });
-    log.info({ idempotencyKey }, "ejecutando accion de n8n");
+    log.info({ idempotencyKey, executionId: execution.id }, "ejecutando accion de n8n");
 
     const startedAt = Date.now();
-    const result = await this.gateway.executeAction(params);
+    const result = await this.gateway.executeAction({ ...params, idempotencyKey, executionId: execution.id });
     const durationMs = Date.now() - startedAt;
 
     if (result.success) {

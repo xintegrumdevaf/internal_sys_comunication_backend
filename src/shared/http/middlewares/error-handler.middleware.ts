@@ -10,6 +10,7 @@ const STATUS_BY_ERROR_TYPE: Record<DomainError["type"], number> = {
   TIMEOUT: 504,
   EXTERNAL_SERVICE_ERROR: 502,
   AI_ERROR: 502,
+  AUTHORIZATION_ERROR: 403,
 };
 
 /**

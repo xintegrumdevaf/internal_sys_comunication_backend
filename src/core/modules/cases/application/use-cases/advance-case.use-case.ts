@@ -24,6 +24,8 @@ export type AdvanceCaseDeps = {
 export type AdvanceCaseInput = {
   caseId: string;
   correlationId: string;
+  /** Texto crudo de la unidad de trabajo que dispara este avance, ver `WorkflowStepInput.text`. */
+  text?: string;
 };
 
 /**
@@ -67,6 +69,7 @@ export class AdvanceCaseUseCase {
         currentState,
         context,
         gateway: instrumentedGateway,
+        text: input.text,
       });
       log.info(
         { workflowType: aggregate.case.workflowType, stateBefore, outcome: outcome.type },
