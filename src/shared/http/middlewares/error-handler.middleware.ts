@@ -14,19 +14,23 @@ const STATUS_BY_ERROR_TYPE: Record<DomainError["type"], number> = {
 
 /**
  * Unico formato de error HTTP de todo el API (docs/skills/api-design-best-practices.md).
- * Debe montarse al final de la cadena de middlewares.
+ * Debe montarse al final de la cadena de middlewares. Usa `req.log` (con el
+ * correlationId de la request, ver `request-logger.middleware.ts`) y solo cae
+ * al logger base si por alguna razon el middleware anterior no corrio.
  */
-export function createErrorHandler(logger: Logger): ErrorRequestHandler {
+export function createErrorHandler(fallbackLogger: Logger): ErrorRequestHandler {
   return (err, req, res, _next) => {
+    const log = req.log ?? fallbackLogger;
+
     if (err instanceof DomainError) {
-      logger.warn({ err, path: req.path }, "domain error");
+      log.warn({ err, path: req.path }, "domain error");
       res.status(STATUS_BY_ERROR_TYPE[err.type]).json({
         error: { type: err.type, message: err.message },
       });
       return;
     }
 
-    logger.error({ err, path: req.path }, "unhandled error");
+    log.error({ err, path: req.path }, "unhandled error");
     res.status(500).json({
       error: { type: "EXTERNAL_SERVICE_ERROR", message: "Error interno inesperado" },
     });

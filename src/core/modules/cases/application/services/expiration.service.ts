@@ -1,5 +1,6 @@
 import { TERMINAL_CASE_STATUSES, type Case } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
+import type { Logger } from "../../../../../shared/logging/logger";
 
 /**
  * docs/spec/02_STATE_MACHINE.md §8: `case.expires_at = last_activity_at +
@@ -7,7 +8,10 @@ import type { CaseRepositoryPort } from "../ports/case.repository.port";
  * nuevo del mismo workflow_type en la misma conversacion mas adelante.
  */
 export class ExpirationService {
-  constructor(private readonly caseRepo: CaseRepositoryPort) {}
+  constructor(
+    private readonly caseRepo: CaseRepositoryPort,
+    private readonly logger: Logger,
+  ) {}
 
   isExpired(caseEntity: Case, now: Date = new Date()): boolean {
     if (TERMINAL_CASE_STATUSES.includes(caseEntity.status)) {
@@ -42,7 +46,18 @@ export class ExpirationService {
         expiresAt: null,
       });
       await this.caseRepo.appendEvent(aggregate.case.id, "CASE_EXPIRED", {});
+      this.logger.info(
+        { caseId: aggregate.case.id, workflowType: aggregate.case.workflowType },
+        "caso vencido por inactividad",
+      );
       expired.push(result.case);
+    }
+
+    if (candidates.length > 0) {
+      this.logger.info(
+        { candidateCount: candidates.length, expiredCount: expired.length },
+        "barrido de expiracion de casos completado",
+      );
     }
 
     return expired;

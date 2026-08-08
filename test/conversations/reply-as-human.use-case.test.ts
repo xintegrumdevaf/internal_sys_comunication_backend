@@ -7,6 +7,7 @@ import { MessageRepositoryPg } from "../../src/core/modules/conversations/infras
 import { ReplyAsHumanUseCase } from "../../src/core/modules/conversations/application/use-cases/reply-as-human.use-case";
 import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
 import { AuditRepositoryPg } from "../../src/core/modules/audit/infrastructure/postgres/audit.repository.pg";
+import { silentLogger } from "../support/silent-logger";
 
 /** Fake del puerto (docs/skills/testing-strategy.md: fakes, no mocks fragiles). */
 class FakeWhatsAppSender implements WhatsAppSenderPort {
@@ -32,7 +33,7 @@ describe("ReplyAsHumanUseCase", () => {
     const waPhone = `+59398${randomUUID().replace(/-/g, "").slice(0, 7)}`;
     const conversation = await conversationRepo.findOrCreateByWaPhone(waPhone);
     const whatsappSender = new FakeWhatsAppSender();
-    const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo });
+    const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo, logger: silentLogger });
 
     const message = await useCase.execute({
       conversationId: conversation.id,
@@ -53,7 +54,7 @@ describe("ReplyAsHumanUseCase", () => {
 
   it("lanza NOT_FOUND si la conversacion no existe", async () => {
     const whatsappSender = new FakeWhatsAppSender();
-    const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo });
+    const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo, logger: silentLogger });
 
     await expect(
       useCase.execute({ conversationId: randomUUID(), agentUserId: randomUUID(), body: "hola" }),

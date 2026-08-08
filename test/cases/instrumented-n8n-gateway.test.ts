@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InstrumentedN8nGateway } from "../../src/core/modules/cases/application/gateway/instrumented-n8n-gateway";
 import { N8nGatewayFake, WorkflowExecutionRepositoryFake } from "./fakes";
+import { silentLogger } from "../support/silent-logger";
 
 describe("InstrumentedN8nGateway (docs/spec/03_API_CONTRACT.md §B)", () => {
   it("un reintento con el mismo input no vuelve a llamar al gateway real (idempotencyKey estable)", async () => {
@@ -8,7 +9,7 @@ describe("InstrumentedN8nGateway (docs/spec/03_API_CONTRACT.md §B)", () => {
     const gateway = new N8nGatewayFake({
       RECORD_PAYMENT: () => ({ success: true, result: { recorded: true } }),
     });
-    const instrumented = new InstrumentedN8nGateway(gateway, executionRepo, "wi-1");
+    const instrumented = new InstrumentedN8nGateway(gateway, executionRepo, "wi-1", silentLogger);
 
     const params = {
       action: "RECORD_PAYMENT",
@@ -34,7 +35,7 @@ describe("InstrumentedN8nGateway (docs/spec/03_API_CONTRACT.md §B)", () => {
         error: { type: "EXTERNAL_SERVICE_ERROR", message: "MikroTik timeout", retryable: true },
       }),
     });
-    const instrumented = new InstrumentedN8nGateway(gateway, executionRepo, "wi-2");
+    const instrumented = new InstrumentedN8nGateway(gateway, executionRepo, "wi-2", silentLogger);
 
     const result = await instrumented.executeAction({
       action: "DIAGNOSTIC",

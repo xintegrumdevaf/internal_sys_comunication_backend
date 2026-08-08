@@ -1,4 +1,5 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
+import type { Logger } from "../../../../../shared/logging/logger";
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
@@ -16,6 +17,7 @@ export type ReplyAsHumanDeps = {
   messageRepo: MessageRepositoryPort;
   whatsappSender: WhatsAppSenderPort;
   auditRepo: AuditRepositoryPort;
+  logger: Logger;
 };
 
 /**
@@ -31,14 +33,23 @@ export class ReplyAsHumanUseCase {
   constructor(private readonly deps: ReplyAsHumanDeps) {}
 
   async execute(input: ReplyAsHumanInput): Promise<Message> {
-    const { conversationRepo, messageRepo, whatsappSender, auditRepo } = this.deps;
+    const { conversationRepo, messageRepo, whatsappSender, auditRepo, logger } = this.deps;
 
     const conversation = await conversationRepo.findById(input.conversationId);
     if (!conversation) {
       throw notFound(`Conversacion ${input.conversationId} no encontrada`);
     }
 
-    const { externalId } = await whatsappSender.sendText(conversation.waPhone, input.body);
+    let externalId: string;
+    try {
+      ({ externalId } = await whatsappSender.sendText(conversation.waPhone, input.body));
+    } catch (error) {
+      logger.error(
+        { err: error, conversationId: conversation.id, agentUserId: input.agentUserId },
+        "fallo al enviar respuesta de agente por whatsapp",
+      );
+      throw error;
+    }
 
     const message = await messageRepo.insertOutbound({
       conversationId: conversation.id,
@@ -56,6 +67,11 @@ export class ReplyAsHumanUseCase {
       actorId: input.agentUserId,
       metadata: { messageId: message.id },
     });
+
+    logger.info(
+      { conversationId: conversation.id, messageId: message.id, agentUserId: input.agentUserId },
+      "respuesta de agente enviada por whatsapp",
+    );
 
     return message;
   }

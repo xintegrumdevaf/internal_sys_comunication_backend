@@ -1,4 +1,5 @@
 import type Redis from "ioredis";
+import type { Logger } from "../../../../../shared/logging/logger";
 
 export type FlushHandler = (conversationId: string, messageIds: string[]) => Promise<void>;
 
@@ -31,10 +32,12 @@ export class InboundBufferService {
     private readonly redisClient: Redis,
     private readonly onFlush: FlushHandler,
     private readonly options: InboundBufferOptions,
+    private readonly logger: Logger,
   ) {}
 
   async push(conversationId: string, messageId: string): Promise<void> {
     await this.redisClient.rpush(this.bufferKey(conversationId), messageId);
+    this.logger.debug({ conversationId, messageId }, "mensaje empujado al buffer, debounce reprogramado");
     this.reschedule(conversationId);
   }
 
@@ -63,7 +66,7 @@ export class InboundBufferService {
     }
     const timer = setTimeout(() => {
       this.drain(conversationId).catch((error) => {
-        console.error(`[inbound-buffer] fallo al procesar el buffer de ${conversationId}`, error);
+        this.logger.error({ err: error, conversationId }, "fallo al procesar el buffer de la conversacion");
       });
     }, this.options.debounceMs);
     this.timers.set(conversationId, timer);
@@ -76,6 +79,10 @@ export class InboundBufferService {
     if (messageIds.length === 0) {
       return;
     }
+    this.logger.info(
+      { conversationId, messageCount: messageIds.length, messageIds },
+      "debounce vencido, entregando unidad de trabajo acumulada",
+    );
     await this.onFlush(conversationId, messageIds);
   }
 

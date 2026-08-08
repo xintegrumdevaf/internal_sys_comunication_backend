@@ -4,13 +4,21 @@ import { WorkflowEngine } from "../../../src/core/modules/cases/application/engi
 import { supportInternetWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
 import { CaseRepositoryFake, N8nGatewayFake, WorkflowExecutionRepositoryFake } from "../fakes";
 import { ConversationRepositoryFake } from "../../support/fakes";
+import { silentLogger } from "../../support/silent-logger";
 
 function buildUseCase(gateway: N8nGatewayFake) {
   const caseRepo = new CaseRepositoryFake();
   const workflowExecutionRepo = new WorkflowExecutionRepositoryFake();
   const conversationRepo = new ConversationRepositoryFake();
   const engine = new WorkflowEngine([supportInternetWorkflow]);
-  const advanceCase = new AdvanceCaseUseCase({ caseRepo, workflowExecutionRepo, conversationRepo, engine, gateway });
+  const advanceCase = new AdvanceCaseUseCase({
+    caseRepo,
+    workflowExecutionRepo,
+    conversationRepo,
+    engine,
+    gateway,
+    logger: silentLogger,
+  });
   return { caseRepo, workflowExecutionRepo, conversationRepo, engine, advanceCase };
 }
 

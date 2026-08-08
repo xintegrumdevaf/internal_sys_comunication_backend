@@ -1,4 +1,5 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
+import type { Logger } from "../../../../../shared/logging/logger";
 import type { Case } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
@@ -17,6 +18,7 @@ export type AdvanceCaseDeps = {
   conversationRepo: ConversationRepositoryPort;
   engine: WorkflowEngine;
   gateway: N8nGatewayPort;
+  logger: Logger;
 };
 
 export type AdvanceCaseInput = {
@@ -36,6 +38,10 @@ export class AdvanceCaseUseCase {
 
   async execute(input: AdvanceCaseInput): Promise<Case> {
     const { caseRepo, conversationRepo, engine } = this.deps;
+    const log = this.deps.logger.child({
+      correlationId: input.correlationId,
+      caseId: input.caseId,
+    });
     const aggregate = await caseRepo.findById(input.caseId);
     if (!aggregate) {
       throw notFound(`Caso ${input.caseId} no encontrado`);
@@ -45,6 +51,7 @@ export class AdvanceCaseUseCase {
       this.deps.gateway,
       this.deps.workflowExecutionRepo,
       aggregate.workflowInstance.id,
+      this.deps.logger,
     );
 
     let currentState = aggregate.workflowInstance.currentState;
@@ -52,6 +59,7 @@ export class AdvanceCaseUseCase {
     let outcome: WorkflowStepOutcome | undefined;
 
     for (let step = 0; step < MAX_STEPS_PER_RUN; step += 1) {
+      const stateBefore = currentState;
       outcome = await engine.step(aggregate.case.workflowType, {
         caseId: aggregate.case.id,
         conversationId: aggregate.case.conversationId,
@@ -60,6 +68,10 @@ export class AdvanceCaseUseCase {
         context,
         gateway: instrumentedGateway,
       });
+      log.info(
+        { workflowType: aggregate.case.workflowType, stateBefore, outcome: outcome.type },
+        "paso del motor de workflow ejecutado",
+      );
 
       if (outcome.type !== "CONTINUE") {
         break;
@@ -89,6 +101,7 @@ export class AdvanceCaseUseCase {
       });
       await caseRepo.appendEvent(aggregate.case.id, "WAITING_USER", { nextState: outcome.nextState });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
+      log.info({ status: "WAITING_USER", currentState: outcome.nextState }, "caso a la espera del usuario");
       return result.case;
     }
 
@@ -104,6 +117,7 @@ export class AdvanceCaseUseCase {
       });
       await caseRepo.appendEvent(aggregate.case.id, "CASE_COMPLETED", {});
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+      log.info({ status: "COMPLETED" }, "caso completado");
       return result.case;
     }
 
@@ -120,11 +134,16 @@ export class AdvanceCaseUseCase {
       await caseRepo.setAutomationEnabled(aggregate.case.id, false, { reason: outcome.reason });
       await caseRepo.appendEvent(aggregate.case.id, "CASE_ESCALATED", { reason: outcome.reason });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+      log.warn({ status: "ESCALATED", reason: outcome.reason }, "caso escalado, automatizacion deshabilitada");
       return result.case;
     }
 
     // outcome.type === "CONTINUE": se agoto MAX_STEPS_PER_RUN sin estabilizar.
     // Se persiste el ultimo estado alcanzado como ACTIVE en vez de perder el avance.
+    log.warn(
+      { workflowType: aggregate.case.workflowType, maxSteps: MAX_STEPS_PER_RUN },
+      "se agoto el limite de pasos del motor sin llegar a un estado estable",
+    );
     const result = await caseRepo.applyTransition({
       caseId: aggregate.case.id,
       expectedCaseVersion: aggregate.case.version,

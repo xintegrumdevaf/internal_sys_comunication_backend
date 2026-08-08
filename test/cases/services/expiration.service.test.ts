@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ExpirationService } from "../../../src/core/modules/cases/application/services/expiration.service";
 import { CaseRepositoryFake } from "../fakes";
+import { silentLogger } from "../../support/silent-logger";
 
 describe("ExpirationService (docs/spec/02_STATE_MACHINE.md §8)", () => {
   it("mueve a EXPIRED un caso automatizable cuya expires_at ya paso", async () => {
@@ -23,7 +24,7 @@ describe("ExpirationService (docs/spec/02_STATE_MACHINE.md §8)", () => {
       expiresAt: created.expiresAt,
     });
 
-    const service = new ExpirationService(caseRepo);
+    const service = new ExpirationService(caseRepo, silentLogger);
     const expired = await service.expireDueCases();
 
     expect(expired).toHaveLength(1);
@@ -51,7 +52,7 @@ describe("ExpirationService (docs/spec/02_STATE_MACHINE.md §8)", () => {
       expiresAt: new Date(Date.now() + 86_400_000),
     });
 
-    const service = new ExpirationService(caseRepo);
+    const service = new ExpirationService(caseRepo, silentLogger);
     const expired = await service.expireDueCases();
 
     expect(expired).toHaveLength(0);
@@ -76,7 +77,7 @@ describe("ExpirationService (docs/spec/02_STATE_MACHINE.md §8)", () => {
       currentState: "VALIDATE_CLIENT",
       expiresAt: created.expiresAt,
     });
-    const service = new ExpirationService(caseRepo);
+    const service = new ExpirationService(caseRepo, silentLogger);
     await service.expireDueCases();
 
     const secondCase = await caseRepo.create({

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CancelCaseUseCase } from "../../../src/core/modules/cases/application/use-cases/cancel-case.use-case";
 import { CaseRepositoryFake } from "../fakes";
 import { ConversationRepositoryFake } from "../../support/fakes";
+import { silentLogger } from "../../support/silent-logger";
 
 describe("CancelCaseUseCase (docs/spec/02_STATE_MACHINE.md §2)", () => {
   it("cancela un caso ACTIVE y libera el active_case_id de la conversacion", async () => {
@@ -27,7 +28,7 @@ describe("CancelCaseUseCase (docs/spec/02_STATE_MACHINE.md §2)", () => {
     });
     await conversationRepo.setActiveCaseId(conversation.id, created.id);
 
-    const useCase = new CancelCaseUseCase({ caseRepo, conversationRepo });
+    const useCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: silentLogger });
     const result = await useCase.execute({ caseId: created.id, reason: "Cliente ya no necesita el servicio" });
 
     expect(result.status).toBe("CANCELLED");
@@ -60,7 +61,7 @@ describe("CancelCaseUseCase (docs/spec/02_STATE_MACHINE.md §2)", () => {
       expiresAt: null,
     });
 
-    const useCase = new CancelCaseUseCase({ caseRepo, conversationRepo });
+    const useCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: silentLogger });
     await expect(useCase.execute({ caseId: created.id, reason: "x" })).rejects.toMatchObject({
       type: "BUSINESS_ERROR",
     });

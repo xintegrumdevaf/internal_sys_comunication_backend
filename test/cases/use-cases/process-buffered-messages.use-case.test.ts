@@ -9,6 +9,7 @@ import type { WorkflowDefinition } from "../../../src/core/modules/cases/applica
 import type { Interpretation, InterpretationPort, InterpretMessageInput } from "../../../src/core/modules/cases/application/ports/interpretation.port";
 import { CaseRepositoryFake, N8nGatewayFake, WorkflowExecutionRepositoryFake } from "../fakes";
 import { ConversationRepositoryFake, DepartmentRepositoryFake } from "../../support/fakes";
+import { silentLogger } from "../../support/silent-logger";
 
 /** Interpretacion sintetica (docs/spec/05_BUILD_PLAN.md Etapa 2): cola de resultados fijados por el test. */
 class QueuedInterpretationProvider implements InterpretationPort {
@@ -49,9 +50,16 @@ function buildScenario() {
     CONTINUE_DIAGNOSTIC: () => ({ success: true, result: { resolved: true, result: "ONU reiniciada" } }),
   });
 
-  const advanceCase = new AdvanceCaseUseCase({ caseRepo, workflowExecutionRepo, conversationRepo, engine, gateway });
+  const advanceCase = new AdvanceCaseUseCase({
+    caseRepo,
+    workflowExecutionRepo,
+    conversationRepo,
+    engine,
+    gateway,
+    logger: silentLogger,
+  });
   const departmentResolver = new DepartmentResolverService(departmentRepo);
-  const arbitrationService = new CaseArbitrationService(caseRepo);
+  const arbitrationService = new CaseArbitrationService(caseRepo, silentLogger);
 
   return { caseRepo, conversationRepo, departmentRepo, engine, gateway, advanceCase, departmentResolver, arbitrationService };
 }
@@ -79,6 +87,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", 
         interpretationProvider,
         engine,
         advanceCase,
+        logger: silentLogger,
       });
 
       // 1) "No tengo internet" -> crea SUPPORT_INTERNET, encadena hasta WAITING_USER_DIAGNOSTIC.
@@ -146,6 +155,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", 
       interpretationProvider,
       engine,
       advanceCase,
+      logger: silentLogger,
     });
 
     await useCase.execute({ conversationId: conversation.id, correlationId: "corr-1", text: "asdkjaslkd" });

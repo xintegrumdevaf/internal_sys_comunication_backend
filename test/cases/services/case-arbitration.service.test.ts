@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CaseArbitrationService } from "../../../src/core/modules/cases/application/services/case-arbitration.service";
 import type { Interpretation } from "../../../src/core/modules/cases/application/ports/interpretation.port";
 import { CaseRepositoryFake } from "../fakes";
+import { silentLogger } from "../../support/silent-logger";
 
 function interpretation(overrides: Partial<Interpretation>): Interpretation {
   return { type: "NEW_INTENT", intent: "support.internet", entities: {}, confidence: 0.9, ...overrides };
@@ -10,7 +11,7 @@ function interpretation(overrides: Partial<Interpretation>): Interpretation {
 describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
   it("sin caso activo, intencion clara y de alta confianza -> ACTIVATE sin nada que pausar", async () => {
     const caseRepo = new CaseRepositoryFake();
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
 
     const decision = await service.decide({
       conversationId: "conv-1",
@@ -27,7 +28,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
 
   it("UNCLEAR siempre resulta en CLARIFY, incluso con un caso activo", async () => {
     const caseRepo = new CaseRepositoryFake();
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
     await caseRepo.create({
       conversationId: "conv-1",
       workflowType: "SUPPORT_INTERNET",
@@ -64,7 +65,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       currentState: "VALIDATE_CLIENT",
       expiresAt: null,
     });
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
 
     const decision = await service.decide({
       conversationId: "conv-1",
@@ -93,7 +94,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       currentState: "VALIDATE_CLIENT",
       expiresAt: null,
     });
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
 
     const decision = await service.decide({
       conversationId: "conv-1",
@@ -127,7 +128,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       currentState: "VALIDATE_CLIENT",
       expiresAt: null,
     });
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
 
     // billing.* exige 0.8 de confianza (confidence-threshold.ts); 0.7 no alcanza.
     const decision = await service.decide({
@@ -176,7 +177,7 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       expiresAt: null,
     });
 
-    const service = new CaseArbitrationService(caseRepo);
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
     const decision = await service.decide({
       conversationId: "conv-1",
       interpretation: interpretation({ type: "CHANGE_TOPIC", intent: "billing.balance", confidence: 0.9 }),

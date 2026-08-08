@@ -1,5 +1,6 @@
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { Interpretation } from "../ports/interpretation.port";
+import type { Logger } from "../../../../../shared/logging/logger";
 import { mapIntentToWorkflowType } from "./intent-workflow-mapper";
 import { confidenceThreshold } from "./confidence-threshold";
 import { ExpirationService } from "./expiration.service";
@@ -26,8 +27,11 @@ export type ArbitrationDecision =
 export class CaseArbitrationService {
   private readonly expirationService: ExpirationService;
 
-  constructor(private readonly caseRepo: CaseRepositoryPort) {
-    this.expirationService = new ExpirationService(caseRepo);
+  constructor(
+    private readonly caseRepo: CaseRepositoryPort,
+    logger: Logger,
+  ) {
+    this.expirationService = new ExpirationService(caseRepo, logger);
   }
 
   async decide(input: { conversationId: string; interpretation: Interpretation }): Promise<ArbitrationDecision> {

@@ -67,11 +67,17 @@ export function createContainer(): Container {
   const pgPool = createPostgresPool(env);
   const redisClient = createRedisClient(env);
 
+  // Loggers hijos por modulo (AGENTS.md: correlationId end-to-end, cada linea
+  // se puede filtrar por `module` ademas de por `correlationId`).
+  const conversationsLogger = logger.child({ module: "conversations" });
+  const ingestionLogger = logger.child({ module: "ingestion" });
+  const casesLogger = logger.child({ module: "cases" });
+
   // --- Repositorios (infrastructure) ---
   const auditRepo = new AuditRepositoryPg(pgPool);
   const conversationRepo = new ConversationRepositoryPg(pgPool);
   const messageRepo = new MessageRepositoryPg(pgPool);
-  const whatsappSender = new WhatsAppSenderHttp(env);
+  const whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const agentRepo = new AgentRepositoryPg(pgPool);
   const caseRepo = new CaseRepositoryPg(pgPool);
@@ -82,8 +88,8 @@ export function createContainer(): Container {
   // BILLING_BALANCE/SALES_PACKAGES se agregan en la Etapa 8 sin tocar el motor.
   const workflowEngine = new WorkflowEngine([supportInternetWorkflow]);
   const departmentResolver = new DepartmentResolverService(departmentRepo);
-  const arbitrationService = new CaseArbitrationService(caseRepo);
-  const expirationService = new ExpirationService(caseRepo);
+  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
+  const expirationService = new ExpirationService(caseRepo, casesLogger);
 
   // Placeholders explicitos hasta que existan sus etapas reales:
   // - N8nGatewayPort real (HTTP + n8n_workflow_registry) llega en la Etapa 3.
@@ -100,6 +106,7 @@ export function createContainer(): Container {
     conversationRepo,
     engine: workflowEngine,
     gateway: n8nGateway,
+    logger: casesLogger,
   });
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({
     caseRepo,
@@ -109,21 +116,28 @@ export function createContainer(): Container {
     interpretationProvider,
     engine: workflowEngine,
     advanceCase,
+    logger: casesLogger,
   });
-  const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo });
+  const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: casesLogger });
 
   const inboundBuffer = new InboundBufferService(
     redisClient,
     async (conversationId, messageIds) => {
+      // Nueva unidad de trabajo: el correlationId de cada request HTTP que
+      // aporto un mensaje ya quedo logueado en ReceiveInboundMessageUseCase;
+      // de aqui en adelante (interpretacion -> caso -> ejecucion) todo se
+      // traza bajo este nuevo correlationId de lote (AGENTS.md end-to-end).
+      const batchCorrelationId = randomUUID();
       const messages = await messageRepo.findByIds(messageIds);
       const text = messages.map((message) => message.body).join("\n");
       await processBufferedMessages.execute({
         conversationId,
-        correlationId: randomUUID(),
+        correlationId: batchCorrelationId,
         text,
       });
     },
     { debounceMs: env.MESSAGE_DEBOUNCE_MS },
+    ingestionLogger,
   );
 
   const receiveInboundMessage = new ReceiveInboundMessageUseCase({
@@ -131,6 +145,7 @@ export function createContainer(): Container {
     messageRepo,
     redisClient,
     inboundBuffer,
+    logger: conversationsLogger,
   });
   const listConversations = new ListConversationsUseCase(conversationRepo);
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
@@ -139,6 +154,7 @@ export function createContainer(): Container {
     messageRepo,
     whatsappSender,
     auditRepo,
+    logger: conversationsLogger,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);

@@ -1,4 +1,5 @@
 import { DomainError } from "../../../../../shared/errors/domain-errors";
+import type { Logger } from "../../../../../shared/logging/logger";
 import type { Case } from "../../domain/case.entity";
 import { emptyContextFor } from "../../domain/contexts/case-context";
 import type { CaseContext } from "../../domain/contexts/case-context";
@@ -18,6 +19,7 @@ export type ProcessBufferedMessagesDeps = {
   interpretationProvider: InterpretationPort;
   engine: WorkflowEngine;
   advanceCase: AdvanceCaseUseCase;
+  logger: Logger;
 };
 
 export type ProcessBufferedMessagesInput = {
@@ -39,6 +41,7 @@ export class ProcessBufferedMessagesUseCase {
 
   async execute(input: ProcessBufferedMessagesInput): Promise<void> {
     const { conversationId, correlationId, text } = input;
+    const log = this.deps.logger.child({ correlationId, conversationId });
     const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
 
     const interpretation = await this.deps.interpretationProvider.interpretMessage({
@@ -47,8 +50,19 @@ export class ProcessBufferedMessagesUseCase {
       text,
       activeCase: activeAggregate ? { workflowType: activeAggregate.case.workflowType } : null,
     });
+    log.info(
+      {
+        textLength: text.length,
+        interpretationType: interpretation.type,
+        intent: interpretation.intent,
+        confidence: interpretation.confidence,
+        activeWorkflowType: activeAggregate?.case.workflowType ?? null,
+      },
+      "unidad de trabajo interpretada",
+    );
 
     const decision = await this.deps.arbitrationService.decide({ conversationId, interpretation });
+    log.info({ decision: decision.action }, "arbitraje de caso decidido");
 
     if (decision.action === "CLARIFY") {
       // Etapa 5/6: componer y enviar un mensaje de aclaracion. Por ahora, no-op
@@ -62,11 +76,12 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     if (decision.pauseCaseId) {
-      await this.pauseCase(decision.pauseCaseId);
+      await this.pauseCase(decision.pauseCaseId, log);
     }
 
-    const targetCaseId = decision.resumeCaseId ?? (await this.createCase(conversationId, decision.workflowType)).id;
+    const targetCaseId = decision.resumeCaseId ?? (await this.createCase(conversationId, decision.workflowType, log)).id;
     if (decision.resumeCaseId) {
+      log.info({ caseId: targetCaseId }, "caso pausado reanudado sin reiniciar el workflow");
       await this.deps.caseRepo.appendEvent(targetCaseId, "CASE_RESUMED", {});
     }
 
@@ -74,7 +89,7 @@ export class ProcessBufferedMessagesUseCase {
     await this.deps.advanceCase.execute({ caseId: targetCaseId, correlationId });
   }
 
-  private async pauseCase(caseId: string): Promise<void> {
+  private async pauseCase(caseId: string, log: Logger): Promise<void> {
     const aggregate = await this.deps.caseRepo.findById(caseId);
     if (!aggregate) {
       return;
@@ -89,9 +104,10 @@ export class ProcessBufferedMessagesUseCase {
       expiresAt: aggregate.case.expiresAt,
     });
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_PAUSED", {});
+    log.info({ caseId: aggregate.case.id, workflowType: aggregate.case.workflowType }, "caso pausado por cambio de tema");
   }
 
-  private async createCase(conversationId: string, workflowType: string): Promise<Case> {
+  private async createCase(conversationId: string, workflowType: string, log: Logger): Promise<Case> {
     const definition = this.deps.engine.getDefinition(workflowType);
     if (!definition) {
       throw new DomainError("UNSUPPORTED", `No hay WorkflowDefinition registrada para '${workflowType}'`);
@@ -109,6 +125,7 @@ export class ProcessBufferedMessagesUseCase {
       expiresAt,
     });
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_CREATED", { workflowType });
+    log.info({ caseId: aggregate.case.id, workflowType, departmentId }, "caso nuevo creado");
     return aggregate.case;
   }
 }

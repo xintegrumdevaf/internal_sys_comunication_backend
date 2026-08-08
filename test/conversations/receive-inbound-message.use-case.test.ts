@@ -6,6 +6,7 @@ import { env } from "../../src/shared/config/env";
 import { ConversationRepositoryPg } from "../../src/core/modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../../src/core/modules/conversations/infrastructure/postgres/message.repository.pg";
 import { ReceiveInboundMessageUseCase } from "../../src/core/modules/conversations/application/use-cases/receive-inbound-message.use-case";
+import { silentLogger } from "../support/silent-logger";
 
 /**
  * Test de integracion (docs/skills/testing-strategy.md): contra la Postgres
@@ -17,7 +18,7 @@ describe("ReceiveInboundMessageUseCase", () => {
   const redisClient = new Redis(env.REDIS_URL);
   const conversationRepo = new ConversationRepositoryPg(pool);
   const messageRepo = new MessageRepositoryPg(pool);
-  const useCase = new ReceiveInboundMessageUseCase({ conversationRepo, messageRepo, redisClient });
+  const useCase = new ReceiveInboundMessageUseCase({ conversationRepo, messageRepo, redisClient, logger: silentLogger });
 
   afterAll(async () => {
     await pool.end();

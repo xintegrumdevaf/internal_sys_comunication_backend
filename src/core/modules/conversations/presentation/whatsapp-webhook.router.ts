@@ -60,9 +60,13 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
       }
 
       const normalizedMessages = parseWhatsAppWebhookPayload(req.body);
+      req.log?.info({ messageCount: normalizedMessages.length }, "payload de whatsapp recibido");
 
       for (const normalized of normalizedMessages) {
-        const { conversation, message, isDuplicate } = await receiveInboundMessage.execute(normalized);
+        const { conversation, message, isDuplicate } = await receiveInboundMessage.execute({
+          ...normalized,
+          correlationId: req.correlationId,
+        });
 
         if (!isDuplicate) {
           await enqueueConversationJob(redisClient, conversation.id, {

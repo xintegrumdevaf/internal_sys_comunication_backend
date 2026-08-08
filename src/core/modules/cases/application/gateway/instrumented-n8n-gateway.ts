@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ExecuteActionParams, N8nActionResult, N8nGatewayPort } from "../ports/n8n-gateway.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
+import type { Logger } from "../../../../../shared/logging/logger";
 
 function canonicalHash(input: Record<string, unknown>): string {
   const sortedKeys = Object.keys(input).sort();
@@ -20,16 +21,20 @@ export class InstrumentedN8nGateway implements N8nGatewayPort {
     private readonly gateway: N8nGatewayPort,
     private readonly executionRepo: WorkflowExecutionRepositoryPort,
     private readonly workflowInstanceId: string,
+    private readonly logger: Logger,
   ) {}
 
   async executeAction(params: ExecuteActionParams): Promise<N8nActionResult> {
     const idempotencyKey = `${params.caseId}:${params.action}:${canonicalHash(params.input)}`;
+    const log = this.logger.child({ correlationId: params.correlationId, caseId: params.caseId, action: params.action });
 
     const existing = await this.executionRepo.findByIdempotencyKey(idempotencyKey);
     if (existing && existing.status === "COMPLETED") {
+      log.info({ idempotencyKey }, "accion de n8n ya ejecutada, reutilizando resultado (idempotencia)");
       return { success: true, result: existing.output ?? {} };
     }
     if (existing && existing.status === "FAILED" && existing.error) {
+      log.info({ idempotencyKey }, "accion de n8n ya fallo antes, reutilizando error (idempotencia)");
       return { success: false, error: existing.error };
     }
 
@@ -41,13 +46,18 @@ export class InstrumentedN8nGateway implements N8nGatewayPort {
       idempotencyKey,
       correlationId: params.correlationId,
     });
+    log.info({ idempotencyKey }, "ejecutando accion de n8n");
 
+    const startedAt = Date.now();
     const result = await this.gateway.executeAction(params);
+    const durationMs = Date.now() - startedAt;
 
     if (result.success) {
       await this.executionRepo.complete({ idempotencyKey, output: result.result });
+      log.info({ idempotencyKey, durationMs }, "accion de n8n completada");
     } else {
       await this.executionRepo.fail({ idempotencyKey, error: result.error, output: null });
+      log.warn({ idempotencyKey, durationMs, error: result.error }, "accion de n8n fallo");
     }
 
     return result;

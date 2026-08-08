@@ -1,5 +1,6 @@
 import type Redis from "ioredis";
 import { withConversationLock } from "../../../../../shared/queue/redis";
+import type { Logger } from "../../../../../shared/logging/logger";
 import type { Conversation } from "../../domain/conversation.entity";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
@@ -15,6 +16,8 @@ export type ReceiveInboundMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  /** correlationId de la request HTTP que origino el mensaje (trazabilidad, AGENTS.md). */
+  correlationId?: string;
 };
 
 export type ReceiveInboundMessageResult = {
@@ -27,6 +30,7 @@ export type ReceiveInboundMessageDeps = {
   conversationRepo: ConversationRepositoryPort;
   messageRepo: MessageRepositoryPort;
   redisClient: Redis;
+  logger: Logger;
   /** Opcional: si no se inyecta, el mensaje se persiste pero no se agrupa (tests de Etapa 1). */
   inboundBuffer?: InboundBufferService;
 };
@@ -42,7 +46,7 @@ export class ReceiveInboundMessageUseCase {
   constructor(private readonly deps: ReceiveInboundMessageDeps) {}
 
   async execute(input: ReceiveInboundMessageInput): Promise<ReceiveInboundMessageResult> {
-    const { conversationRepo, messageRepo, redisClient, inboundBuffer } = this.deps;
+    const { conversationRepo, messageRepo, redisClient, inboundBuffer, logger } = this.deps;
 
     const conversation = await withConversationLock(redisClient, input.waPhone, () =>
       conversationRepo.findOrCreateByWaPhone(input.waPhone),
@@ -58,6 +62,18 @@ export class ReceiveInboundMessageUseCase {
       caption: input.caption ?? null,
       filename: input.filename ?? null,
     });
+
+    logger.info(
+      {
+        correlationId: input.correlationId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        externalId: input.externalId,
+        type: input.type,
+        isDuplicate,
+      },
+      isDuplicate ? "mensaje inbound duplicado, se descarta" : "mensaje inbound recibido y persistido",
+    );
 
     if (!isDuplicate) {
       await conversationRepo.touchLastActivity(conversation.id);

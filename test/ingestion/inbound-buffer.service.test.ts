@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import Redis from "ioredis";
 import { env } from "../../src/shared/config/env";
 import { InboundBufferService } from "../../src/core/modules/ingestion/application/services/inbound-buffer.service";
+import { silentLogger } from "../support/silent-logger";
 
 /**
  * Integracion contra el Redis real de docker-compose.yml (docs/skills/testing-strategy.md).
@@ -26,6 +27,7 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
         flushes.push(messageIds);
       },
       { debounceMs: 150 },
+      silentLogger,
     );
 
     await buffer.push(conversationId, "msg-1");
@@ -51,6 +53,7 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
         flushes.push(messageIds);
       },
       { debounceMs: 100 },
+      silentLogger,
     );
 
     await buffer.push(conversationId, "a-1");
@@ -74,6 +77,7 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
         flushed.set(conversationId, messageIds);
       },
       { debounceMs: 120 },
+      silentLogger,
     );
 
     await buffer.push(conversationA, "a-1");
