@@ -23,7 +23,7 @@ services:
  
   # Opcional: para probar el 04_N8N_WORKFLOW_SPEC.md en local antes de tocar el n8n de producción
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:2.33.7
     restart: unless-stopped
     ports:
       - "5678:5678"
@@ -31,6 +31,12 @@ services:
       N8N_HOST: localhost
       N8N_PORT: 5678
       N8N_PROTOCOL: http
+      # Debe coincidir con API_INTERNAL_KEY de la API (workflows validan X-Internal-Api-Key)
+      API_INTERNAL_KEY: ${API_INTERNAL_KEY:-dev-local-internal-key-change-me}
+      # Permite {{ $env.API_INTERNAL_KEY }} en nodos IF/Code
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Persistir entre recreates; si falta, n8n genera una nueva y rompe OAuth
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-dev-local-n8n-encryption-key-change-me}
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_DATABASE: isp_platform
