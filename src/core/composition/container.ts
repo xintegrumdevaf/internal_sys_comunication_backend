@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import type { Pool } from "pg";
 import type Redis from "ioredis";
@@ -28,6 +29,21 @@ import { ListDepartmentsUseCase } from "../modules/departments/application/use-c
 import { ListAgentsUseCase } from "../modules/departments/application/use-cases/list-agents.use-case";
 import { createDepartmentsRouter } from "../modules/departments/presentation/departments.router";
 
+import { InboundBufferService } from "../modules/ingestion/application/services/inbound-buffer.service";
+
+import { CaseRepositoryPg } from "../modules/cases/infrastructure/postgres/case.repository.pg";
+import { WorkflowExecutionRepositoryPg } from "../modules/cases/infrastructure/postgres/workflow-execution.repository.pg";
+import { UnclearInterpretationProvider } from "../modules/cases/infrastructure/synthetic/unclear-interpretation.provider";
+import { NotImplementedN8nGateway } from "../modules/cases/infrastructure/synthetic/not-implemented-n8n-gateway";
+import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
+import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
+import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
+import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
+import { ExpirationService } from "../modules/cases/application/services/expiration.service";
+import { AdvanceCaseUseCase } from "../modules/cases/application/use-cases/advance-case.use-case";
+import { ProcessBufferedMessagesUseCase } from "../modules/cases/application/use-cases/process-buffered-messages.use-case";
+import { CancelCaseUseCase } from "../modules/cases/application/use-cases/cancel-case.use-case";
+
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
  * Aqui, y solo aqui, se instancian adapters de infraestructura y se
@@ -40,6 +56,9 @@ export type Container = {
   pgPool: Pool;
   redisClient: Redis;
   logger: Logger;
+  inboundBuffer: InboundBufferService;
+  cancelCase: CancelCaseUseCase;
+  expirationService: ExpirationService;
   shutdown: () => Promise<void>;
 };
 
@@ -55,12 +74,63 @@ export function createContainer(): Container {
   const whatsappSender = new WhatsAppSenderHttp(env);
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const agentRepo = new AgentRepositoryPg(pgPool);
+  const caseRepo = new CaseRepositoryPg(pgPool);
+  const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
+
+  // --- Motor de workflow (Etapa 2) ---
+  // Unico workflow implementado por ahora (docs/spec/05_BUILD_PLAN.md Etapa 2);
+  // BILLING_BALANCE/SALES_PACKAGES se agregan en la Etapa 8 sin tocar el motor.
+  const workflowEngine = new WorkflowEngine([supportInternetWorkflow]);
+  const departmentResolver = new DepartmentResolverService(departmentRepo);
+  const arbitrationService = new CaseArbitrationService(caseRepo);
+  const expirationService = new ExpirationService(caseRepo);
+
+  // Placeholders explicitos hasta que existan sus etapas reales:
+  // - N8nGatewayPort real (HTTP + n8n_workflow_registry) llega en la Etapa 3.
+  // - InterpretationPort real (AIProviderPort/OllamaAdapter) llega en la Etapa 5.
+  // Mientras tanto la interpretacion siempre es UNCLEAR, asi que el gateway
+  // nunca se invoca en produccion (ver comentarios en ambas clases).
+  const n8nGateway = new NotImplementedN8nGateway();
+  const interpretationProvider = new UnclearInterpretationProvider();
 
   // --- Casos de uso (application) ---
+  const advanceCase = new AdvanceCaseUseCase({
+    caseRepo,
+    workflowExecutionRepo,
+    conversationRepo,
+    engine: workflowEngine,
+    gateway: n8nGateway,
+  });
+  const processBufferedMessages = new ProcessBufferedMessagesUseCase({
+    caseRepo,
+    conversationRepo,
+    departmentResolver,
+    arbitrationService,
+    interpretationProvider,
+    engine: workflowEngine,
+    advanceCase,
+  });
+  const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo });
+
+  const inboundBuffer = new InboundBufferService(
+    redisClient,
+    async (conversationId, messageIds) => {
+      const messages = await messageRepo.findByIds(messageIds);
+      const text = messages.map((message) => message.body).join("\n");
+      await processBufferedMessages.execute({
+        conversationId,
+        correlationId: randomUUID(),
+        text,
+      });
+    },
+    { debounceMs: env.MESSAGE_DEBOUNCE_MS },
+  );
+
   const receiveInboundMessage = new ReceiveInboundMessageUseCase({
     conversationRepo,
     messageRepo,
     redisClient,
+    inboundBuffer,
   });
   const listConversations = new ListConversationsUseCase(conversationRepo);
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
@@ -93,8 +163,9 @@ export function createContainer(): Container {
   app.use(createErrorHandler(logger));
 
   const shutdown = async (): Promise<void> => {
+    inboundBuffer.clearAllTimers();
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };
 
-  return { env, app, pgPool, redisClient, logger, shutdown };
+  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, shutdown };
 }

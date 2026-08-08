@@ -21,17 +21,19 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),
   WHATSAPP_ACCESS_TOKEN: z.string().default(""),
 
-  // Registro de acciones -> URL (docs/spec/04_N8N_WORKFLOW_SPEC.md §7): un
-  // workflow independiente por accion, cada uno Webhook -> Respond to Webhook.
-  // Se consumen recien en la Etapa 3 (N8nGatewayPort); aqui solo se validan.
-  N8N_WEBHOOK_INTERPRET_MESSAGE: z.string().min(1, "N8N_WEBHOOK_INTERPRET_MESSAGE es requerida"),
-  N8N_WEBHOOK_VALIDATE_CLIENT: z.string().min(1, "N8N_WEBHOOK_VALIDATE_CLIENT es requerida"),
-  N8N_WEBHOOK_CHECK_BALANCE: z.string().min(1, "N8N_WEBHOOK_CHECK_BALANCE es requerida"),
-  N8N_WEBHOOK_DIAGNOSTIC: z.string().min(1, "N8N_WEBHOOK_DIAGNOSTIC es requerida"),
-  N8N_WEBHOOK_CONTINUE_DIAGNOSTIC: z.string().min(1, "N8N_WEBHOOK_CONTINUE_DIAGNOSTIC es requerida"),
-  N8N_WEBHOOK_RECORD_PAYMENT: z.string().min(1, "N8N_WEBHOOK_RECORD_PAYMENT es requerida"),
-  N8N_WEBHOOK_APPLY_BANK_ACCOUNT: z.string().min(1, "N8N_WEBHOOK_APPLY_BANK_ACCOUNT es requerida"),
+  // AIProviderPort (docs/spec/03_API_CONTRACT.md §A) — implementado en la
+  // Etapa 5, se valida desde ahora porque ya vive en .env.example.
+  AI_PROVIDER: z.enum(["ollama"]).default("ollama"),
+  OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
+  OLLAMA_MODEL: z.string().default("qwen3.5:4b"),
+  AI_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
 
+  // Buffer/debounce de mensajes por conversacion (docs/spec/02_STATE_MACHINE.md §12).
+  MESSAGE_DEBOUNCE_MS: z.coerce.number().int().positive().default(4500),
+
+  // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
+  // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,
+  // el timeout/retries por accion especifica se puede sobreescribir en la fila.
   N8N_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
   N8N_CALL_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
 });

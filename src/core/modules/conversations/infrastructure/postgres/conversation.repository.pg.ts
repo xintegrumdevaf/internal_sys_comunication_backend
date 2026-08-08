@@ -68,6 +68,13 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     );
   }
 
+  async setActiveCaseId(id: string, caseId: string | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET active_case_id = $2, updated_at = now() WHERE id = $1`,
+      [id, caseId],
+    );
+  }
+
   async list(filter: ListConversationsFilter): Promise<Conversation[]> {
     if (filter.status) {
       const { rows } = await this.pool.query<ConversationRow>(

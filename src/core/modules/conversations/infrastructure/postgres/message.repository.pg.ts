@@ -92,4 +92,15 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     );
     return rows.map(mapRow);
   }
+
+  async findByIds(ids: string[]): Promise<Message[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const { rows } = await this.pool.query<MessageRow>(
+      `SELECT * FROM message WHERE id = ANY($1::uuid[]) ORDER BY created_at ASC`,
+      [ids],
+    );
+    return rows.map(mapRow);
+  }
 }

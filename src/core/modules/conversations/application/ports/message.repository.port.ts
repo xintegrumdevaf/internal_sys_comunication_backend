@@ -27,4 +27,6 @@ export interface MessageRepositoryPort {
   insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
   insertOutbound(input: InsertOutboundMessageInput): Promise<Message>;
   listByConversation(conversationId: string): Promise<Message[]>;
+  /** Usado por el buffer/debounce (docs/spec/02_STATE_MACHINE.md §12) para recuperar la unidad de trabajo agrupada. */
+  findByIds(ids: string[]): Promise<Message[]>;
 }
