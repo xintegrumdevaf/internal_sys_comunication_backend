@@ -1,6 +1,11 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { Case } from "../../domain/case.entity";
+import {
+  bumpWaitingAttempts,
+  clearWaitingMeta,
+  getEngineMeta,
+} from "../../domain/contexts/engine-meta";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
 import type { N8nGatewayPort } from "../ports/n8n-gateway.port";
@@ -9,8 +14,8 @@ import type { EscalationService } from "../../../escalation/application/services
 import type { WorkflowStepOutcome } from "../engine/workflow-definition";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
+import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
 
-/** Guarda contra un `WorkflowDefinition` mal formado que nunca deja de devolver CONTINUE. */
 const MAX_STEPS_PER_RUN = 10;
 
 export type AdvanceCaseDeps = {
@@ -20,15 +25,15 @@ export type AdvanceCaseDeps = {
   engine: WorkflowEngine;
   gateway: N8nGatewayPort;
   logger: Logger;
-  /** Etapa 6: persiste resumen estructurado al escalar. */
   escalationService?: EscalationService;
 };
 
 export type AdvanceCaseInput = {
   caseId: string;
   correlationId: string;
-  /** Texto crudo de la unidad de trabajo que dispara este avance, ver `WorkflowStepInput.text`. */
   text?: string;
+  /** Entities de la interpretacion (02_STATE_MACHINE.md §13). */
+  entities?: Record<string, unknown>;
 };
 
 export type AdvanceCaseResult = {
@@ -37,11 +42,7 @@ export type AdvanceCaseResult = {
 };
 
 /**
- * Ejecuta el motor de workflow (docs/spec/02_STATE_MACHINE.md §1-3) sobre un
- * caso existente hasta que llegue a un estado estable (`WAITING_USER`,
- * `COMPLETED`, `ESCALATED`) o se agote `MAX_STEPS_PER_RUN` — encadena pasos
- * que no requieren al usuario (VALIDATE_CLIENT -> CHECK_BALANCE -> DIAGNOSTIC)
- * en una sola invocacion, persistiendo el resultado final de forma optimista.
+ * Motor + politica §13 de WaitingStep (requireAll/Any, waitingAttempts, escalacion).
  */
 export class AdvanceCaseUseCase {
   constructor(private readonly deps: AdvanceCaseDeps) {}
@@ -66,36 +67,84 @@ export class AdvanceCaseUseCase {
 
     let currentState = aggregate.workflowInstance.currentState;
     let context = aggregate.case.context;
+    let entities = { ...(input.entities ?? {}) };
     let outcome: WorkflowStepOutcome | undefined;
 
-    for (let step = 0; step < MAX_STEPS_PER_RUN; step += 1) {
-      const stateBefore = currentState;
-      outcome = await engine.step(aggregate.case.workflowType, {
-        caseId: aggregate.case.id,
-        conversationId: aggregate.case.conversationId,
-        correlationId: input.correlationId,
-        currentState,
-        context,
-        gateway: instrumentedGateway,
-        text: input.text,
-      });
-      log.info(
-        { workflowType: aggregate.case.workflowType, stateBefore, outcome: outcome.type },
-        "paso del motor de workflow ejecutado",
-      );
+    const definition = engine.getDefinition(aggregate.case.workflowType);
+    const waitingStep = definition?.waitingSteps?.[currentState];
 
-      if (outcome.type !== "CONTINUE") {
-        break;
+    // §13: si estamos en un WaitingStep y hay mensaje del usuario, evaluar entities.
+    if (waitingStep && input.text !== undefined) {
+      // Si el paso pide "answer", el texto del usuario ES la respuesta.
+      // Algunos modelos devuelven answer:true/boolean; forzamos el string.
+      if (waitingStep.requireAll?.includes("answer") && input.text.trim()) {
+        const current = entities.answer;
+        if (typeof current !== "string" || current.trim() === "") {
+          entities = { ...entities, answer: input.text.trim() };
+        }
       }
-      currentState = outcome.nextState;
-      context = outcome.context;
+
+      const missing = missingRequiredFields(waitingStep, entities);
+      if (missing.length > 0) {
+        const nextContext = bumpWaitingAttempts(context, missing);
+        const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
+        const max = maxAttemptsOf(waitingStep);
+        log.info(
+          { currentState, missing, attempts, max },
+          "WaitingStep: datos incompletos",
+        );
+
+        if (attempts >= max) {
+          outcome = {
+            type: "ESCALATED",
+            reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
+            context: nextContext,
+          };
+        } else {
+          outcome = {
+            type: "WAITING_USER",
+            nextState: currentState,
+            context: nextContext,
+          };
+        }
+      } else {
+        context = clearWaitingMeta(context);
+        log.info({ currentState, entities }, "WaitingStep: datos completos, avanzando");
+      }
+    }
+
+    if (!outcome) {
+      for (let step = 0; step < MAX_STEPS_PER_RUN; step += 1) {
+        const stateBefore = currentState;
+        outcome = await engine.step(aggregate.case.workflowType, {
+          caseId: aggregate.case.id,
+          conversationId: aggregate.case.conversationId,
+          correlationId: input.correlationId,
+          currentState,
+          context,
+          gateway: instrumentedGateway,
+          text: input.text,
+          entities,
+        });
+        log.info(
+          { workflowType: aggregate.case.workflowType, stateBefore, outcome: outcome.type },
+          "paso del motor de workflow ejecutado",
+        );
+
+        if (outcome.type !== "CONTINUE") {
+          break;
+        }
+        currentState = outcome.nextState;
+        context = outcome.context;
+        // Tras el primer paso, entities ya se consumieron.
+        entities = {};
+      }
     }
 
     if (!outcome) {
       throw new Error(`El motor no produjo ningun resultado para el caso ${input.caseId}`);
     }
 
-    const definition = engine.getDefinition(aggregate.case.workflowType);
     const expiresAt = definition
       ? new Date(Date.now() + definition.expirationHours * 60 * 60 * 1000)
       : aggregate.case.expiresAt;
@@ -110,7 +159,11 @@ export class AdvanceCaseUseCase {
         currentState: outcome.nextState,
         expiresAt,
       });
-      await caseRepo.appendEvent(aggregate.case.id, "WAITING_USER", { nextState: outcome.nextState });
+      await caseRepo.appendEvent(aggregate.case.id, "WAITING_USER", {
+        nextState: outcome.nextState,
+        missingFields: getEngineMeta(outcome.context).missingFields ?? null,
+        waitingAttempts: getEngineMeta(outcome.context).waitingAttempts ?? 0,
+      });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
       log.info({ status: "WAITING_USER", currentState: outcome.nextState }, "caso a la espera del usuario");
       return { case: result.case, outcome };
@@ -155,7 +208,6 @@ export class AdvanceCaseUseCase {
       return { case: result.case, outcome };
     }
 
-    // outcome.type === "CONTINUE": se agoto MAX_STEPS_PER_RUN sin estabilizar.
     log.warn(
       { workflowType: aggregate.case.workflowType, maxSteps: MAX_STEPS_PER_RUN },
       "se agoto el limite de pasos del motor sin llegar a un estado estable",

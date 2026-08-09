@@ -24,14 +24,21 @@ type InterpretMessageInput = {
   messageId: string;
   text: string;                              // ya normalizado: transcrito/con datos de OCR fusionados si aplicaba
   conversationSnapshot: {
-    activeCase?: { workflowType: string; pendingQuestion?: string };
+    activeCase?: {
+      workflowType: string;
+      pendingQuestion?: string;
+      // qué debe extraer el modelo para este paso puntual (02_STATE_MACHINE.md §13) — no es una lista fija global,
+      // cambia por paso/workflow. El modelo extrae SOLO lo que se le pide aquí, nada más.
+      requireAll?: string[];
+      requireAny?: string[];
+    };
   };
 };
 
 type Interpretation = {
   type: "NEW_INTENT" | "CONTINUE" | "ANSWER" | "CHANGE_TOPIC" | "CONFIRM" | "DENY" | "CANCEL" | "REQUEST_HUMAN" | "UNCLEAR";
   intent: string;                            // 'support.internet' | 'billing.record_payment' | ...
-  entities: Record<string, unknown>;         // validado/tipado por caso de uso consumidor, no genérico más allá de este borde
+  entities: Record<string, unknown>;         // solo las claves de requireAll/requireAny que el modelo pudo identificar
   confidence: number;
 };
 
@@ -39,7 +46,8 @@ type ComposeReplyInput = {
   caseId: string;
   workflowType: string;
   stepOutcome: { action: string; status: "COMPLETED" | "FAILED" | "WAITING_USER"; result?: Record<string, unknown> };
-  templateHint?: string;                     // plantilla base cuando el paso ya define una (02_STATE_MACHINE.md §12); el LLM solo naturaliza, no decide contenido
+  templateHint?: string;                     // plantilla base cuando el paso ya define una (02_STATE_MACHINE.md §13); el LLM solo naturaliza, no decide contenido
+  missingFields?: string[];                  // cuando se re-pregunta por datos incompletos (02_STATE_MACHINE.md §13) — para que la respuesta sea específica ("no pude leer el número de comprobante") en vez de repetir la pregunta completa
 };
 ```
 

@@ -1,33 +1,12 @@
 import type { CaseContext } from "../../../domain/contexts/case-context";
 import type { SupportInternetContext } from "../../../domain/contexts/support-internet.context";
-import type { WorkflowDefinition, WorkflowStateHandler, WorkflowStepInput } from "../workflow-definition";
+import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
 /**
- * docs/spec/02_STATE_MACHINE.md §3 — flujo de referencia:
- *
- *   VALIDATE_CLIENT --cliente validado--> CHECK_BALANCE
- *   VALIDATE_CLIENT --faltan datos--> WAITING_USER_CLIENT --usuario responde--> VALIDATE_CLIENT
- *   CHECK_BALANCE --tiene deuda--> RESPOND_DEBT --> COMPLETED
- *   CHECK_BALANCE --sin deuda--> DIAGNOSTIC
- *   DIAGNOSTIC --necesita info--> WAITING_USER_DIAGNOSTIC --usuario responde--> DIAGNOSTIC (nunca vuelve a VALIDATE_CLIENT/CHECK_BALANCE)
- *   DIAGNOSTIC --resuelto--> COMPLETED
- *   DIAGNOSTIC --no resoluble--> ESCALATED
- *
- * WAITING_USER_CLIENT/WAITING_USER_DIAGNOSTIC reusan el handler del estado
- * "activo" correspondiente: retomar nunca reinicia el workflow (regla dura
- * de docs/spec/02_STATE_MACHINE.md §2), simplemente se re-ejecuta el mismo
- * paso con el contexto ya actualizado por la respuesta del usuario.
+ * docs/spec/02_STATE_MACHINE.md §3 + §13 — SUPPORT_INTERNET con WaitingSteps.
  */
 
-// Formas de `result` confirmadas contra los workflows reales de n8n
-// (docs/spec/04_N8N_WORKFLOW_SPEC.md §11 — fixtures de prueba por accion).
-//
-// Anti-Corruption Layer (01_DATA_MODEL.md §5, docs/skills/design-patterns-backend.md):
-// `find-client-contract` devuelve los datos tecnicos anidados bajo
-// `contracts[].router.{sector, olt_name, pon, serial}` (snake_case) y puede
-// devolver mas de un contrato — el handler `validateClient` de abajo es quien
-// traduce esa forma externa al `SupportInternetContext.contract` interno
-// (camelCase), nunca el dominio trabaja con la forma cruda de n8n.
 type ValidateClientContractResult = {
   id: string;
   name: string;
@@ -50,7 +29,6 @@ type CheckBalanceOutput = {
 type DiagnosticOutput = {
   status: "WAITING_USER" | "COMPLETED" | "ESCALATED";
   question?: string;
-  /** Codigo de diagnostico final cuando `status === "COMPLETED"` (ej. "ONU_UNREACHABLE"). */
   diagnostic?: string;
 };
 
@@ -61,49 +39,83 @@ function requireSupportInternetContext(context: CaseContext): SupportInternetCon
   return context.data;
 }
 
-function withContext(data: SupportInternetContext): CaseContext {
-  return { workflowType: "SUPPORT_INTERNET", data };
+function withContext(data: SupportInternetContext, base?: CaseContext): CaseContext {
+  return {
+    workflowType: "SUPPORT_INTERNET",
+    data,
+    _engine: base?._engine,
+  };
 }
 
-const validateClient: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
-  const data = requireSupportInternetContext(context);
+const validateClient: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+  entities,
+}) => {
+  let data = requireSupportInternetContext(context);
 
-  // Campo real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `id`, no `nationalId`.
+  // Fusionar entities del WaitingStep (nationalId) antes de llamar a n8n.
+  const nationalIdFromEntities =
+    typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
+  if (nationalIdFromEntities) {
+    data = {
+      ...data,
+      client: {
+        nationalId: nationalIdFromEntities,
+        fullName: data.client?.fullName ?? "",
+      },
+    };
+  }
+
+  if (!data.client?.nationalId) {
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
+
   const result = await gateway.executeAction({
     action: "VALIDATE_CLIENT",
     caseId,
     conversationId,
     correlationId,
-    input: { id: data.client?.nationalId ?? null },
+    input: { id: data.client.nationalId },
   });
 
   if (!result.success) {
-    return { type: "ESCALATED", reason: result.error.message, context };
+    return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
   }
 
   const output = result.result as ValidateClientOutput;
 
   if (!output.found || output.contracts.length === 0) {
-    // No es un error de transporte (04_N8N_WORKFLOW_SPEC.md §11): re-pregunta
-    // la cedula en vez de escalar directo a un humano por un posible typo.
-    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context };
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
 
-  // TODO(post-Etapa 4): multiples contratos requieren desambiguacion por
-  // direccion/nombre (01_DATA_MODEL.md §5) — el flujo de conversacion todavia
-  // no recolecta ese dato del cliente, asi que se escala en vez de adivinar
-  // cual contrato es el correcto.
   if (output.contracts.length > 1) {
-    return {
-      type: "ESCALATED",
-      reason: "Se encontro mas de un contrato para la cedula, requiere verificacion manual",
-      context,
-    };
+    const pendingContracts = output.contracts.map((c) => ({
+      id: c.id,
+      name: c.name,
+      address: c.address,
+      sector: c.router.sector,
+      oltName: c.router.olt_name,
+      pon: c.router.pon,
+      serial: c.router.serial,
+    }));
+    const nextData: SupportInternetContext = { ...data, pendingContracts };
+    const waiting = resetWaitingAttempts(
+      withContext(nextData, context),
+      "WAITING_USER_DISAMBIGUATE",
+    );
+    return { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context: waiting };
   }
 
   const found = output.contracts[0]!;
   const nextData: SupportInternetContext = {
     ...data,
+    pendingContracts: undefined,
     client: { nationalId: found.id, fullName: found.name },
     contract: {
       id: found.id,
@@ -113,13 +125,59 @@ const validateClient: WorkflowStateHandler = async ({ caseId, conversationId, co
       serial: found.router.serial,
     },
   };
-  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData) };
+  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+};
+
+const disambiguateContract: WorkflowStateHandler = async ({ context, entities }) => {
+  const data = requireSupportInternetContext(context);
+  const pending = data.pendingContracts ?? [];
+  if (pending.length === 0) {
+    return {
+      type: "ESCALATED",
+      reason: "No hay contratos pendientes para desambiguar",
+      context,
+    };
+  }
+
+  const address =
+    typeof entities?.address === "string" ? entities.address.trim().toLowerCase() : "";
+  const fullName =
+    typeof entities?.fullName === "string" ? entities.fullName.trim().toLowerCase() : "";
+
+  const matched = pending.find((c) => {
+    if (fullName && c.name.toLowerCase().includes(fullName)) return true;
+    if (address && (c.address ?? "").toLowerCase().includes(address)) return true;
+    return false;
+  });
+
+  if (!matched) {
+    // Sin match: el evaluator §13 ya debio haber pedido reintento; si llegamos
+    // aqui con entities incompletas, re-preguntar.
+    const waiting = resetWaitingAttempts(context, "WAITING_USER_DISAMBIGUATE");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context: waiting };
+  }
+
+  const nextData: SupportInternetContext = {
+    ...data,
+    pendingContracts: undefined,
+    client: {
+      nationalId: data.client?.nationalId ?? matched.id,
+      fullName: matched.name,
+    },
+    contract: {
+      id: matched.id,
+      sector: matched.sector,
+      oltName: matched.oltName,
+      pon: matched.pon,
+      serial: matched.serial,
+    },
+  };
+  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
 };
 
 const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
   const data = requireSupportInternetContext(context);
 
-  // Campo real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `id`, no `nationalId`.
   const result = await gateway.executeAction({
     action: "CHECK_BALANCE",
     caseId,
@@ -139,9 +197,9 @@ const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, corr
   };
 
   if (output.hasDebt) {
-    return { type: "CONTINUE", nextState: "RESPOND_DEBT", context: withContext(nextData) };
+    return { type: "CONTINUE", nextState: "RESPOND_DEBT", context: withContext(nextData, context) };
   }
-  return { type: "CONTINUE", nextState: "DIAGNOSTIC", context: withContext(nextData) };
+  return { type: "CONTINUE", nextState: "DIAGNOSTIC", context: withContext(nextData, context) };
 };
 
 const respondDebt: WorkflowStateHandler = async ({ context }) => {
@@ -156,18 +214,18 @@ const diagnostic: WorkflowStateHandler = async ({
   context,
   gateway,
   text,
+  entities,
 }) => {
   const data = requireSupportInternetContext(context);
   const isContinuation = currentState === "WAITING_USER_DIAGNOSTIC";
   const action = isContinuation ? "CONTINUE_DIAGNOSTIC" : "DIAGNOSTIC";
 
-  // Nombres de campo confirmados contra el workflow real de n8n
-  // (docs/spec/04_N8N_WORKFLOW_SPEC.md §7.1/7.2) — snake_case hacia n8n
-  // (`olt_name`, no `oltName`, aunque el dominio interno SI use camelCase,
-  // ver 01_DATA_MODEL.md §4). CONTINUE_DIAGNOSTIC reenvia el mensaje crudo
-  // del cliente tal cual, nunca una version reinterpretada por la IA.
+  const answerFromEntities =
+    typeof entities?.answer === "string" ? entities.answer.trim() : "";
+  const message = isContinuation ? answerFromEntities || text || "" : undefined;
+
   const input = isContinuation
-    ? { conversationId, message: text ?? "" }
+    ? { conversationId, message: message ?? "" }
     : {
         sector: data.contract?.sector ?? null,
         olt_name: data.contract?.oltName ?? null,
@@ -188,9 +246,6 @@ const diagnostic: WorkflowStateHandler = async ({
     return { type: "ESCALATED", reason: result.error.message, context };
   }
 
-  // Shape real confirmado (04_N8N_WORKFLOW_SPEC.md §11): `status` +
-  // `question` (WAITING_USER) o `diagnostic` (COMPLETED) — no `resolved`/
-  // `unresolvable`/`result` como se asumia antes de probar contra fixtures reales.
   const output = result.result as DiagnosticOutput;
 
   if (output.status === "WAITING_USER") {
@@ -198,7 +253,11 @@ const diagnostic: WorkflowStateHandler = async ({
       ...data,
       diagnostic: { status: "PENDING", lastQuestion: output.question },
     };
-    return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: withContext(nextData) };
+    const waiting = resetWaitingAttempts(
+      withContext(nextData, context),
+      "WAITING_USER_DIAGNOSTIC",
+    );
+    return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: waiting };
   }
 
   if (output.status === "COMPLETED") {
@@ -206,11 +265,9 @@ const diagnostic: WorkflowStateHandler = async ({
       ...data,
       diagnostic: { status: "RESOLVED", result: output.diagnostic },
     };
-    return { type: "COMPLETED", context: withContext(nextData) };
+    return { type: "COMPLETED", context: withContext(nextData, context) };
   }
 
-  // status === "ESCALATED" u otro valor no reconocido: nunca se deja el caso
-  // sin ruta de salida (AGENTS.md — "todo error no recuperable tiene una ruta definida").
   const nextData: SupportInternetContext = {
     ...data,
     diagnostic: { status: "UNRESOLVABLE", result: output.diagnostic },
@@ -218,7 +275,7 @@ const diagnostic: WorkflowStateHandler = async ({
   return {
     type: "ESCALATED",
     reason: "Diagnostico no resoluble automaticamente",
-    context: withContext(nextData),
+    context: withContext(nextData, context),
   };
 };
 
@@ -226,28 +283,45 @@ export const supportInternetWorkflow: WorkflowDefinition = {
   workflowType: "SUPPORT_INTERNET",
   initialState: "VALIDATE_CLIENT",
   expirationHours: 24,
+  waitingSteps: {
+    WAITING_USER_CLIENT: {
+      pendingQuestion: "Para ayudarte con tu servicio de internet, ¿me confirmas tu número de cédula?",
+      requireAll: ["nationalId"],
+      maxAttempts: 2,
+    },
+    WAITING_USER_DISAMBIGUATE: {
+      pendingQuestion:
+        "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
+      requireAny: ["address", "fullName"],
+      maxAttempts: 2,
+    },
+    WAITING_USER_DIAGNOSTIC: {
+      pendingQuestion: "{{question}}",
+      requireAll: ["answer"],
+      maxAttempts: 2,
+    },
+  },
   replyTemplates: {
     WAITING_USER_CLIENT:
       "Para ayudarte con tu servicio de internet, ¿me confirmas tu número de cédula?",
-    WAITING_USER_DIAGNOSTIC:
-      "{{question}}",
+    WAITING_USER_DISAMBIGUATE:
+      "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
+    WAITING_USER_DIAGNOSTIC: "{{question}}",
     RESPOND_DEBT:
       "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
     COMPLETED:
       "Listo: revisamos tu conexión. {{diagnostic}} Si el problema continúa, escríbenos de nuevo.",
     ESCALATED:
       "Escalamos tu caso a un asesor de soporte. En breve te contactarán para ayudarte.",
-    ACTIVE:
-      "Seguimos trabajando en tu caso de internet. Un momento por favor.",
+    ACTIVE: "Seguimos trabajando en tu caso de internet. Un momento por favor.",
   },
   states: {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,
+    WAITING_USER_DISAMBIGUATE: disambiguateContract,
     CHECK_BALANCE: checkBalance,
     RESPOND_DEBT: respondDebt,
     DIAGNOSTIC: diagnostic,
     WAITING_USER_DIAGNOSTIC: diagnostic,
   },
 };
-
-export type { WorkflowStepInput as SupportInternetStepInput };

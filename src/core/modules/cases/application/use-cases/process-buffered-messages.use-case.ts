@@ -60,12 +60,29 @@ export class ProcessBufferedMessagesUseCase {
     const { text, receiptEntities, primaryMessageId } = await this.prepareText(messages, log);
     const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
 
+    const waitingStep = activeAggregate
+      ? this.deps.engine.getDefinition(activeAggregate.case.workflowType)?.waitingSteps?.[
+          activeAggregate.workflowInstance.currentState
+        ]
+      : undefined;
+
     let interpretation = await this.deps.interpretationProvider.interpretMessage({
       correlationId,
       conversationId,
       messageId: primaryMessageId,
       text,
-      activeCase: activeAggregate ? { workflowType: activeAggregate.case.workflowType } : null,
+      activeCase: activeAggregate
+        ? {
+            workflowType: activeAggregate.case.workflowType,
+            pendingQuestion:
+              waitingStep?.pendingQuestion ??
+              (activeAggregate.case.context.workflowType === "SUPPORT_INTERNET"
+                ? activeAggregate.case.context.data.diagnostic?.lastQuestion
+                : undefined),
+            requireAll: waitingStep?.requireAll,
+            requireAny: waitingStep?.requireAny,
+          }
+        : null,
     });
 
     // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
@@ -76,6 +93,11 @@ export class ProcessBufferedMessagesUseCase {
         entities: { ...interpretation.entities, ...receiptEntities },
         confidence: Math.max(interpretation.confidence, 0.95),
       };
+    } else if (Object.keys(receiptEntities).length > 0) {
+      interpretation = {
+        ...interpretation,
+        entities: { ...interpretation.entities, ...receiptEntities },
+      };
     }
 
     log.info(
@@ -84,7 +106,9 @@ export class ProcessBufferedMessagesUseCase {
         interpretationType: interpretation.type,
         intent: interpretation.intent,
         confidence: interpretation.confidence,
+        entities: interpretation.entities,
         activeWorkflowType: activeAggregate?.case.workflowType ?? null,
+        requireAll: waitingStep?.requireAll ?? null,
       },
       "unidad de trabajo interpretada",
     );
@@ -137,6 +161,7 @@ export class ProcessBufferedMessagesUseCase {
         caseId: decision.caseId,
         correlationId,
         text,
+        entities: interpretation.entities,
       });
       await this.sendCustomerReply({
         conversationId,
@@ -196,6 +221,7 @@ export class ProcessBufferedMessagesUseCase {
       caseId: targetCaseId,
       correlationId,
       text,
+      entities: interpretation.entities,
     });
     await this.sendCustomerReply({
       conversationId,
@@ -327,6 +353,7 @@ export class ProcessBufferedMessagesUseCase {
         result: resolved.resultVars,
       },
       templateHint: resolved.templateHint,
+      missingFields: resolved.missingFields,
     });
 
     const conversation = await this.deps.conversationRepo.findById(input.conversationId);

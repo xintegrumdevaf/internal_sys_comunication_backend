@@ -1,6 +1,5 @@
 /**
  * Contrato interno de IA (docs/spec/03_API_CONTRACT.md §A).
- * No es HTTP: adapters intercambiables (Ollama por defecto).
  */
 
 export type InterpretationType =
@@ -16,7 +15,6 @@ export type InterpretationType =
 
 export type Interpretation = {
   type: InterpretationType;
-  /** 'support.internet' | 'billing.record_payment' | ... */
   intent: string;
   entities: Record<string, unknown>;
   confidence: number;
@@ -28,7 +26,12 @@ export type InterpretMessageInput = {
   messageId: string;
   text: string;
   conversationSnapshot: {
-    activeCase?: { workflowType: string; pendingQuestion?: string };
+    activeCase?: {
+      workflowType: string;
+      pendingQuestion?: string;
+      requireAll?: string[];
+      requireAny?: string[];
+    };
   };
 };
 
@@ -41,6 +44,7 @@ export type ComposeReplyInput = {
     result?: Record<string, unknown>;
   };
   templateHint?: string;
+  missingFields?: string[];
 };
 
 export type ReceiptData = {

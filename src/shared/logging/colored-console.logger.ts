@@ -35,6 +35,12 @@ function scopeColor(scope: string): string {
       return ANSI.magenta;
     case "cases":
       return ANSI.yellow;
+    case "ai":
+      return ANSI.magenta;
+    case "escalation":
+      return ANSI.red;
+    case "realtime":
+      return ANSI.cyan;
     case "n8n":
       return ANSI.cyan;
     default:
@@ -98,15 +104,21 @@ export class ColoredConsoleLogger implements Logger {
       "durationMs",
       "waPhone",
       "body",
+      "textPreview",
       "conversationId",
       "messageId",
       "isDuplicate",
       "messageCount",
       "decision",
       "intent",
+      "type",
+      "confidence",
       "interpretationType",
       "action",
       "caseId",
+      "err",
+      "timeoutMs",
+      "attempt",
     ];
     const details: string[] = [];
     for (const key of interestingKeys) {

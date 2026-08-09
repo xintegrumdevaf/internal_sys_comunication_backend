@@ -135,6 +135,12 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
       const interpretationProvider = new QueuedInterpretationProvider([
         { type: "NEW_INTENT", intent: "support.internet", entities: {}, confidence: 0.9 },
+        {
+          type: "ANSWER",
+          intent: "support.internet",
+          entities: { nationalId: "1" },
+          confidence: 0.95,
+        },
         { type: "CHANGE_TOPIC", intent: "billing.balance", entities: {}, confidence: 0.9 },
         { type: "CHANGE_TOPIC", intent: "support.internet", entities: {}, confidence: 0.9 },
       ]);
@@ -173,6 +179,18 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       expect(whatsappSender.sent.length).toBeGreaterThanOrEqual(1);
       expect(whatsappSender.sent[0]!.body).not.toMatch(/^\s*\{/);
 
+      // §13: responde cédula → avanza VALIDATE_CLIENT → CHECK_BALANCE → DIAGNOSTIC
+      await useCase.execute({
+        conversationId: conversation.id,
+        correlationId: "corr-1b",
+        messages: textMessages(conversation.id, messageRepo, "1"),
+      });
+      const supportAfterCedula = (await caseRepo.findById(supportCase.id))!.case;
+      expect(supportAfterCedula.status).toBe("WAITING_USER");
+      if (supportAfterCedula.context.workflowType === "SUPPORT_INTERNET") {
+        expect(supportAfterCedula.context.data.client?.nationalId).toBe("1");
+      }
+
       await useCase.execute({
         conversationId: conversation.id,
         correlationId: "corr-2",
@@ -181,7 +199,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
       const supportAfterPause = (await caseRepo.findById(supportCase.id))!.case;
       expect(supportAfterPause.status).toBe("PAUSED");
-      expect(supportAfterPause.context).toEqual(supportCase.context);
+      expect(supportAfterPause.context).toEqual(supportAfterCedula.context);
 
       const allCasesAfterStep2 = await caseRepo.listByConversation(conversation.id);
       const billingCase = allCasesAfterStep2.find((c) => c.workflowType === "BILLING_BALANCE");

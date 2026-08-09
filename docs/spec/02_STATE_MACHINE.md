@@ -140,3 +140,32 @@ Cuando la interpretación de IA es `UNCLEAR` de forma sostenida (reintento agota
 - `interpretMessage(...)` → `{ type, intent, entities, confidence }`, usado por `CaseArbitrationService`/el motor para decidir transición.
 - `composeReply(...)` → texto final para el cliente. Cada estado de un `WorkflowDefinition` declara **o bien** un template estático con variables del `context` (preferido: determinista, fácil de auditar, cumple "el cliente nunca ve detalles internos" sin depender de que el LLM se comporte) **o bien** delega en `composeReply` para redactar naturalmente a partir del resultado estructurado del paso — nunca al revés (el LLM nunca decide *qué* decir, solo puede ayudar a decir *cómo* decirlo de forma más natural sobre una plantilla/resultado ya decidido por la API).
 
+## 13. Datos esperados por paso, reintentos, y escalación por información insuficiente
+
+Este es el mecanismo general (no un parche por campo): **cada estado que entra en `WAITING_USER` declara explícitamente qué datos necesita para continuar**, y ese contrato (no la IA) es lo que decide cuándo hay suficiente información y cuándo hay que escalar.
+
+```ts
+type WaitingStep = {
+  pendingQuestion: string;         // texto exacto que se le muestra al cliente (o template hint para composeReply)
+  requireAll?: string[];           // TODAS estas claves de "entities" deben estar presentes para continuar
+  requireAny?: string[];           // BASTA con UNA de estas claves (ej. desambiguar contrato: nombre O dirección O serial)
+  maxAttempts?: number;            // default 2
+};
+```
+
+Ejemplos:
+- `VALIDATE_CLIENT` (primera pregunta): `{ pendingQuestion: "¿podrías confirmar tu número de cédula?", requireAll: ["nationalId"] }`.
+- `VALIDATE_CLIENT` (múltiples contratos encontrados, desambiguar): `{ pendingQuestion: "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?", requireAny: ["address", "fullName"] }`.
+- `RECORD_PAYMENT` (esperando comprobante): `{ pendingQuestion: "Envíame la foto de tu comprobante de pago", requireAll: ["amount", "reference"] }` — los valores de `entities` en este caso salen de `extractReceiptData` (`03_API_CONTRACT.md` §A.2), fusionados al mismo `entities` que evalúa este contrato, no por un camino aparte.
+
+**Flujo de decisión** (en el motor de workflow, no en el prompt):
+1. Interpretación llega con `type=ANSWER`/`CONTINUE` sobre el paso actual.
+2. Si `requireAll` está definido: ¿están **todas** esas claves presentes en `entities` (no vacías)? Si sí → continuar con esos valores como `input` de la siguiente acción.
+3. Si `requireAny` está definido: ¿está **al menos una**? Si sí → continuar.
+4. Si falta algo: incrementar `case.context.waitingAttempts` (contador por paso, se resetea al entrar a un `WaitingStep` nuevo).
+   - `waitingAttempts < maxAttempts` → volver a preguntar, idealmente solo por lo que falta (`composeReply` recibe `missingFields` para redactar algo como "no logré leer el número de comprobante, ¿me lo confirmas?" en vez de repetir la pregunta completa desde cero — evita el bug de "pregunta idéntica 3 veces").
+   - `waitingAttempts >= maxAttempts` → `ESCALATED` (`automation.enabled=false`), con `reason: "No fue posible obtener {campos faltantes} tras {N} intentos"` en el resumen estructurado (`03_API_CONTRACT.md` §D) — el departamento de la escalación es el mismo del `Case` (`§9` de este documento), no uno genérico.
+
+**La IA nunca decide escalar.** Solo reporta qué pudo extraer (`entities`) y con qué confianza; el motor es quien compara eso contra `requireAll`/`requireAny` y decide reintentar o escalar. Esto es deliberado: si dejáramos que el LLM decidiera "no puedo procesar esto, escalo", perderíamos determinismo justo en el punto más importante (cuándo un cliente necesita un humano).
+
+

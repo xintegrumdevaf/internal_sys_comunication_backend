@@ -22,8 +22,40 @@ function buildUseCase(gateway: N8nGatewayFake) {
   return { caseRepo, workflowExecutionRepo, conversationRepo, engine, advanceCase };
 }
 
-describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
-  it("inicia el workflow y encadena pasos sin intervencion del usuario hasta necesitar un dato", async () => {
+describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () => {
+  it("sin nationalId se detiene en WAITING_USER_CLIENT antes de llamar n8n", async () => {
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } }],
+        },
+      }),
+    });
+    const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
+
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-1" });
+
+    expect(result.case.status).toBe("WAITING_USER");
+    const aggregate = await caseRepo.findById(created.id);
+    expect(aggregate?.workflowInstance.currentState).toBe("WAITING_USER_CLIENT");
+    expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
+  });
+
+  it("con nationalId encadena pasos hasta WAITING_USER_DIAGNOSTIC", async () => {
     const gateway = new N8nGatewayFake({
       VALIDATE_CLIENT: () => ({
         success: true,
@@ -49,7 +81,13 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
     });
     await conversationRepo.setActiveCaseId(conversation.id, created.id);
 
-    const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-1" });
+    await advanceCase.execute({ caseId: created.id, correlationId: "corr-1a" });
+    const result = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-1b",
+      text: "1",
+      entities: { nationalId: "1" },
+    });
 
     expect(result.case.status).toBe("WAITING_USER");
     const aggregate = await caseRepo.findById(created.id);
@@ -88,7 +126,12 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
       expiresAt: created.expiresAt,
     });
 
-    const result = await advanceCase.execute({ caseId: created.id, correlationId: "corr-2" });
+    const result = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-2",
+      text: "si, ya esta encendida",
+      entities: { answer: "si, ya esta encendida" },
+    });
 
     expect(result.case.status).toBe("COMPLETED");
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
@@ -99,7 +142,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
     expect(conversationAfter?.activeCaseId).toBeNull();
   });
 
-  it("completa un caso sin deuda y con diagnostico resuelto de una sola pasada", async () => {
+  it("completa un caso sin deuda y con diagnostico resuelto cuando hay nationalId", async () => {
     const gateway = new N8nGatewayFake({
       VALIDATE_CLIENT: () => ({
         success: true,
@@ -119,7 +162,10 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2)", () => {
       conversationId: conversation.id,
       workflowType: "SUPPORT_INTERNET",
       departmentId: null,
-      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      context: {
+        workflowType: "SUPPORT_INTERNET",
+        data: { client: { nationalId: "1", fullName: "" } },
+      },
       initialState: "VALIDATE_CLIENT",
       expiresAt: new Date(Date.now() + 86_400_000),
     });

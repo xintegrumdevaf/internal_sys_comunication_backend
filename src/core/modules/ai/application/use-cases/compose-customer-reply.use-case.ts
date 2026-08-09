@@ -17,7 +17,7 @@ export class ComposeCustomerReplyUseCase {
           templateHint: rendered,
         });
         const text = naturalized.trim();
-        if (text.length > 0 && !looksLikeRawJson(text)) {
+        if (text.length > 0 && !looksLikeRawJson(text) && includesRequiredFacts(text, input.stepOutcome.result)) {
           return text;
         }
       } catch {
@@ -54,4 +54,25 @@ function looksLikeRawJson(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+function formatAmount(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value.toFixed(2);
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n.toFixed(2);
+  }
+  return null;
+}
+
+/**
+ * Si el resultado trae un monto (debt/amount), el mensaje naturalizado debe
+ * incluirlo; si el LLM lo omitió, se descarta y se usa la plantilla renderizada.
+ */
+function includesRequiredFacts(text: string, result: Record<string, unknown> | undefined): boolean {
+  if (!result) return true;
+  const debt = formatAmount(result.debt) ?? formatAmount(result.amount);
+  if (!debt) return true;
+  const normalizedText = text.replace(/,/g, ".");
+  return normalizedText.includes(debt) || normalizedText.includes(String(result.debt ?? result.amount));
 }

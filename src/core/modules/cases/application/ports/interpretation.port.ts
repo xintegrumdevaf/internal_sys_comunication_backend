@@ -1,10 +1,5 @@
 /**
- * Subconjunto de `AIProviderPort` (docs/spec/03_API_CONTRACT.md §A) que
- * necesita `CaseArbitrationService` para decidir una transicion. La
- * implementacion real (`OllamaAdapter`) llega en la Etapa 5; en la Etapa 2
- * los tests de arbitraje/motor construyen `Interpretation` a mano
- * ("interpretacion sintetica", docs/spec/05_BUILD_PLAN.md Etapa 2) sin pasar
- * por ningun adapter.
+ * Subconjunto de AIProviderPort para cases (docs/spec/03_API_CONTRACT.md §A).
  */
 export type InterpretationType =
   | "NEW_INTENT"
@@ -19,7 +14,6 @@ export type InterpretationType =
 
 export type Interpretation = {
   type: InterpretationType;
-  /** 'support.internet' | 'billing.record_payment' | ... */
   intent: string;
   entities: Record<string, unknown>;
   confidence: number;
@@ -29,9 +23,13 @@ export type InterpretMessageInput = {
   correlationId: string;
   conversationId: string;
   text: string;
-  /** Id del mensaje principal del lote (opcional; Etapa 5 lo propaga a AIProviderPort). */
   messageId?: string;
-  activeCase: { workflowType: string; pendingQuestion?: string } | null;
+  activeCase: {
+    workflowType: string;
+    pendingQuestion?: string;
+    requireAll?: string[];
+    requireAny?: string[];
+  } | null;
 };
 
 export interface InterpretationPort {

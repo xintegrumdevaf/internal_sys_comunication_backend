@@ -97,10 +97,12 @@ isp-platform/
 │           │   │   ├── workflow-execution.entity.ts
 │           │   │   ├── workflow-event.entity.ts
 │           │   │   ├── automation-state.entity.ts
+│           │   │   ├── intent-catalog.ts             ← fuente única del mapeo intent→workflowType, 06_AI_PROMPTS.md §2
 │           │   │   └── contexts/
 │           │   │       ├── support-internet.context.ts
 │           │   │       ├── billing-balance.context.ts
-│           │   │       └── sales-packages.context.ts
+│           │   │       ├── sales-packages.context.ts
+│           │   │       └── general-inquiry.context.ts
 │           │   ├── application/
 │           │   │   ├── ports/
 │           │   │   │   ├── case.repository.port.ts
@@ -108,7 +110,7 @@ isp-platform/
 │           │   │   │   └── n8n-gateway.port.ts        ← solo executeAction(...), sin interpretación
 │           │   │   ├── engine/
 │           │   │   │   ├── workflow-engine.ts            ← motor declarativo (02_STATE_MACHINE.md)
-│           │   │   │   ├── workflow-definition.ts         ← tipo base de definición (incluye reply templates, §12)
+│           │   │   │   ├── workflow-definition.ts         ← tipo base de definición (incluye WaitingStep: requireAll/requireAny/maxAttempts, §13)
 │           │   │   │   └── definitions/
 │           │   │   │       ├── support-internet.workflow.ts
 │           │   │   │       ├── billing-balance.workflow.ts  (Etapa 8)
@@ -136,6 +138,9 @@ isp-platform/
 │           │   ├── application/
 │           │   │   ├── ports/
 │           │   │   │   └── ai-provider.port.ts    ← interpretMessage, composeReply, transcribeAudio, extractReceiptData
+│           │   │   ├── prompts/                    ← normativo, 06_AI_PROMPTS.md — NO es detalle de infraestructura
+│           │   │   │   ├── interpret-message.prompt.ts
+│           │   │   │   └── compose-reply.prompt.ts
 │           │   │   └── use-cases/
 │           │   │       ├── interpret-message.use-case.ts
 │           │   │       ├── compose-customer-reply.use-case.ts
@@ -143,7 +148,7 @@ isp-platform/
 │           │   │       └── extract-receipt-data.use-case.ts
 │           │   └── infrastructure/
 │           │       └── ollama/
-│           │           └── ollama-adapter.ts       ← implementa ai-provider.port.ts; base para futuros OpenAI/OpenRouter/Claude adapters
+│           │           └── ollama-adapter.ts       ← implementa ai-provider.port.ts; recibe el prompt ya armado, no conoce su contenido; base para futuros OpenAI/OpenRouter/Claude adapters
 │           │
 │           ├── ingestion/             ← Etapa 2, buffer/debounce (antes vivía en n8n como Data Table + Wait)
 │           │   └── application/

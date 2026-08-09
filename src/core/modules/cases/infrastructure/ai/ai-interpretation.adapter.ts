@@ -8,8 +8,7 @@ import type {
 } from "../../application/ports/interpretation.port";
 
 /**
- * Puente hexagonal: `cases` depende de InterpretationPort; la IA real vive
- * en el modulo `ai` (AIProviderPort). No importa Ollama desde cases.
+ * Puente hexagonal cases → ai (InterpretationPort → AIProviderPort).
  */
 export class AiInterpretationAdapter implements InterpretationPort {
   private readonly interpretUseCase: InterpretMessageUseCase;
@@ -29,6 +28,8 @@ export class AiInterpretationAdapter implements InterpretationPort {
           ? {
               workflowType: input.activeCase.workflowType,
               pendingQuestion: input.activeCase.pendingQuestion,
+              requireAll: input.activeCase.requireAll,
+              requireAny: input.activeCase.requireAny,
             }
           : undefined,
       },

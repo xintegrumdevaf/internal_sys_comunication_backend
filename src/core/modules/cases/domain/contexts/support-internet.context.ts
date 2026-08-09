@@ -4,6 +4,16 @@
  * se leen de aqui una vez resueltos (§5 de ese documento) — ninguna accion
  * hacia n8n se los pide al LLM.
  */
+export type SupportInternetPendingContract = {
+  id: string;
+  name: string;
+  address?: string;
+  sector: string;
+  oltName: string;
+  pon: string;
+  serial: string;
+};
+
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
   contract?: {
@@ -15,6 +25,8 @@ export type SupportInternetContext = {
     /** Modelo de router — el workflow real `find-client-contract` no lo devuelve hoy. */
     router?: string;
   };
+  /** Contratos candidatos cuando VALIDATE_CLIENT devuelve mas de uno (§13 desambiguar). */
+  pendingContracts?: SupportInternetPendingContract[];
   balance?: { hasDebt: boolean; amount?: number };
-  diagnostic?: { status: string; lastQuestion?: string; result?: string };
+  diagnostic?: { status: string; lastQuestion?: string; result?: string; answer?: string };
 };

@@ -264,6 +264,8 @@ type CaseContext =
 
 Cada `WorkflowDefinition` (ver `02_STATE_MACHINE.md`) declara su tipo de contexto asociado; el motor nunca manipula `context` como objeto genérico fuera de la frontera de (de)serialización.
 
+**`waitingAttempts`**: no es parte del contexto tipado de negocio de arriba — es un contador de control del motor (`02_STATE_MACHINE.md` §13), se guarda junto al contexto (ej. `case.context._engine.waitingAttempts`) y se resetea cada vez que el `Case` entra a un `WaitingStep` nuevo. No lo mezcles con los campos de negocio (`client`, `contract`, etc.) — es metadata del motor, no un dato que la IA deba ver ni tocar.
+
 ## 5. Datos técnicos del cliente — regla de origen
 
 Campos como `sector`, `oltName`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por la acción `VALIDATE_CLIENT` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2, `04_N8N_WORKFLOW_SPEC.md` §3.1).

@@ -51,13 +51,16 @@ Orden de construcción para un agente de IA que construye el sistema **desde cer
 
 ## Etapa 5 — Interpretación y composición de respuesta (`AIProviderPort`, en código)
 - `AIProviderPort` (`03_API_CONTRACT.md` §A) + `OllamaAdapter` como implementación por defecto — estructura pensada para poder agregar `OpenAIAdapter`/`OpenRouterAdapter`/`ClaudeAdapter` después sin tocar el resto del sistema (Dependency Inversion, `docs/skills/solid-principles.md`).
+- Prompts de `docs/spec/06_AI_PROMPTS.md` §3/§4, ubicados en `application/prompts/` (no hardcodeados dentro del adapter) — copiar el texto tal cual, no parafrasear ni "mejorar" sin señalarlo.
+- `intent-catalog.ts` (`06_AI_PROMPTS.md` §2) como fuente única del mapeo `intent → workflowType`, consumida tanto por el prompt como por `department-resolver.service.ts` de la Etapa 2.
+- Validación con Zod del JSON devuelto contra el tipo `Interpretation` antes de usarlo en cualquier caso de uso; JSON inválido o que no matchea el schema se trata como `AI_ERROR` con un reintento (`06_AI_PROMPTS.md` §5) — usar el modo de salida JSON forzada del proveedor (`format: "json"` en Ollama) además del prompt.
 - Casos de uso: `InterpretMessageUseCase`, `ComposeCustomerReplyUseCase`, `TranscribeAudioUseCase`, `ExtractReceiptDataUseCase`.
 - `CaseArbitrationService` de la Etapa 2 conectado a la interpretación real (ya no al fake).
 - Cada estado de `SupportInternetWorkflow` (Etapa 2) define su plantilla de respuesta o delega en `composeReply` (`02_STATE_MACHINE.md` §12).
 - Umbrales de confianza configurables por `intent` (`02_STATE_MACHINE.md` §7).
 - Timeout de la llamada al provider tratado como `AI_ERROR`.
 
-**Aceptación (tests):** intención válida activa/continúa el caso correcto; intención desconocida pide aclaración; baja confianza con caso activo continúa ese caso; cambio de intención pausa y activa el nuevo; `REQUEST_HUMAN` escala directo; imagen de comprobante con datos completos en `entities` dispara `RECORD_PAYMENT` sin preguntar nada al cliente; el mensaje final enviado al cliente nunca es el JSON crudo del resultado de un paso.
+**Aceptación (tests):** intención válida activa/continúa el caso correcto; intención desconocida pide aclaración; baja confianza con caso activo continúa ese caso; cambio de intención pausa y activa el nuevo; `REQUEST_HUMAN` escala directo; imagen de comprobante con datos completos en `entities` dispara `RECORD_PAYMENT` sin preguntar nada al cliente; el mensaje final enviado al cliente nunca es el JSON crudo del resultado de un paso; JSON malformado del modelo se reintenta una vez y luego cae a `UNCLEAR`/escalación, no rompe el flujo.
 
 ## Etapa 6 — Escalación, automatización y triage
 - `EscalationService`: política de errores (`02_STATE_MACHINE.md` §5) → `ESCALATED` + `automation.enabled=false` + resumen estructurado (`03_API_CONTRACT.md` §D) generado desde `workflow_execution`/`workflow_event`.
@@ -74,6 +77,8 @@ Orden de construcción para un agente de IA que construye el sistema **desde cer
 
 ## Etapa 8 — Workflows adicionales
 - Repetir el patrón de Etapa 2/4 para `BILLING_BALANCE` y `SALES_PACKAGES`, reutilizando el mismo motor declarativo y el mismo `AIProviderPort` (agregar una definición nueva no debe tocar el engine ni el port).
+
+**Nota (no es un bug si lo ves antes de esta etapa):** hasta que `BILLING_BALANCE` esté construido, cualquier mensaje que la IA clasifique con `intent="billing.*"` no tiene `WorkflowDefinition` registrada → cae en `UNSUPPORTED` (`02_STATE_MACHINE.md` §5) → escala directo a un humano. Es el comportamiento esperado del sistema con un workflow todavía no implementado, no una falla de interpretación — no lo confundas con el bug de §"caso conocido de falla" de `06_AI_PROMPTS.md` §6, que es sobre extracción de entidades, no sobre workflows faltantes.
 
 ## Etapa 9 — Endurecimiento
 - Revisar si alguna acción (típicamente `DIAGNOSTIC`) necesita en la práctica pasar de síncrona a asíncrona por tiempos reales de respuesta — solo si se confirma con datos de producción, no por anticipado (confirmado en esta versión: todo responde rápido).

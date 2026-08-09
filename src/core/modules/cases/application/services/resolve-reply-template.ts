@@ -8,6 +8,20 @@ const REQUEST_HUMAN_TEMPLATE =
   "Te conectamos con un asesor humano. En breve te atenderán por este mismo chat.";
 
 /**
+ * Formatea montos para plantillas/compose (ej. 45.5 → "45.50").
+ */
+export function formatDebtAmount(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toFixed(2);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n.toFixed(2);
+  }
+  return null;
+}
+
+/**
  * Resuelve la plantilla de negocio (02_STATE_MACHINE.md §12) a partir del
  * outcome del motor o de una decision de arbitraje (CLARIFY / REQUEST_HUMAN).
  */
@@ -16,7 +30,7 @@ export function resolveReplyTemplate(input: {
   outcome?: WorkflowStepOutcome;
   decision?: "CLARIFY" | "REQUEST_HUMAN";
   context?: CaseContext;
-}): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string } {
+}): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string; missingFields?: string[] } {
   if (input.decision === "CLARIFY") {
     return {
       templateHint: CLARIFY_TEMPLATE,
@@ -54,23 +68,37 @@ export function resolveReplyTemplate(input: {
     const diagnostic = (contextData.diagnostic ?? {}) as Record<string, unknown>;
     const question =
       typeof diagnostic.lastQuestion === "string" ? diagnostic.lastQuestion : "";
+    const waitingDecl = input.definition?.waitingSteps?.[outcome.nextState];
+    const missingFields = input.context?._engine?.missingFields;
+    let templateHint =
+      waitingDecl?.pendingQuestion ??
+      templates[outcome.nextState] ??
+      templates.WAITING_USER_CLIENT ??
+      CLARIFY_TEMPLATE;
+    if (missingFields && missingFields.length > 0) {
+      templateHint = `No pude obtener ${missingFields.join(" y ")}. ${templateHint}`;
+    }
     return {
-      templateHint: templates[outcome.nextState] ?? templates.WAITING_USER_CLIENT ?? CLARIFY_TEMPLATE,
+      templateHint,
       resultVars: { ...flattenContext(contextData), question },
       action: outcome.nextState,
       status: "WAITING_USER",
+      missingFields,
     };
   }
 
   if (outcome.type === "COMPLETED") {
-    const diagnostic = (contextData.diagnostic ?? {}) as Record<string, unknown>;
     const balance = (contextData.balance ?? {}) as Record<string, unknown>;
+    // Cierre por deuda (RESPOND_DEBT): no usar plantilla de diagnostico.
+    if (balance.hasDebt === true) {
+      return debtReply(templates, contextData, balance, "COMPLETED");
+    }
+    const diagnostic = (contextData.diagnostic ?? {}) as Record<string, unknown>;
     return {
       templateHint: templates.COMPLETED ?? "Tu solicitud fue atendida.",
       resultVars: {
         ...flattenContext(contextData),
         diagnostic: diagnostic.result ?? "",
-        debt: balance.amount ?? "",
       },
       action: "COMPLETED",
       status: "COMPLETED",
@@ -88,13 +116,8 @@ export function resolveReplyTemplate(input: {
 
   // CONTINUE leftover / ACTIVE
   const balance = (contextData.balance ?? {}) as Record<string, unknown>;
-  if (balance.hasDebt === true) {
-    return {
-      templateHint: templates.RESPOND_DEBT ?? templates.ACTIVE ?? "Hay un saldo pendiente en tu cuenta.",
-      resultVars: { ...flattenContext(contextData), debt: balance.amount ?? "" },
-      action: outcome.nextState,
-      status: "ACTIVE",
-    };
+  if (balance.hasDebt === true || outcome.nextState === "RESPOND_DEBT") {
+    return debtReply(templates, contextData, balance, "ACTIVE");
   }
 
   return {
@@ -102,6 +125,29 @@ export function resolveReplyTemplate(input: {
     resultVars: flattenContext(contextData),
     action: outcome.nextState,
     status: "ACTIVE",
+  };
+}
+
+function debtReply(
+  templates: Record<string, string>,
+  contextData: Record<string, unknown>,
+  balance: Record<string, unknown>,
+  status: string,
+): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string } {
+  const debtFormatted = formatDebtAmount(balance.amount) ?? formatDebtAmount(balance.debt);
+  const debtValue = debtFormatted ?? "";
+  return {
+    templateHint:
+      templates.RESPOND_DEBT ??
+      "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
+    resultVars: {
+      ...flattenContext(contextData),
+      hasDebt: true,
+      debt: debtValue,
+      amount: balance.amount ?? balance.debt,
+    },
+    action: "RESPOND_DEBT",
+    status,
   };
 }
 

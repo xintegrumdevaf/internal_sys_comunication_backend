@@ -26,7 +26,7 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["ollama"]).default("ollama"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:4b"),
-  AI_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  AI_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
 
   // Buffer/debounce de mensajes por conversacion (docs/spec/02_STATE_MACHINE.md §12).
   MESSAGE_DEBOUNCE_MS: z.coerce.number().int().positive().default(4500),
