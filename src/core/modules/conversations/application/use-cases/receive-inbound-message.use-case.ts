@@ -49,6 +49,9 @@ export class ReceiveInboundMessageUseCase {
 
   async execute(input: ReceiveInboundMessageInput): Promise<ReceiveInboundMessageResult> {
     const { conversationRepo, messageRepo, redisClient, inboundBuffer, logger } = this.deps;
+    const log = input.correlationId
+      ? logger.child({ correlationId: input.correlationId })
+      : logger;
 
     const conversation = await withConversationLock(redisClient, input.waPhone, () =>
       conversationRepo.findOrCreateByWaPhone(input.waPhone),
@@ -65,9 +68,8 @@ export class ReceiveInboundMessageUseCase {
       filename: input.filename ?? null,
     });
 
-    logger.info(
+    log.info(
       {
-        correlationId: input.correlationId,
         conversationId: conversation.id,
         messageId: message.id,
         externalId: input.externalId,

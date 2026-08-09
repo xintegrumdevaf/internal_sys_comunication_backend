@@ -133,6 +133,7 @@ export class ProcessBufferedMessagesUseCase {
         const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
           caseId: decision.caseId,
           reason: "REQUEST_HUMAN",
+          correlationId,
         });
         await this.deliverFixedReply({
           conversationId,

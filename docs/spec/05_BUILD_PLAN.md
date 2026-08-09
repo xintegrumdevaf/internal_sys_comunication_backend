@@ -85,6 +85,9 @@ Orden de construcción para un agente de IA que construye el sistema **desde cer
 - Observabilidad: `correlationId` propagado end-to-end en logs estructurados (mensaje → buffer → interpretación → acción → transición de caso → respuesta).
 - Pruebas de carga de concurrencia (ráfaga de mensajes) y de reintentos end-to-end con `idempotencyKey`.
 
+**Aceptación (tests en `test/hardening/etapa-9-acceptance.test.ts`):** logs del pipeline de un batch comparten el mismo `correlationId`; una ráfaga en la misma conversación produce un solo flush; dos conversaciones en paralelo no cruzan flushes; un reintento HTTP retryable reusa la misma `idempotencyKey` y deja una sola `workflow_execution` COMPLETED.
+
+**Decisión documentada:** `DIAGNOSTIC` / `CONTINUE_DIAGNOSTIC` permanecen síncronos (contrato `03`/`04`); no se introduce cola async hasta medir latencias reales en producción.
 ---
 
 ## Regla de trabajo para cada etapa

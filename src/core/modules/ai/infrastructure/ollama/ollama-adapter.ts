@@ -39,12 +39,17 @@ export class OllamaAdapter implements AIProviderPort {
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
+    const log = this.logger.child({
+      correlationId: input.correlationId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+    });
     const { system, user } = buildInterpretMessagePrompt(input);
     const started = Date.now();
     try {
       const raw = await this.chat(system, user, { jsonMode: true, temperature: 0.2 });
       const interpretation = parseInterpretation(raw);
-      this.logger.info(
+      log.info(
         {
           durationMs: Date.now() - started,
           type: interpretation.type,
@@ -56,7 +61,7 @@ export class OllamaAdapter implements AIProviderPort {
       );
       return interpretation;
     } catch (error) {
-      this.logger.warn(
+      log.warn(
         {
           durationMs: Date.now() - started,
           err: error instanceof Error ? error.message : String(error),

@@ -38,7 +38,12 @@ export class EscalationService {
     caseId: string;
     reason: string;
     priority?: "low" | "normal" | "high" | "urgent";
+    correlationId?: string;
   }): Promise<Escalation> {
+    const log = this.deps.logger.child({
+      correlationId: input.correlationId,
+      caseId: input.caseId,
+    });
     const existing = await this.deps.escalationRepo.findByCaseId(input.caseId);
     if (existing) return existing;
 
@@ -50,7 +55,9 @@ export class EscalationService {
     await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
       reason: input.reason,
     });
-    return this.persistEscalation(aggregate.case, input.reason, input.priority ?? "normal");
+    const escalation = await this.persistEscalation(aggregate.case, input.reason, input.priority ?? "normal");
+    log.info({ escalationId: escalation.id, reason: input.reason }, "registro de escalacion persistido");
+    return escalation;
   }
 
   /**
@@ -61,8 +68,13 @@ export class EscalationService {
     caseId: string;
     reason: string;
     priority?: "low" | "normal" | "high" | "urgent";
+    correlationId?: string;
   }): Promise<{ case: Case; escalation: Escalation; customerMessage: string }> {
-    const { caseRepo, escalationRepo, conversationRepo, logger } = this.deps;
+    const { caseRepo, escalationRepo, conversationRepo } = this.deps;
+    const log = this.deps.logger.child({
+      correlationId: input.correlationId,
+      caseId: input.caseId,
+    });
     const aggregate = await caseRepo.findById(input.caseId);
     if (!aggregate) {
       throw notFound(`Caso ${input.caseId} no encontrado`);
@@ -101,8 +113,8 @@ export class EscalationService {
       : null;
     const customerMessage = businessReplyForReason(input.reason, department?.slug ?? null);
 
-    logger.warn(
-      { caseId: caseEntity.id, escalationId: escalation.id, reason: input.reason },
+    log.warn(
+      { escalationId: escalation.id, reason: input.reason },
       "caso escalado con resumen estructurado",
     );
     this.deps.broadcaster?.publish({
@@ -124,7 +136,11 @@ export class EscalationService {
     reason: string;
     correlationId: string;
   }): Promise<{ case: Case; escalation: Escalation; customerMessage: string }> {
-    const { caseRepo, conversationRepo, logger } = this.deps;
+    const { caseRepo, conversationRepo } = this.deps;
+    const log = this.deps.logger.child({
+      correlationId: input.correlationId,
+      conversationId: input.conversationId,
+    });
 
     const aggregate = await caseRepo.create({
       conversationId: input.conversationId,
@@ -156,7 +172,7 @@ export class EscalationService {
     const escalation = await this.persistEscalation(transitioned.case, input.reason, "normal");
     const customerMessage = businessReplyForReason("TRIAGE");
 
-    logger.info(
+    log.info(
       { caseId: transitioned.case.id, escalationId: escalation.id },
       "caso enviado al pool de triage",
     );

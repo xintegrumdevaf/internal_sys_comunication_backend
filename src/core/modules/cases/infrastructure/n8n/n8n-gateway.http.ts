@@ -44,6 +44,11 @@ export class N8nGatewayHttp implements N8nGatewayPort {
       };
     }
 
+    const log = this.logger.child({
+      correlationId: params.correlationId,
+      action: params.action,
+      caseId: params.caseId,
+    });
     const maxAttempts = entry.maxRetries + 1;
     let lastResult: N8nActionResult | undefined;
 
@@ -54,13 +59,13 @@ export class N8nGatewayHttp implements N8nGatewayPort {
       }
 
       const backoffMs = INITIAL_BACKOFF_MS * 2 ** (attempt - 1);
-      this.logger.warn(
+      log.warn(
         {
-          action: params.action,
           attempt,
           maxAttempts,
           backoffMs,
           errorType: lastResult.error.type,
+          idempotencyKey: params.idempotencyKey,
         },
         "reintentando llamada a n8n tras error retryable",
       );

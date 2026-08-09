@@ -205,6 +205,7 @@ export class AdvanceCaseUseCase {
         await this.deps.escalationService.ensureEscalationRecord({
           caseId: result.case.id,
           reason: outcome.reason,
+          correlationId: input.correlationId,
         });
       }
       log.warn({ status: "ESCALATED", reason: outcome.reason }, "caso escalado, automatizacion deshabilitada");

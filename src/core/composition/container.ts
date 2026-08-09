@@ -258,7 +258,19 @@ export function createContainer(): Container {
   const inboundBuffer = new InboundBufferService(
     redisClient,
     async (conversationId, messageIds) => {
+      // El correlationId de negocio post-debounce es el del batch (Etapa 9):
+      // el webhook puede haber generado varios IDs inbound distintos; la unidad
+      // de trabajo agrupa mensajes y traza con un id nuevo documentado aqui.
       const batchCorrelationId = randomUUID();
+      ingestionLogger.info(
+        {
+          correlationId: batchCorrelationId,
+          conversationId,
+          messageIds,
+          messageCount: messageIds.length,
+        },
+        "flush del buffer inbound: unidad de trabajo lista",
+      );
       const messages = await messageRepo.findByIds(messageIds);
       await processBufferedMessages.execute({
         conversationId,
