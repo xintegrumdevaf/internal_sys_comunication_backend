@@ -240,14 +240,24 @@ type SupportInternetContext = {
 };
 
 type BillingBalanceContext = {
+  /** balance = consulta de saldo; record_payment = registrar comprobante. */
+  purpose?: "balance" | "record_payment";
   client?: { nationalId: string; fullName: string };
   invoices?: { id: string; amount: number; dueDate: string }[];
+  balance?: { hasDebt: boolean; amount?: number };
+  payment?: {
+    amount?: number;
+    reference?: string;
+    date?: string;
+    status?: "PENDING" | "RECORDED" | "REJECTED";
+  };
 };
 
 type SalesPackagesContext = {
+  purpose?: "packages" | "upgrade";
   requestedSpeed?: string;
   currentPlan?: { name: string; speed: string };
-  offer?: { planId: string; price: number };
+  offer?: { planId: string; name?: string; price: number; speed?: string; answer?: string };
 };
 
 type GeneralInquiryContext = {

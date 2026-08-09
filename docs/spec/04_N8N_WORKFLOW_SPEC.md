@@ -114,12 +114,13 @@ INSERT INTO n8n_workflow_registry (action, category, url, description) VALUES
   ('CHECK_BALANCE',         'case_action',  'https://localhost:5678/webhook/check-balance',         'Consulta saldo/deuda'),
   ('DIAGNOSTIC',            'case_action',  'https://localhost:5678/webhook/do-diagnostic',         'Diagnóstico técnico inicial (proxy a microservicio propio)'),
   ('CONTINUE_DIAGNOSTIC',   'case_action',  'https://localhost:5678/webhook/continue-diagnostic',   'Continúa diagnóstico con el mensaje textual del usuario'),
-  ('RECORD_PAYMENT',        'case_action',  'https://localhost:5678/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey) — pendiente de construir'),
-  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://localhost:5678/webhook/apply-bank-account',    'Solicitud de cuenta bancaria asociada — pendiente de construir'),
-  ('QUERY_KNOWLEDGE_BASE',  'case_action',  'https://localhost:5678/webhook/query-knowledge-base',  'Consulta la base de conocimiento (RAG) — pendiente de construir'),
+  ('RECORD_PAYMENT',        'case_action',  'https://localhost:5678/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey)'),
+  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://localhost:5678/webhook/apply-bank-account',    'Devuelve cuentas bancarias para depósito / transferencia'),
+  ('QUERY_KNOWLEDGE_BASE',  'case_action',  'https://localhost:5678/webhook/query-knowledge-base',  'Consulta la base de conocimiento (RAG)'),
   ('UPLOAD_RAG_DOCUMENT',   'admin_action', 'https://localhost:5678/form/cargar-documentos',        'Ingesta de documentos al RAG — herramienta administrativa, ya existe');
 ```
 
+> **Estado local (2026-08-08):** Los 7 `case_action` + `UPLOAD_RAG_DOCUMENT` están construidos y activos en el n8n de `docker-compose`. URLs de producción: `http://localhost:5678/webhook/record-payment`, `…/apply-bank-account`, `…/query-knowledge-base`, y form `http://localhost:5678/form/cargar-documentos`. JSON versionado en `n8n/`. Tablas de efecto: `n8n_recorded_payments` / `n8n_bank_account_requests` (`migrations/0008_n8n_payment_bank_tables.sql`).
 ### 7.1 Ejemplo — `DIAGNOSTIC` (input en camelCase, el nodo de n8n mapea a `olt_name` al llamar al microservicio)
 ```json
 { "input": { "sector": "pomasqui", "oltName": "bicentenario", "pon": "3", "serial": "D011A66CB67C", "conversationId": "conv_456" } }
@@ -201,6 +202,18 @@ Base para probar cada workflow de forma aislada (vía curl/Postman directo al we
 // QUERY_KNOWLEDGE_BASE — sin resultado
 { "input": { "question": "¿venden televisores?" } }
 // → { "success": true, "result": { "found": false }, "error": null }
+
+// RECORD_PAYMENT — éxito (monto alineado a deuda en Sheets / sistema externo)
+{ "idempotencyKey": "case_123:RECORD_PAYMENT:hash", "input": { "nationalId": "1205500216", "amount": 30.8, "reference": "REF-OK-001", "date": "2026-08-08" } }
+// → { "success": true, "result": { "recorded": true, "amount": 30.8, "reference": "REF-OK-001", "nationalId": "1205500216", "date": "2026-08-08" }, "error": null }
+
+// RECORD_PAYMENT — monto no coincide
+{ "idempotencyKey": "case_123:RECORD_PAYMENT:hash2", "input": { "nationalId": "1205500216", "amount": 1, "reference": "BAD" } }
+// → { "success": false, "result": null, "error": { "type": "BUSINESS_ERROR", "message": "Monto no coincide…", "retryable": false } }
+
+// APPLY_BANK_ACCOUNT — éxito
+{ "idempotencyKey": "case_123:APPLY_BANK_ACCOUNT:hash", "input": { "nationalId": "1205500216" } }
+// → { "success": true, "result": { "accounts": [{ "bank": "…", "accountType": "…", "accountNumber": "…", "holder": "…", "taxId": "…" }], "nationalId": "1205500216" }, "error": null }
 
 // Header inválido (aplica a cualquier acción)
 // sin X-Internal-Api-Key o con valor incorrecto

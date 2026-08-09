@@ -1,0 +1,291 @@
+{
+  "name": "record-payment",
+  "nodes": [
+    {
+      "id": "wh-rp",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "record-payment",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "if-auth-rp",
+      "name": "Auth Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "auth-rp-1",
+              "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $env.API_INTERNAL_KEY }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-unauth-rp",
+      "name": "Unauthorized Body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [440, 220],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "resp-unauth-rp",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [660, 220],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseCode": 401 }
+      }
+    },
+    {
+      "id": "pg-lookup-rp",
+      "name": "Lookup Idempotency",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [440, -40],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": { "id": "Wii5eNTA7a51xCts", "name": "Postgres RAG" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT idempotency_key, result FROM n8n_recorded_payments WHERE idempotency_key = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').item.json.body.idempotencyKey || '' }}"
+        }
+      }
+    },
+    {
+      "id": "if-need-rp",
+      "name": "Need New Record?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [660, -40],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "need-rp-1",
+              "leftValue": "={{ $json.idempotency_key }}",
+              "operator": { "operation": "empty", "type": "string" },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sheets-rp",
+      "name": "Get balance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [880, -120],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XuIQR46gmyrhWYxR",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "operation": "read",
+        "resource": "sheet",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "1Eln1zxs-us-WCZGdUE7uIrsHoEIUv3cpIuFPiCm0ec4"
+        },
+        "sheetName": { "__rl": true, "mode": "list", "value": "gid=0" },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Identificacion",
+              "lookupValue": "={{ $('Webhook').item.json.body.input.nationalId || $('Webhook').item.json.body.input.id || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "code-rp",
+      "name": "Validate And Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -120],
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst input = body.input || {};\nconst amount = Number(input.amount);\nconst reference = String(input.reference || '').trim();\nconst nationalId = String(input.nationalId || input.id || '').trim();\nconst date = input.date != null ? String(input.date) : null;\nconst idempotencyKey = String(body.idempotencyKey || '').trim();\n\nif (!idempotencyKey) {\n  return [{ json: { success: false, result: null, error: { type: 'VALIDATION_ERROR', message: 'idempotencyKey requerido', retryable: false }, _insert: false } }];\n}\nif (!Number.isFinite(amount) || amount <= 0 || !reference) {\n  return [{ json: { success: false, result: null, error: { type: 'BUSINESS_ERROR', message: 'Comprobante invalido: monto o referencia faltante', retryable: false }, _insert: false } }];\n}\n\nconst sheetItems = $input.all().map((i) => i.json).filter((j) => j && !j.error);\nconst row = sheetItems.find((j) => j.Identificacion || j.DEBE !== undefined);\nif (row) {\n  const debtRaw = (row.DEBE ?? '').toString().trim();\n  const debt = parseFloat((debtRaw || '0').replace(',', '.'));\n  if (debtRaw !== '' && Number.isFinite(debt) && Math.abs(debt - amount) > 0.05) {\n    return [{ json: { success: false, result: null, error: { type: 'BUSINESS_ERROR', message: `Monto no coincide con la deuda registrada (${debt})`, retryable: false }, _insert: false } }];\n  }\n}\n\nconst result = { recorded: true, amount, reference, nationalId: nationalId || null, date };\nreturn [{ json: { success: true, result, error: null, _insert: true, idempotencyKey, nationalId, amount, reference, date, resultJson: JSON.stringify(result) } }];"
+      }
+    },
+    {
+      "id": "if-insert-rp",
+      "name": "Should Insert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1320, -120],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ins-rp-1",
+              "leftValue": "={{ $json._insert }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pg-insert-rp",
+      "name": "Insert Payment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1540, -200],
+      "credentials": {
+        "postgres": { "id": "Wii5eNTA7a51xCts", "name": "Postgres RAG" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO n8n_recorded_payments (idempotency_key, national_id, amount, reference, payment_date, result)\nVALUES ($1, NULLIF($2, ''), $3::numeric, $4, NULLIF($5, ''), $6::jsonb)\nON CONFLICT (idempotency_key) DO UPDATE SET result = EXCLUDED.result\nRETURNING result;",
+        "options": {
+          "queryReplacement": "={{ $json.idempotencyKey }},={{ $json.nationalId || '' }},={{ $json.amount }},={{ $json.reference }},={{ $json.date || '' }},={{ $json.resultJson }}"
+        }
+      }
+    },
+    {
+      "id": "set-ok-rp",
+      "name": "Format Recorded",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [1760, -200],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { success: true, result: typeof $json.result === 'string' ? JSON.parse($json.result) : ($json.result || $('Validate And Build').item.json.result), error: null } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "set-err-rp",
+      "name": "Format Cached Or Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [1100, 40],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ (() => {\n  const j = $json;\n  if (j.idempotency_key && j.result) {\n    const r = typeof j.result === 'string' ? JSON.parse(j.result) : j.result;\n    return { success: true, result: r, error: null };\n  }\n  if (j.success === false) return { success: false, result: null, error: j.error };\n  if (j.success === true && j.result) return { success: true, result: j.result, error: null };\n  return { success: false, result: null, error: { type: 'EXTERNAL_SERVICE_ERROR', message: 'No se pudo registrar el pago', retryable: true } };\n})() }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "resp-ok-rp",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1980, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Auth Valid", "type": "main", "index": 0 }]]
+    },
+    "Auth Valid": {
+      "main": [
+        [{ "node": "Lookup Idempotency", "type": "main", "index": 0 }],
+        [{ "node": "Unauthorized Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "Unauthorized Body": {
+      "main": [[{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]]
+    },
+    "Lookup Idempotency": {
+      "main": [[{ "node": "Need New Record?", "type": "main", "index": 0 }]]
+    },
+    "Need New Record?": {
+      "main": [
+        [{ "node": "Get balance", "type": "main", "index": 0 }],
+        [{ "node": "Format Cached Or Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get balance": {
+      "main": [[{ "node": "Validate And Build", "type": "main", "index": 0 }]]
+    },
+    "Validate And Build": {
+      "main": [[{ "node": "Should Insert?", "type": "main", "index": 0 }]]
+    },
+    "Should Insert?": {
+      "main": [
+        [{ "node": "Insert Payment", "type": "main", "index": 0 }],
+        [{ "node": "Format Cached Or Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Payment": {
+      "main": [[{ "node": "Format Recorded", "type": "main", "index": 0 }]]
+    },
+    "Format Recorded": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "Format Cached Or Error": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

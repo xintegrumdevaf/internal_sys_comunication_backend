@@ -161,7 +161,7 @@ export class ProcessBufferedMessagesUseCase {
         caseId: decision.caseId,
         correlationId,
         text,
-        entities: interpretation.entities,
+        entities: seedPurposeEntities(interpretation.intent, interpretation.entities),
       });
       await this.sendCustomerReply({
         conversationId,
@@ -210,18 +210,20 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     const targetCaseId =
-      decision.resumeCaseId ?? (await this.createCase(conversationId, decision.workflowType, log)).id;
+      decision.resumeCaseId ??
+      (await this.createCase(conversationId, decision.workflowType, interpretation.intent, log)).id;
     if (decision.resumeCaseId) {
       log.info({ caseId: targetCaseId }, "caso pausado reanudado sin reiniciar el workflow");
       await this.deps.caseRepo.appendEvent(targetCaseId, "CASE_RESUMED", {});
     }
 
     await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+    const seededEntities = seedPurposeEntities(interpretation.intent, interpretation.entities);
     const advanced = await this.deps.advanceCase.execute({
       caseId: targetCaseId,
       correlationId,
       text,
-      entities: interpretation.entities,
+      entities: seededEntities,
     });
     await this.sendCustomerReply({
       conversationId,
@@ -425,21 +427,26 @@ export class ProcessBufferedMessagesUseCase {
     log.info({ caseId: aggregate.case.id, workflowType: aggregate.case.workflowType }, "caso pausado por cambio de tema");
   }
 
-  private async createCase(conversationId: string, workflowType: string, log: Logger): Promise<Case> {
+  private async createCase(
+    conversationId: string,
+    workflowType: string,
+    intent: string,
+    log: Logger,
+  ): Promise<Case> {
     const definition = this.deps.engine.getDefinition(workflowType);
     if (!definition) {
-      // Sin definicion (Etapa 8): crear placeholder no aplica; el caller evita advance.
       throw new DomainError("UNSUPPORTED", `No hay WorkflowDefinition registrada para '${workflowType}'`);
     }
 
     const departmentId = await this.deps.departmentResolver.resolveDepartmentId(workflowType);
     const expiresAt = new Date(Date.now() + definition.expirationHours * 60 * 60 * 1000);
+    const context = seedInitialContext(workflowType, intent);
 
     const aggregate = await this.deps.caseRepo.create({
       conversationId,
       workflowType,
       departmentId,
-      context: emptyContextFor(workflowType as CaseContext["workflowType"]),
+      context,
       initialState: definition.initialState,
       expiresAt,
     });
@@ -455,4 +462,46 @@ function hasCompleteReceipt(entities: Record<string, unknown>): boolean {
     entities.reference !== undefined &&
     entities.date !== undefined
   );
+}
+
+function seedPurposeEntities(
+  intent: string,
+  entities: Record<string, unknown>,
+): Record<string, unknown> {
+  if (intent === "billing.record_payment") {
+    return { ...entities, billingPurpose: "record_payment" };
+  }
+  if (intent === "billing.balance") {
+    return { ...entities, billingPurpose: "balance" };
+  }
+  if (intent === "sales.upgrade") {
+    return { ...entities, salesPurpose: "upgrade" };
+  }
+  if (intent === "sales.packages") {
+    return { ...entities, salesPurpose: "packages" };
+  }
+  return entities;
+}
+
+function seedInitialContext(workflowType: string, intent: string): CaseContext {
+  const base = emptyContextFor(workflowType as CaseContext["workflowType"]);
+  if (base.workflowType === "BILLING_BALANCE") {
+    return {
+      ...base,
+      data: {
+        ...base.data,
+        purpose: intent === "billing.record_payment" ? "record_payment" : "balance",
+      },
+    };
+  }
+  if (base.workflowType === "SALES_PACKAGES") {
+    return {
+      ...base,
+      data: {
+        ...base.data,
+        purpose: intent === "sales.upgrade" ? "upgrade" : "packages",
+      },
+    };
+  }
+  return base;
 }

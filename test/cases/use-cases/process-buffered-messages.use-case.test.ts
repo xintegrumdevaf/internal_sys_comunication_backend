@@ -5,7 +5,8 @@ import { CaseArbitrationService } from "../../../src/core/modules/cases/applicat
 import { DepartmentResolverService } from "../../../src/core/modules/cases/application/services/department-resolver.service";
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
-import type { WorkflowDefinition } from "../../../src/core/modules/cases/application/engine/workflow-definition";
+import { billingBalanceWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
+import { salesPackagesWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/sales-packages.workflow";
 import type {
   Interpretation,
   InterpretationPort,
@@ -36,18 +37,6 @@ class QueuedInterpretationProvider implements InterpretationPort {
   }
 }
 
-const dummyBillingWorkflow: WorkflowDefinition = {
-  workflowType: "BILLING_BALANCE",
-  initialState: "COLLECT_INFO",
-  expirationHours: 24,
-  replyTemplates: {
-    COLLECT_INFO: "¿Me confirmas el monto o referencia de tu pago?",
-  },
-  states: {
-    COLLECT_INFO: async ({ context }) => ({ type: "WAITING_USER", nextState: "COLLECT_INFO", context }),
-  },
-};
-
 function buildScenario() {
   const caseRepo = new CaseRepositoryFake();
   const conversationRepo = new ConversationRepositoryFake();
@@ -58,7 +47,11 @@ function buildScenario() {
   departmentRepo.seed({ slug: "billing", name: "Facturacion" });
 
   const workflowExecutionRepo = new WorkflowExecutionRepositoryFake();
-  const engine = new WorkflowEngine([supportInternetWorkflow, dummyBillingWorkflow]);
+  const engine = new WorkflowEngine([
+    supportInternetWorkflow,
+    billingBalanceWorkflow,
+    salesPackagesWorkflow,
+  ]);
   const gateway = new N8nGatewayFake({
     VALIDATE_CLIENT: () => ({
       success: true,

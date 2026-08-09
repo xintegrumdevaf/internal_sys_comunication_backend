@@ -1,0 +1,149 @@
+{
+  "name": "apply-bank-account",
+  "nodes": [
+    {
+      "id": "wh-ba",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "apply-bank-account",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "if-auth-ba",
+      "name": "Auth Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "auth-ba-1",
+              "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $env.API_INTERNAL_KEY }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-unauth-ba",
+      "name": "Unauthorized Body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [440, 200],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "resp-unauth-ba",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [660, 200],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseCode": 401 }
+      }
+    },
+    {
+      "id": "code-ba",
+      "name": "Build Bank Accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, -40],
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst input = body.input || {};\nconst nationalId = String(input.nationalId || input.id || '').trim() || null;\nconst idempotencyKey = String(body.idempotencyKey || '').trim() || null;\n\nconst accounts = [\n  {\n    bank: 'Banco Pichincha',\n    accountType: 'Corriente',\n    accountNumber: '2100123456',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  },\n  {\n    bank: 'Banco Guayaquil',\n    accountType: 'Ahorros',\n    accountNumber: '0012345678',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  }\n];\n\nconst result = { accounts, nationalId };\nreturn [{ json: {\n  success: true,\n  result,\n  error: null,\n  nationalId,\n  idempotencyKey,\n  resultJson: JSON.stringify(result)\n} }];"
+      }
+    },
+    {
+      "id": "pg-log-ba",
+      "name": "Log Request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [660, -40],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": { "id": "Wii5eNTA7a51xCts", "name": "Postgres RAG" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO n8n_bank_account_requests (idempotency_key, national_id, result)\nVALUES (NULLIF($1, ''), NULLIF($2, ''), $3::jsonb)\nON CONFLICT (idempotency_key) DO UPDATE SET result = EXCLUDED.result\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ $json.idempotencyKey || '' }},={{ $json.nationalId || '' }},={{ $json.resultJson }}"
+        }
+      }
+    },
+    {
+      "id": "set-ok-ba",
+      "name": "Format Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [880, -40],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { success: true, result: $('Build Bank Accounts').item.json.result, error: null } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "resp-ok-ba",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1100, -40],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Auth Valid", "type": "main", "index": 0 }]]
+    },
+    "Auth Valid": {
+      "main": [
+        [{ "node": "Build Bank Accounts", "type": "main", "index": 0 }],
+        [{ "node": "Unauthorized Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "Unauthorized Body": {
+      "main": [[{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]]
+    },
+    "Build Bank Accounts": {
+      "main": [[{ "node": "Log Request", "type": "main", "index": 0 }]]
+    },
+    "Log Request": {
+      "main": [[{ "node": "Format Success", "type": "main", "index": 0 }]]
+    },
+    "Format Success": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

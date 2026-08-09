@@ -88,21 +88,7 @@ export function resolveReplyTemplate(input: {
   }
 
   if (outcome.type === "COMPLETED") {
-    const balance = (contextData.balance ?? {}) as Record<string, unknown>;
-    // Cierre por deuda (RESPOND_DEBT): no usar plantilla de diagnostico.
-    if (balance.hasDebt === true) {
-      return debtReply(templates, contextData, balance, "COMPLETED");
-    }
-    const diagnostic = (contextData.diagnostic ?? {}) as Record<string, unknown>;
-    return {
-      templateHint: templates.COMPLETED ?? "Tu solicitud fue atendida.",
-      resultVars: {
-        ...flattenContext(contextData),
-        diagnostic: diagnostic.result ?? "",
-      },
-      action: "COMPLETED",
-      status: "COMPLETED",
-    };
+    return resolveCompleted(templates, contextData);
   }
 
   if (outcome.type === "ESCALATED") {
@@ -116,8 +102,23 @@ export function resolveReplyTemplate(input: {
 
   // CONTINUE leftover / ACTIVE
   const balance = (contextData.balance ?? {}) as Record<string, unknown>;
+  if (templates.RESPOND_BALANCE && balance.hasDebt !== undefined) {
+    return balanceInquiryReply(templates, contextData, balance, "ACTIVE");
+  }
   if (balance.hasDebt === true || outcome.nextState === "RESPOND_DEBT") {
     return debtReply(templates, contextData, balance, "ACTIVE");
+  }
+  if (outcome.nextState === "RESPOND_OFFER" || outcome.nextState === "RESPOND_BALANCE") {
+    const offer = (contextData.offer ?? {}) as Record<string, unknown>;
+    return {
+      templateHint: templates[outcome.nextState] ?? templates.ACTIVE ?? "Seguimos con tu caso.",
+      resultVars: {
+        ...flattenContext(contextData),
+        offerAnswer: offer.answer ?? "",
+      },
+      action: outcome.nextState,
+      status: "ACTIVE",
+    };
   }
 
   return {
@@ -125,6 +126,88 @@ export function resolveReplyTemplate(input: {
     resultVars: flattenContext(contextData),
     action: outcome.nextState,
     status: "ACTIVE",
+  };
+}
+
+function resolveCompleted(
+  templates: Record<string, string>,
+  contextData: Record<string, unknown>,
+): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string } {
+  const balance = (contextData.balance ?? {}) as Record<string, unknown>;
+  const payment = (contextData.payment ?? {}) as Record<string, unknown>;
+  const offer = (contextData.offer ?? {}) as Record<string, unknown>;
+  const flat = flattenContext(contextData);
+
+  if (payment.status === "RECORDED") {
+    const amount = formatDebtAmount(payment.amount) ?? "";
+    return {
+      templateHint:
+        templates.COMPLETED ??
+        "Registramos tu pago de {{debt}} con referencia {{reference}}. Gracias.",
+      resultVars: {
+        ...flat,
+        debt: amount,
+        reference: payment.reference ?? "",
+        paymentMessage: amount
+          ? `Registramos tu pago de $${amount} (ref. ${String(payment.reference ?? "")}).`
+          : "Registramos tu pago.",
+      },
+      action: "RECORD_PAYMENT",
+      status: "COMPLETED",
+    };
+  }
+
+  // BILLING consulta de saldo (plantilla RESPOND_BALANCE).
+  if (templates.RESPOND_BALANCE && balance.hasDebt !== undefined) {
+    return balanceInquiryReply(templates, contextData, balance, "COMPLETED");
+  }
+
+  // SUPPORT cierre por deuda.
+  if (balance.hasDebt === true && templates.RESPOND_DEBT) {
+    return debtReply(templates, contextData, balance, "COMPLETED");
+  }
+
+  return {
+    templateHint: templates.COMPLETED ?? "Tu solicitud fue atendida.",
+    resultVars: {
+      ...flat,
+      diagnostic:
+        typeof (contextData.diagnostic as { result?: string } | undefined)?.result === "string"
+          ? (contextData.diagnostic as { result: string }).result
+          : "",
+      offerAnswer: typeof offer.answer === "string" ? offer.answer : "",
+      paymentMessage: "",
+    },
+    action: "COMPLETED",
+    status: "COMPLETED",
+  };
+}
+
+function balanceInquiryReply(
+  templates: Record<string, string>,
+  contextData: Record<string, unknown>,
+  balance: Record<string, unknown>,
+  status: string,
+): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string } {
+  const debtFormatted = formatDebtAmount(balance.amount) ?? formatDebtAmount(balance.debt);
+  const debtValue = debtFormatted ?? (balance.hasDebt ? "" : "0.00");
+  const balanceMessage =
+    balance.hasDebt === true
+      ? "Tienes un saldo pendiente; cuando pagues podemos ayudarte con lo que necesites."
+      : "No tienes saldo pendiente en este momento.";
+  return {
+    templateHint:
+      templates.RESPOND_BALANCE ??
+      "Tu saldo actual: {{debt}}. {{balanceMessage}}",
+    resultVars: {
+      ...flattenContext(contextData),
+      hasDebt: balance.hasDebt === true,
+      debt: debtValue,
+      amount: balance.amount ?? balance.debt,
+      balanceMessage,
+    },
+    action: "RESPOND_BALANCE",
+    status,
   };
 }
 

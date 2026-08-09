@@ -1,0 +1,302 @@
+import type { CaseContext } from "../../../domain/contexts/case-context";
+import type { BillingBalanceContext } from "../../../domain/contexts/billing-balance.context";
+import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
+
+/**
+ * BILLING_BALANCE (docs/spec/05_BUILD_PLAN.md Etapa 8 + §13 WaitingSteps).
+ *
+ * VALIDATE_CLIENT → CHECK_BALANCE →
+ *   purpose=balance → RESPOND_BALANCE → COMPLETED
+ *   purpose=record_payment → (entities completas) RECORD_PAYMENT | WAITING_USER_RECEIPT
+ */
+
+type ValidateClientContractResult = {
+  id: string;
+  name: string;
+  address?: string;
+  status?: string;
+  router?: { sector: string; olt_name: string; pon: string; serial: string };
+};
+
+type ValidateClientOutput = {
+  found: boolean;
+  contractNumbers: number;
+  contracts: ValidateClientContractResult[];
+};
+
+type CheckBalanceOutput = {
+  hasDebt: boolean;
+  debt?: number;
+};
+
+function requireBillingContext(context: CaseContext): BillingBalanceContext {
+  if (context.workflowType !== "BILLING_BALANCE") {
+    throw new Error(`Contexto invalido para BILLING_BALANCE: workflowType='${context.workflowType}'`);
+  }
+  return context.data;
+}
+
+function withContext(data: BillingBalanceContext, base?: CaseContext): CaseContext {
+  return {
+    workflowType: "BILLING_BALANCE",
+    data,
+    _engine: base?._engine,
+  };
+}
+
+function mergePaymentFromEntities(
+  data: BillingBalanceContext,
+  entities?: Record<string, unknown>,
+): BillingBalanceContext {
+  if (!entities) return data;
+  const amountRaw = entities.amount;
+  const amount =
+    typeof amountRaw === "number"
+      ? amountRaw
+      : typeof amountRaw === "string" && amountRaw.trim() !== ""
+        ? Number(amountRaw)
+        : undefined;
+  const reference =
+    typeof entities.reference === "string" ? entities.reference.trim() : undefined;
+  const date = typeof entities.date === "string" ? entities.date.trim() : undefined;
+
+  if (amount === undefined && !reference && !date) return data;
+
+  return {
+    ...data,
+    payment: {
+      ...data.payment,
+      ...(Number.isFinite(amount) ? { amount } : {}),
+      ...(reference ? { reference } : {}),
+      ...(date ? { date } : {}),
+      status: data.payment?.status ?? "PENDING",
+    },
+  };
+}
+
+function hasCompletePayment(data: BillingBalanceContext): boolean {
+  return (
+    data.payment?.amount !== undefined &&
+    Number.isFinite(data.payment.amount) &&
+    typeof data.payment.reference === "string" &&
+    data.payment.reference.trim() !== ""
+  );
+}
+
+function resolvePurpose(
+  data: BillingBalanceContext,
+  entities?: Record<string, unknown>,
+): "balance" | "record_payment" {
+  if (data.purpose === "record_payment" || data.purpose === "balance") return data.purpose;
+  if (entities?.billingPurpose === "record_payment") return "record_payment";
+  if (hasCompletePayment(mergePaymentFromEntities(data, entities))) return "record_payment";
+  return "balance";
+}
+
+const validateClient: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+  entities,
+}) => {
+  let data = requireBillingContext(context);
+  data = {
+    ...data,
+    purpose: resolvePurpose(data, entities),
+  };
+  data = mergePaymentFromEntities(data, entities);
+
+  const nationalIdFromEntities =
+    typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
+  if (nationalIdFromEntities) {
+    data = {
+      ...data,
+      client: {
+        nationalId: nationalIdFromEntities,
+        fullName: data.client?.fullName ?? "",
+      },
+    };
+  }
+
+  if (!data.client?.nationalId) {
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
+
+  const result = await gateway.executeAction({
+    action: "VALIDATE_CLIENT",
+    caseId,
+    conversationId,
+    correlationId,
+    input: { id: data.client.nationalId },
+  });
+
+  if (!result.success) {
+    return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
+  }
+
+  const output = result.result as ValidateClientOutput;
+  if (!output.found || output.contracts.length === 0) {
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
+
+  const found = output.contracts[0]!;
+  const nextData: BillingBalanceContext = {
+    ...data,
+    client: { nationalId: data.client.nationalId, fullName: found.name },
+  };
+  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+};
+
+const checkBalance: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+  entities,
+}) => {
+  let data = requireBillingContext(context);
+  data = mergePaymentFromEntities(data, entities);
+  data = { ...data, purpose: resolvePurpose(data, entities) };
+
+  const result = await gateway.executeAction({
+    action: "CHECK_BALANCE",
+    caseId,
+    conversationId,
+    correlationId,
+    input: { id: data.client?.nationalId ?? null },
+  });
+
+  if (!result.success) {
+    return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
+  }
+
+  const output = result.result as CheckBalanceOutput;
+  data = {
+    ...data,
+    balance: { hasDebt: output.hasDebt, amount: output.debt },
+    invoices:
+      output.hasDebt && output.debt !== undefined
+        ? [{ id: "current", amount: output.debt, dueDate: "" }]
+        : data.invoices,
+  };
+
+  if (data.purpose === "record_payment") {
+    if (hasCompletePayment(data)) {
+      return { type: "CONTINUE", nextState: "RECORD_PAYMENT", context: withContext(data, context) };
+    }
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_RECEIPT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context: waiting };
+  }
+
+  return { type: "CONTINUE", nextState: "RESPOND_BALANCE", context: withContext(data, context) };
+};
+
+const respondBalance: WorkflowStateHandler = async ({ context }) => {
+  return { type: "COMPLETED", context };
+};
+
+const waitingReceipt: WorkflowStateHandler = async ({ context, entities }) => {
+  let data = requireBillingContext(context);
+  data = mergePaymentFromEntities(data, entities);
+  data = { ...data, purpose: "record_payment" };
+
+  if (!hasCompletePayment(data)) {
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_RECEIPT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context: waiting };
+  }
+
+  return { type: "CONTINUE", nextState: "RECORD_PAYMENT", context: withContext(data, context) };
+};
+
+const recordPayment: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+  entities,
+}) => {
+  let data = requireBillingContext(context);
+  data = mergePaymentFromEntities(data, entities);
+
+  if (!hasCompletePayment(data)) {
+    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_RECEIPT");
+    return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context: waiting };
+  }
+
+  const result = await gateway.executeAction({
+    action: "RECORD_PAYMENT",
+    caseId,
+    conversationId,
+    correlationId,
+    input: {
+      nationalId: data.client?.nationalId ?? null,
+      amount: data.payment!.amount,
+      reference: data.payment!.reference,
+      date: data.payment?.date ?? null,
+    },
+  });
+
+  if (!result.success) {
+    const nextData: BillingBalanceContext = {
+      ...data,
+      payment: { ...data.payment, status: "REJECTED" },
+    };
+    return {
+      type: "ESCALATED",
+      reason: result.error.message,
+      context: withContext(nextData, context),
+    };
+  }
+
+  const nextData: BillingBalanceContext = {
+    ...data,
+    payment: { ...data.payment, status: "RECORDED" },
+  };
+  return { type: "COMPLETED", context: withContext(nextData, context) };
+};
+
+export const billingBalanceWorkflow: WorkflowDefinition = {
+  workflowType: "BILLING_BALANCE",
+  initialState: "VALIDATE_CLIENT",
+  expirationHours: 24,
+  waitingSteps: {
+    WAITING_USER_CLIENT: {
+      pendingQuestion: "Para consultar tu saldo, ¿me confirmas tu número de cédula?",
+      requireAll: ["nationalId"],
+      maxAttempts: 2,
+    },
+    WAITING_USER_RECEIPT: {
+      pendingQuestion:
+        "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+      requireAll: ["amount", "reference"],
+      maxAttempts: 2,
+    },
+  },
+  replyTemplates: {
+    WAITING_USER_CLIENT: "Para consultar tu saldo, ¿me confirmas tu número de cédula?",
+    WAITING_USER_RECEIPT:
+      "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+    RESPOND_BALANCE:
+      "Tu saldo actual: {{debt}}. {{balanceMessage}} Si ya pagaste, envíame el comprobante por este chat.",
+    COMPLETED:
+      "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
+    ESCALATED:
+      "Escalamos tu caso de facturación a un asesor. En breve te contactarán por este chat.",
+    ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
+  },
+  states: {
+    VALIDATE_CLIENT: validateClient,
+    WAITING_USER_CLIENT: validateClient,
+    CHECK_BALANCE: checkBalance,
+    RESPOND_BALANCE: respondBalance,
+    WAITING_USER_RECEIPT: waitingReceipt,
+    RECORD_PAYMENT: recordPayment,
+  },
+};

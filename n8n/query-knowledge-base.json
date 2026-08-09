@@ -1,0 +1,163 @@
+{
+  "name": "query-knowledge-base",
+  "nodes": [
+    {
+      "id": "wh-qkb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "query-knowledge-base",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "if-auth-qkb",
+      "name": "Auth Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "auth-qkb-1",
+              "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $env.API_INTERNAL_KEY }}"
+            }
+          ],
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-unauth-qkb",
+      "name": "Unauthorized Body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [440, 180],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "resp-unauth-qkb",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [660, 180],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseCode": 401 }
+      }
+    },
+    {
+      "id": "vec-qkb",
+      "name": "Postgres PGVector Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.3,
+      "position": [440, -40],
+      "alwaysOutputData": true,
+      "parameters": {
+        "mode": "load",
+        "prompt": "={{ $('Webhook').item.json.body.input.question }}",
+        "tableName": "n8n_vectors",
+        "topK": 4,
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "Wii5eNTA7a51xCts",
+          "name": "Postgres RAG"
+        }
+      }
+    },
+    {
+      "id": "emb-qkb",
+      "name": "Embeddings Ollama",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [440, 160],
+      "parameters": {
+        "model": "qwen3-embedding:4b"
+      },
+      "credentials": {
+        "ollamaApi": {
+          "id": "74YkDop2YcYEQfOJ",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "id": "code-qkb",
+      "name": "Format And Wrap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -40],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst docs = items\n  .map((item) => item.json)\n  .filter((j) => j && (j.pageContent || j.document || j.text || j.content || j.metadata));\n\nif (!docs.length) {\n  return [{\n    json: {\n      success: true,\n      result: { found: false },\n      error: null,\n    },\n  }];\n}\n\nconst texts = docs.map((d) => String(d.pageContent || d.document || d.text || d.content || '').trim()).filter(Boolean);\nconst sources = [...new Set(docs.map((d) => {\n  const meta = d.metadata || {};\n  return meta.source || meta.fileName || meta.filename || null;\n}).filter(Boolean))];\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: texts.length > 0,\n      ...(texts.length ? { answer: texts.slice(0, 4).join('\\n\\n'), sources } : {}),\n    },\n    error: null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "resp-ok-qkb",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [880, -40],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Auth Valid", "type": "main", "index": 0 }]]
+    },
+    "Auth Valid": {
+      "main": [
+        [{ "node": "Postgres PGVector Store", "type": "main", "index": 0 }],
+        [{ "node": "Unauthorized Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "Unauthorized Body": {
+      "main": [[{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]]
+    },
+    "Embeddings Ollama": {
+      "ai_embedding": [[{ "node": "Postgres PGVector Store", "type": "ai_embedding", "index": 0 }]]
+    },
+    "Postgres PGVector Store": {
+      "main": [[{ "node": "Format And Wrap", "type": "main", "index": 0 }]]
+    },
+    "Format And Wrap": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": true,
+  "meta": {
+    "instanceId": "local-isp-customer-service-api"
+  },
+  "tags": []
+}

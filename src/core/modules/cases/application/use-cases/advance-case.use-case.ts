@@ -77,7 +77,10 @@ export class AdvanceCaseUseCase {
     if (waitingStep && input.text !== undefined) {
       // Si el paso pide "answer", el texto del usuario ES la respuesta.
       // Algunos modelos devuelven answer:true/boolean; forzamos el string.
-      if (waitingStep.requireAll?.includes("answer") && input.text.trim()) {
+      const needsAnswer =
+        waitingStep.requireAll?.includes("answer") ||
+        waitingStep.requireAny?.includes("answer");
+      if (needsAnswer && input.text.trim()) {
         const current = entities.answer;
         if (typeof current !== "string" || current.trim() === "") {
           entities = { ...entities, answer: input.text.trim() };

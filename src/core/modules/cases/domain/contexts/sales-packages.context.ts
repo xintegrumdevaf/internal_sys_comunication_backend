@@ -1,10 +1,10 @@
 /**
- * docs/spec/01_DATA_MODEL.md §4. El workflow que consume este contexto se
- * construye en la Etapa 8 — el tipo se declara ahora para que `CaseContext`
- * sea un discriminated union completo desde ya.
+ * docs/spec/01_DATA_MODEL.md §4 — contexto tipado de SALES_PACKAGES (Etapa 8).
  */
 export type SalesPackagesContext = {
+  /** packages = consulta de planes; upgrade = quiere cambiar de plan. */
+  purpose?: "packages" | "upgrade";
   requestedSpeed?: string;
   currentPlan?: { name: string; speed: string };
-  offer?: { planId: string; price: number };
+  offer?: { planId: string; name?: string; price: number; speed?: string; answer?: string };
 };

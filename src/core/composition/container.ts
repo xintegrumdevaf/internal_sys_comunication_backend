@@ -42,6 +42,8 @@ import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/e
 import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.http";
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
+import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
+import { salesPackagesWorkflow } from "../modules/cases/application/engine/definitions/sales-packages.workflow";
 import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
 import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
 import { ExpirationService } from "../modules/cases/application/services/expiration.service";
@@ -118,10 +120,13 @@ export function createContainer(): Container {
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
   const escalationRepo = new EscalationRepositoryPg(pgPool);
 
-  // --- Motor de workflow (Etapa 2) ---
-  // Unico workflow implementado por ahora (docs/spec/05_BUILD_PLAN.md Etapa 2);
-  // BILLING_BALANCE/SALES_PACKAGES se agregan en la Etapa 8 sin tocar el motor.
-  const workflowEngine = new WorkflowEngine([supportInternetWorkflow]);
+  // --- Motor de workflow (Etapa 2 + 8) ---
+  // Agregar una definicion nueva no toca WorkflowEngine ni AIProviderPort.
+  const workflowEngine = new WorkflowEngine([
+    supportInternetWorkflow,
+    billingBalanceWorkflow,
+    salesPackagesWorkflow,
+  ]);
   const departmentResolver = new DepartmentResolverService(departmentRepo);
   const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
   const expirationService = new ExpirationService(caseRepo, casesLogger);

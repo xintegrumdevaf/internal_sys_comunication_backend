@@ -57,6 +57,42 @@ stateDiagram-v2
 
 Regla explícita: al volver de `WAITING_USER_DIAGNOSTIC` el motor continúa **desde `DIAGNOSTIC`**, nunca desde `VALIDATE_CLIENT` ni `CHECK_BALANCE`, salvo que una regla de negocio lo exija (p. ej. han pasado más de X horas y se requiere re-validar saldo).
 
+## 3.1 `BILLING_BALANCE` (Etapa 8)
+
+```mermaid
+stateDiagram-v2
+    [*] --> VALIDATE_CLIENT
+    VALIDATE_CLIENT --> WAITING_USER_CLIENT: falta nationalId
+    WAITING_USER_CLIENT --> VALIDATE_CLIENT: usuario responde
+    VALIDATE_CLIENT --> CHECK_BALANCE: cliente OK
+    CHECK_BALANCE --> RESPOND_BALANCE: purpose balance
+    RESPOND_BALANCE --> [*]: COMPLETED
+    CHECK_BALANCE --> WAITING_USER_RECEIPT: purpose record_payment sin datos
+    CHECK_BALANCE --> RECORD_PAYMENT: amount+reference presentes
+    WAITING_USER_RECEIPT --> RECORD_PAYMENT: amount+reference
+    RECORD_PAYMENT --> [*]: COMPLETED
+    RECORD_PAYMENT --> [*]: ESCALATED
+```
+
+WaitingSteps (§13): `WAITING_USER_CLIENT` (`requireAll: ["nationalId"]`), `WAITING_USER_RECEIPT` (`requireAll: ["amount","reference"]`). Reutiliza acciones genéricas `VALIDATE_CLIENT`/`CHECK_BALANCE` y `RECORD_PAYMENT`.
+
+## 3.2 `SALES_PACKAGES` (Etapa 8)
+
+```mermaid
+stateDiagram-v2
+    [*] --> COLLECT_PREFERENCE
+    COLLECT_PREFERENCE --> WAITING_USER_SPEED: falta requestedSpeed
+    WAITING_USER_SPEED --> QUERY_PACKAGES
+    COLLECT_PREFERENCE --> QUERY_PACKAGES
+    QUERY_PACKAGES --> RESPOND_OFFER: found
+    QUERY_PACKAGES --> [*]: ESCALATED not found
+    RESPOND_OFFER --> [*]: COMPLETED packages
+    RESPOND_OFFER --> WAITING_USER_UPGRADE: purpose upgrade
+    WAITING_USER_UPGRADE --> [*]: ESCALATED a ventas
+```
+
+Usa `QUERY_KNOWLEDGE_BASE`. Un upgrade confirmado escala a departamento `SALES` (no inventa acción de cambio de plan en n8n).
+
 ## 4. Un solo caso automatizado activo por conversación — arbitraje
 
 `conversation.active_case_id` apunta al único `Case` en estado automatizable. Ante una nueva interpretación de intención mientras hay un caso activo, la API (no el LLM) decide:

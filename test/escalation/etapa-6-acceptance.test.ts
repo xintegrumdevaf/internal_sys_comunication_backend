@@ -117,7 +117,7 @@ describe("Etapa 6 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     const fakeAi = new FakeAIProvider();
     fakeAi.interpretImpl = async () => ({
       type: "NEW_INTENT",
-      intent: "billing.balance",
+      intent: "general.inquiry",
       entities: {},
       confidence: 0.95,
     });
@@ -151,7 +151,7 @@ describe("Etapa 6 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     await useCase.execute({
       conversationId: conversation.id,
       correlationId: "corr-triage",
-      messages: [messageRepo.seedText(conversation.id, "cuanto debo")],
+      messages: [messageRepo.seedText(conversation.id, "qué horarios tienen?")],
     });
 
     const cases = await stack.caseRepo.listByConversation(conversation.id);

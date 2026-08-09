@@ -11,6 +11,7 @@ import { CaseArbitrationService } from "../../src/core/modules/cases/application
 import { DepartmentResolverService } from "../../src/core/modules/cases/application/services/department-resolver.service";
 import { WorkflowEngine } from "../../src/core/modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
+import { billingBalanceWorkflow } from "../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
 import { CaseRepositoryFake, N8nGatewayFake, WorkflowExecutionRepositoryFake } from "../cases/fakes";
 import {
   ConversationRepositoryFake,
@@ -65,8 +66,21 @@ describe("Etapa 5 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     const whatsappSender = new WhatsAppSenderFake();
     const departmentRepo = new DepartmentRepositoryFake();
     departmentRepo.seed({ slug: "billing", name: "Facturacion" });
-    const engine = new WorkflowEngine([supportInternetWorkflow]);
-    const gateway = new N8nGatewayFake({});
+    const engine = new WorkflowEngine([supportInternetWorkflow, billingBalanceWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [
+            { id: "1", name: "Ana", router: { sector: "a", olt_name: "o", pon: "1", serial: "S" } },
+          ],
+        },
+      }),
+      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: true, debt: 45 } }),
+      RECORD_PAYMENT: () => ({ success: true, result: { recorded: true } }),
+    });
     const advanceCase = new AdvanceCaseUseCase({
       caseRepo,
       workflowExecutionRepo: new WorkflowExecutionRepositoryFake(),
@@ -87,6 +101,7 @@ describe("Etapa 5 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
       reference: "ABC123",
       date: "2026-08-07",
     });
+    fakeAi.composeImpl = async (input) => input.templateHint?.trim() || "ok";
 
     const conversation = conversationRepo.createOpen();
     const imageMsg = messageRepo.seedText(conversation.id, "", {
@@ -117,10 +132,11 @@ describe("Etapa 5 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
       messages: [imageMsg],
     });
 
-    // Sin BILLING_BALANCE definition: no crea caso, pero no pregunta datos al cliente
-    // (decide billing por entities completas y responde con plantilla de aclaracion generica
-    // o mensaje de negocio — nunca pide amount/reference).
-    expect(await caseRepo.listByConversation(conversation.id)).toHaveLength(0);
+    // Etapa 8: BILLING_BALANCE registrado — con entities completas pide cédula o avanza.
+    // No pregunta monto/referencia (ya vienen del OCR).
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases.length).toBeGreaterThanOrEqual(1);
+    expect(cases[0]!.workflowType).toBe("BILLING_BALANCE");
     expect(whatsappSender.sent).toHaveLength(1);
     const body = whatsappSender.sent[0]!.body.toLowerCase();
     expect(body).not.toContain("monto");
