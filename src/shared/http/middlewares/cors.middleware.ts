@@ -1,0 +1,37 @@
+import type { NextFunction, Request, Response } from "express";
+
+/**
+ * CORS para el frontend (docs/API_ENDPOINTS.md — la API se consume desde un
+ * navegador en otro origin: distinto puerto de Vite dev = distinto origin).
+ * Sin este middleware, el navegador bloquea toda llamada aunque el backend
+ * responda 200 (el fetch/preflight se rechaza del lado del cliente).
+ *
+ * `CORS_ALLOWED_ORIGINS` (env) es una lista separada por comas. Si está vacía:
+ * - en development, se refleja cualquier `Origin` (conveniencia local — el
+ *   puerto de Vite cambia seguido cuando el anterior queda ocupado).
+ * - en production, no se permite ningún origin (falla explícito en vez de
+ *   abrir CORS por accidente en un despliegue real).
+ */
+export function createCors(allowedOrigins: string, nodeEnv: string) {
+  const list = allowedOrigins
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const allowAny = list.length === 0 && nodeEnv === "development";
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const origin = req.header("origin");
+    if (origin && (allowAny || list.includes(origin))) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-agent-id, x-correlation-id");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  };
+}

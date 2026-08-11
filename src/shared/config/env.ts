@@ -16,6 +16,13 @@ const envSchema = z.object({
 
   API_INTERNAL_KEY: z.string().min(1, "API_INTERNAL_KEY es requerida"),
 
+  // CORS para el frontend (docs/API_ENDPOINTS.md - consumido desde el navegador).
+  // Lista separada por comas (ej. "http://localhost:8080,http://localhost:8082").
+  // Vacio + NODE_ENV=development => refleja cualquier origin (conveniencia local,
+  // nunca en produccion). Vacio + NODE_ENV=production => no se permite ningun
+  // origin (falla explicito en vez de abrir CORS por accidente).
+  CORS_ALLOWED_ORIGINS: z.string().default(""),
+
   WHATSAPP_APP_SECRET: z.string().default(""),
   WHATSAPP_VERIFY_TOKEN: z.string().default(""),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),

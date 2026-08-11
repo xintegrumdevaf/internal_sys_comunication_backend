@@ -8,6 +8,7 @@ import { createRedisClient } from "../../shared/queue/redis";
 import { createLogger, type Logger } from "../../shared/logging/logger";
 import { createRequestLogger } from "../../shared/http/middlewares/request-logger.middleware";
 import { createErrorHandler } from "../../shared/http/middlewares/error-handler.middleware";
+import { createCors } from "../../shared/http/middlewares/cors.middleware";
 import { createHealthRouter } from "../../shared/http/health.router";
 
 import { AuditRepositoryPg } from "../modules/audit/infrastructure/postgres/audit.repository.pg";
@@ -338,6 +339,7 @@ export function createContainer(): Container {
 
   // --- HTTP (presentation) ---
   const app = express();
+  app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
   app.use(
     express.json({
       verify: (req, _res, buf) => {
