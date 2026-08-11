@@ -1,4 +1,5 @@
 import type { Case } from "../../../cases/domain/case.entity";
+import { normalizeTechnicalData } from "../../../cases/domain/contexts/support-internet.context";
 import type { WorkflowExecution } from "../../../cases/domain/workflow-execution.entity";
 import type { EscalationSummary } from "../../domain/escalation.entity";
 
@@ -30,6 +31,16 @@ export class CaseSummaryBuilderService {
     for (const execution of executions) {
       if (execution.status === "COMPLETED" && execution.output) {
         Object.assign(results, execution.output);
+      }
+    }
+    // `technical` llega crudo desde el microservicio de diagnostico (mikrotik_api) —
+    // se aplana a nombres entendibles para el agente, o se descarta si no trajo nada util.
+    if ("technical" in results) {
+      const technical = normalizeTechnicalData(results.technical);
+      if (technical) {
+        results.technical = technical;
+      } else {
+        delete results.technical;
       }
     }
 

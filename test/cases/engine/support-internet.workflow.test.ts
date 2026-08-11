@@ -44,7 +44,43 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
       question:
         "Para continuar con la revisión, verifique su equipo de Internet. Si no tiene luces encendidas...",
       diagnostic: "onu_offline",
+      technical: { brand: "v-sol" },
     });
+  });
+
+  it("normalizeDiagnosticResult aplana la telemetria real de la ONU (potencia, MAC, modelo, estado)", () => {
+    const normalized = normalizeDiagnosticResult({
+      status: "ESCALATED",
+      diagnostic: "onu_offline",
+      technical: {
+        brand: "v-sol",
+        onu: { id: 12, serial: "D011A66CB67C", model: "V2802R" },
+        state: { runState: "down", adminState: "enable", channel: "1" },
+        power: -29.4,
+        mac: { mac: "AA:BB:CC:DD:EE:FF", ontId: 3, vlan: 100, type: "dynamic" },
+      },
+    });
+
+    expect(normalized.technical).toEqual({
+      brand: "v-sol",
+      onuModel: "V2802R",
+      onuSerial: "D011A66CB67C",
+      macAddress: "AA:BB:CC:DD:EE:FF",
+      opticalPowerDbm: -29.4,
+      runState: "down",
+      adminState: "enable",
+      channel: "1",
+    });
+  });
+
+  it("normalizeDiagnosticResult no agrega 'technical' si no hay nada util que leer", () => {
+    const normalized = normalizeDiagnosticResult({
+      status: "ESCALATED",
+      diagnostic: "onu_not_found",
+      technical: { onu: null, state: null, mac: null },
+    });
+
+    expect(normalized.technical).toBeUndefined();
   });
 
   it("DIAGNOSTIC con result MikroTik (instruction) entra a WAITING_USER_DIAGNOSTIC con la pregunta", async () => {
@@ -62,6 +98,7 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
           },
           workflow: { status: "waiting_user", currentStep: "ask_led_status" },
           instruction,
+          technical: { brand: "v-sol", power: -25.1 },
         },
       }),
     });
@@ -86,7 +123,9 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     );
     expect(outcome).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC" });
     if (outcome.type !== "WAITING_USER") throw new Error("unreachable");
+    if (outcome.context.workflowType !== "SUPPORT_INTERNET") throw new Error("unreachable");
     expect(outcome.context.data.diagnostic?.lastQuestion).toBe(instruction);
+    expect(outcome.context.data.diagnostic?.technical).toEqual({ brand: "v-sol", opticalPowerDbm: -25.1 });
   });
 
   it("VALIDATE_CLIENT pide cedula sin llamar n8n cuando no hay nationalId", async () => {

@@ -24,11 +24,17 @@ type WhatsAppInboundMessage = {
   document?: WhatsAppDocumentObject;
 };
 
+type WhatsAppContact = {
+  wa_id?: string;
+  profile?: { name?: string };
+};
+
 type WhatsAppWebhookPayload = {
   entry?: Array<{
     changes?: Array<{
       value?: {
         messages?: WhatsAppInboundMessage[];
+        contacts?: WhatsAppContact[];
       };
     }>;
   }>;
@@ -43,6 +49,13 @@ export type NormalizedInboundMessage = {
   mimeType: string | null;
   caption: string | null;
   filename: string | null;
+  /**
+   * Nombre de perfil/agenda de WhatsApp (`contacts[].profile.name`) — viene
+   * gratis en cada webhook entrante, sin llamada extra a la API de Meta.
+   * `null` si el payload no trae `contacts` para este `wa_id` (no debería
+   * pasar en producción, pero el parser nunca asume que siempre está).
+   */
+  waProfileName: string | null;
 };
 
 export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInboundMessage[] {
@@ -51,8 +64,15 @@ export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInbound
 
   for (const entry of typed.entry ?? []) {
     for (const change of entry.changes ?? []) {
+      const profileNameByWaId = new Map<string, string>();
+      for (const contact of change.value?.contacts ?? []) {
+        if (contact.wa_id && contact.profile?.name) {
+          profileNameByWaId.set(contact.wa_id, contact.profile.name);
+        }
+      }
+
       for (const raw of change.value?.messages ?? []) {
-        normalized.push(normalizeMessage(raw));
+        normalized.push(normalizeMessage(raw, profileNameByWaId.get(raw.from) ?? null));
       }
     }
   }
@@ -60,8 +80,8 @@ export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInbound
   return normalized;
 }
 
-function normalizeMessage(raw: WhatsAppInboundMessage): NormalizedInboundMessage {
-  const base = { waPhone: raw.from, externalId: raw.id, type: raw.type };
+function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | null): NormalizedInboundMessage {
+  const base = { waPhone: raw.from, externalId: raw.id, type: raw.type, waProfileName };
 
   switch (raw.type) {
     case "text":
@@ -87,7 +107,7 @@ function normalizeMessage(raw: WhatsAppInboundMessage): NormalizedInboundMessage
 }
 
 function mediaMessage(
-  base: { waPhone: string; externalId: string; type: string },
+  base: { waPhone: string; externalId: string; type: string; waProfileName: string | null },
   media: WhatsAppMediaObject | undefined,
 ): NormalizedInboundMessage {
   return {

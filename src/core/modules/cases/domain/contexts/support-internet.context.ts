@@ -14,6 +14,26 @@ export type SupportInternetPendingContract = {
   serial: string;
 };
 
+/**
+ * Telemetria real de la ONU devuelta por el microservicio de diagnostico
+ * (mikrotik_api → TechnicalDataResponseDTO), aplanada a nombres entendibles
+ * para un agente no tecnico. Todo opcional: el microservicio puede no
+ * alcanzar a leer algunos campos si la ONU esta caida.
+ */
+export type SupportInternetDiagnosticTechnical = {
+  /** Marca del OLT que atiende la ONU (p.ej. "v-sol", "huawei"). */
+  brand?: string;
+  onuModel?: string;
+  onuSerial?: string;
+  macAddress?: string;
+  /** Potencia optica recibida (RX) en dBm. Valores muy negativos = señal debil. */
+  opticalPowerDbm?: number;
+  /** Estado operativo reportado por el OLT (online/offline/dying-gasp, etc.). */
+  runState?: string;
+  adminState?: string;
+  channel?: string;
+};
+
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
   contract?: {
@@ -28,5 +48,43 @@ export type SupportInternetContext = {
   /** Contratos candidatos cuando VALIDATE_CLIENT devuelve mas de uno (§13 desambiguar). */
   pendingContracts?: SupportInternetPendingContract[];
   balance?: { hasDebt: boolean; amount?: number };
-  diagnostic?: { status: string; lastQuestion?: string; result?: string; answer?: string };
+  diagnostic?: {
+    status: string;
+    lastQuestion?: string;
+    result?: string;
+    answer?: string;
+    /** Ultima lectura tecnica conocida de la ONU (si el microservicio la devolvio). */
+    technical?: SupportInternetDiagnosticTechnical;
+  };
 };
+
+/**
+ * Aplana el bloque `technical` crudo del microservicio de diagnostico
+ * (mikrotik_api → TechnicalDataResponseDTO: brand/onu/state/power/mac) a
+ * nombres entendibles para un agente no tecnico. La usan tanto el workflow
+ * de SUPPORT_INTERNET (para persistirla en el context del case) como el
+ * resumen de escalacion (docs/spec/03_API_CONTRACT.md §D) — una sola fuente
+ * de verdad para no duplicar el mapeo (DRY).
+ */
+export function normalizeTechnicalData(raw: unknown): SupportInternetDiagnosticTechnical | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const t = raw as {
+    brand?: unknown;
+    onu?: { model?: unknown; serial?: unknown } | null;
+    state?: { runState?: unknown; adminState?: unknown; channel?: unknown } | null;
+    power?: unknown;
+    mac?: { mac?: unknown } | null;
+  };
+
+  const result: SupportInternetDiagnosticTechnical = {
+    ...(typeof t.brand === "string" ? { brand: t.brand } : {}),
+    ...(typeof t.onu?.model === "string" ? { onuModel: t.onu.model } : {}),
+    ...(typeof t.onu?.serial === "string" ? { onuSerial: t.onu.serial } : {}),
+    ...(typeof t.mac?.mac === "string" ? { macAddress: t.mac.mac } : {}),
+    ...(typeof t.power === "number" ? { opticalPowerDbm: t.power } : {}),
+    ...(typeof t.state?.runState === "string" ? { runState: t.state.runState } : {}),
+    ...(typeof t.state?.adminState === "string" ? { adminState: t.state.adminState } : {}),
+    ...(typeof t.state?.channel === "string" ? { channel: t.state.channel } : {}),
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
+}

@@ -4,9 +4,13 @@ import type { Case, CaseStatus } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
+import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
+import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 const COMPLETABLE: CaseStatus[] = ["ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
+const ASSIGNMENT_GUARDED: CaseStatus[] = ["HUMAN_ACTIVE", "ESCALATED"];
 
 export class CompleteCaseUseCase {
   constructor(
@@ -16,6 +20,13 @@ export class CompleteCaseUseCase {
       auditRepo: AuditRepositoryPort;
       logger: Logger;
       broadcaster?: RealtimeBroadcaster;
+      /**
+       * docs/spec/06_BACKEND_GAPS.md §2 — si el caso ya esta
+       * HUMAN_ACTIVE/ESCALATED, solo el agente asignado (o manager/admin
+       * con alcance) puede completarlo. Opcionales por compatibilidad.
+       */
+      agentRepo?: AgentRepositoryPort;
+      departmentRepo?: DepartmentRepositoryPort;
     },
   ) {}
 
@@ -28,6 +39,17 @@ export class CompleteCaseUseCase {
     if (!aggregate) throw notFound(`Caso ${input.caseId} no encontrado`);
     if (!COMPLETABLE.includes(aggregate.case.status)) {
       throw businessError(`No se puede completar un caso en estado ${aggregate.case.status}`);
+    }
+
+    if (ASSIGNMENT_GUARDED.includes(aggregate.case.status) && this.deps.agentRepo && this.deps.departmentRepo) {
+      const agent = await resolveActingAgent(this.deps.agentRepo, input.agentUserId);
+      await assertCanWriteCase({
+        agent,
+        caseEntity: aggregate.case,
+        mode: "act",
+        agentRepo: this.deps.agentRepo,
+        departmentRepo: this.deps.departmentRepo,
+      });
     }
 
     const result = await this.deps.caseRepo.applyTransition({

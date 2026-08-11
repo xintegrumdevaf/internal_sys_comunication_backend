@@ -17,6 +17,8 @@ export type ReceiveInboundMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  /** `contacts[].profile.name` del webhook de Meta — ver conversation.entity.ts. */
+  waProfileName?: string | null;
   /** correlationId de la request HTTP que origino el mensaje (trazabilidad, AGENTS.md). */
   correlationId?: string;
 };
@@ -53,9 +55,16 @@ export class ReceiveInboundMessageUseCase {
       ? logger.child({ correlationId: input.correlationId })
       : logger;
 
-    const conversation = await withConversationLock(redisClient, input.waPhone, () =>
+    let conversation = await withConversationLock(redisClient, input.waPhone, () =>
       conversationRepo.findOrCreateByWaPhone(input.waPhone),
     );
+
+    // Se actualiza en cada mensaje que lo traiga (la persona puede cambiar su
+    // nombre de WhatsApp); nunca se pisa un nombre ya conocido con uno vacio.
+    if (input.waProfileName && input.waProfileName !== conversation.waProfileName) {
+      await conversationRepo.setWaProfileName(conversation.id, input.waProfileName);
+      conversation = { ...conversation, waProfileName: input.waProfileName };
+    }
 
     const { message, isDuplicate } = await messageRepo.insertInbound({
       conversationId: conversation.id,

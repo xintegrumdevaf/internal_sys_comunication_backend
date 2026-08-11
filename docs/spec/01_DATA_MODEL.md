@@ -89,9 +89,24 @@ CREATE TABLE conversation (
   status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','pending','resolved','closed')),
   last_activity_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  wa_profile_name   TEXT                        -- migracion 0010; nombre de agenda de WhatsApp, ver nota abajo
 );
 CREATE INDEX idx_conversation_wa_phone ON conversation(wa_phone);
+
+> **`conversation.wa_profile_name` vs `customer.full_name`**: son cosas distintas a propósito.
+> `wa_profile_name` es el nombre de agenda/perfil de WhatsApp — llega gratis en
+> `contacts[].profile.name` de **cada** webhook entrante de Meta (Cloud API), sin
+> llamada extra a la API, y se actualiza solo (`ReceiveInboundMessageUseCase`, nunca se
+> borra con un valor vacío). `customer.full_name` es el nombre **validado por cédula**
+> tras `VALIDATE_CLIENT` — puede diferir del nombre de WhatsApp (ej. alguien atiende
+> con el WhatsApp de otra persona). Nunca se deben mezclar.
+>
+> **La foto de perfil de WhatsApp NO se implementa** — Meta no expone ningún endpoint
+> para obtenerla vía la API oficial (Cloud API), por política de privacidad que aplica
+> a cualquier negocio, no es una limitación de este backend. Solo librerías no
+> oficiales (que simulan WhatsApp Web, ej. Baileys) lo logran, arriesgando que Meta
+> banee el número de negocio — fuera de alcance para un sistema de producción real.
 
 CREATE TABLE message (
   id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -236,7 +251,31 @@ type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
   contract?: { id: string; sector: string; oltName: string; pon: string; serial: string; router: string };
   balance?: { hasDebt: boolean; amount?: number };
-  diagnostic?: { status: string; lastQuestion?: string; result?: string };
+  diagnostic?: {
+    status: string;
+    lastQuestion?: string;
+    result?: string;
+    /** Telemetria real de la ONU (ver nota debajo) — puede faltar si el microservicio no logro leerla. */
+    technical?: SupportInternetDiagnosticTechnical;
+  };
+};
+
+/**
+ * Aplanado de `TechnicalDataResponseDTO` (mikrotik_api: brand/onu/state/power/mac)
+ * a nombres entendibles por un agente sin conocimiento de redes. Se persiste tal
+ * cual (§DIAGNOSTIC más abajo) y se reutiliza sin duplicar el mapeo en el resumen
+ * de escalación (`normalizeTechnicalData`, `support-internet.context.ts`).
+ */
+type SupportInternetDiagnosticTechnical = {
+  brand?: string;
+  onuModel?: string;
+  onuSerial?: string;
+  macAddress?: string;
+  /** Potencia óptica recibida (RX) en dBm — mientras más cercano a 0, más fuerte. */
+  opticalPowerDbm?: number;
+  runState?: string;
+  adminState?: string;
+  channel?: string;
 };
 
 type BillingBalanceContext = {
@@ -277,6 +316,8 @@ Cada `WorkflowDefinition` (ver `02_STATE_MACHINE.md`) declara su tipo de context
 **`waitingAttempts`**: no es parte del contexto tipado de negocio de arriba — es un contador de control del motor (`02_STATE_MACHINE.md` §13), se guarda junto al contexto (ej. `case.context._engine.waitingAttempts`) y se resetea cada vez que el `Case` entra a un `WaitingStep` nuevo. No lo mezcles con los campos de negocio (`client`, `contract`, etc.) — es metadata del motor, no un dato que la IA deba ver ni tocar.
 
 ## 5. Datos técnicos del cliente — regla de origen
+
+**Nota (2026-08-11)**: el microservicio de diagnóstico (`mikrotik_api`) devuelve, junto al resultado del diagnóstico, un bloque `technical` con la lectura real de la ONU (estado, potencia óptica RX, MAC, modelo). `normalizeDiagnosticResult` (`support-internet.workflow.ts`) lo aplana con `normalizeTechnicalData` y lo persiste en `diagnostic.technical` — se conserva sea el diagnóstico automático resoluble o no, porque es justo cuando se escala que el agente humano más lo necesita. La misma función se reutiliza en `CaseSummaryBuilderService` para que el resumen de escalación (`GET /api/cases/:id/summary`) también lo muestre limpio, sin el ruido interno del microservicio (`_history`, `failedStep`).
 
 Campos como `sector`, `oltName`, `pon`, `serial`, `router` **siempre** se leen de `contract` (ya resuelto por la acción `VALIDATE_CLIENT` y guardado en `case.context.data.contract`). Ninguna acción hacia n8n le pide estos valores al LLM; se inyectan como `input` de la acción desde el contexto ya persistido (ver `03_API_CONTRACT.md` §B.2, `04_N8N_WORKFLOW_SPEC.md` §3.1).
 

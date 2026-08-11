@@ -32,7 +32,19 @@ import { DepartmentRepositoryPg } from "../modules/departments/infrastructure/po
 import { AgentRepositoryPg } from "../modules/departments/infrastructure/postgres/agent.repository.pg";
 import { ListDepartmentsUseCase } from "../modules/departments/application/use-cases/list-departments.use-case";
 import { ListAgentsUseCase } from "../modules/departments/application/use-cases/list-agents.use-case";
+import { CreateAgentUseCase } from "../modules/departments/application/use-cases/create-agent.use-case";
+import { UpdateAgentUseCase } from "../modules/departments/application/use-cases/update-agent.use-case";
+import { DeactivateAgentUseCase } from "../modules/departments/application/use-cases/deactivate-agent.use-case";
+import { ResetAgentPasswordUseCase } from "../modules/departments/application/use-cases/reset-agent-password.use-case";
 import { createDepartmentsRouter } from "../modules/departments/presentation/departments.router";
+import { createAgentsAdminRouter } from "../modules/departments/presentation/admin/agents.router";
+
+import { SessionStoreRedis } from "../modules/auth/infrastructure/redis/session-store.repository.redis";
+import { LoginUseCase } from "../modules/auth/application/use-cases/login.use-case";
+import { LogoutUseCase } from "../modules/auth/application/use-cases/logout.use-case";
+import { ChangePasswordUseCase } from "../modules/auth/application/use-cases/change-password.use-case";
+import { createSessionMiddleware } from "../modules/auth/presentation/session.middleware";
+import { createAuthRouter } from "../modules/auth/presentation/auth.router";
 
 import { InboundBufferService } from "../modules/ingestion/application/services/inbound-buffer.service";
 
@@ -65,6 +77,7 @@ import { createCasesRouter } from "../modules/cases/presentation/cases.router";
 import { EscalationRepositoryPg } from "../modules/escalation/infrastructure/postgres/escalation.repository.pg";
 import { CaseSummaryBuilderService } from "../modules/escalation/application/services/case-summary-builder.service";
 import { EscalationService } from "../modules/escalation/application/services/escalation.service";
+import { AutoAssignAgentService } from "../modules/escalation/application/services/auto-assign-agent.service";
 import { ClaimCaseUseCase } from "../modules/escalation/application/use-cases/claim-case.use-case";
 import { AssignCaseUseCase } from "../modules/escalation/application/use-cases/assign-case.use-case";
 import {
@@ -127,6 +140,7 @@ export function createContainer(): Container {
   const whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const agentRepo = new AgentRepositoryPg(pgPool);
+  const sessionStore = new SessionStoreRedis(redisClient);
   const caseRepo = new CaseRepositoryPg(pgPool);
   const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
@@ -167,6 +181,11 @@ export function createContainer(): Container {
 
   // --- Escalacion / triage (Etapa 6) ---
   const summaryBuilder = new CaseSummaryBuilderService();
+  const autoAssignAgent = new AutoAssignAgentService({
+    agentRepo,
+    caseRepo,
+    maxActiveCasesPerAgent: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
   const escalationService = new EscalationService({
     caseRepo,
     escalationRepo,
@@ -176,6 +195,8 @@ export function createContainer(): Container {
     summaryBuilder,
     logger: escalationLogger,
     broadcaster,
+    autoAssign: autoAssignAgent,
+    auditRepo,
   });
   const claimCase = new ClaimCaseUseCase({
     caseRepo,
@@ -254,6 +275,8 @@ export function createContainer(): Container {
     conversationRepo,
     auditRepo,
     logger: casesLogger,
+    agentRepo,
+    departmentRepo,
   });
   const transferCase = new TransferCaseUseCase({
     caseRepo,
@@ -312,6 +335,8 @@ export function createContainer(): Container {
     auditRepo,
     logger: conversationsLogger,
     caseRepo,
+    agentRepo,
+    departmentRepo,
   });
   const takeControl = new TakeControlUseCase({
     conversationRepo,
@@ -322,6 +347,19 @@ export function createContainer(): Container {
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
+  const createAgent = new CreateAgentUseCase({ agentRepo, departmentRepo, auditRepo, logger });
+  const updateAgent = new UpdateAgentUseCase({ agentRepo, departmentRepo, auditRepo, logger });
+  const deactivateAgent = new DeactivateAgentUseCase({ agentRepo, auditRepo, logger });
+  const resetAgentPassword = new ResetAgentPasswordUseCase({ agentRepo, auditRepo, logger });
+
+  const login = new LoginUseCase({
+    agentRepo,
+    sessionStore,
+    sessionTtlSeconds: env.SESSION_TTL_SECONDS,
+    logger,
+  });
+  const logout = new LogoutUseCase(sessionStore);
+  const changePassword = new ChangePasswordUseCase({ agentRepo, logger });
 
   const listN8nWorkflows = new ListN8nWorkflowsUseCase(n8nWorkflowRegistryRepo);
   const upsertN8nWorkflow = new UpsertN8nWorkflowUseCase({
@@ -351,6 +389,13 @@ export function createContainer(): Container {
 
   app.use(createHealthRouter({ pgPool, redisClient }));
   app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient }));
+
+  // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
+  // §1.b) — health y el webhook de WhatsApp quedan afuera a proposito (no
+  // tienen identidad de agente; usan su propia verificacion).
+  app.use(createSessionMiddleware({ sessionStore, agentRepo, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
+  app.use(createAuthRouter({ login, logout, changePassword, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
+
   app.use(
     createConversationsRouter({
       listConversations,
@@ -362,10 +407,17 @@ export function createContainer(): Container {
     }),
   );
   app.use(createDepartmentsRouter({ listDepartments, listAgents }));
+  app.use(
+    createAgentsAdminRouter({
+      createAgent,
+      updateAgent,
+      deactivateAgent,
+      resetAgentPassword,
+    }),
+  );
   app.use(createAuditRouter(auditRepo));
   app.use(
     createN8nWorkflowsRouter({
-      agentRepo,
       listN8nWorkflows,
       upsertN8nWorkflow,
       deactivateN8nWorkflow,
@@ -388,7 +440,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createEscalationsRouter({ listEscalations }));
-  app.use(createRealtimeRouter({ broadcaster, agentRepo }));
+  app.use(createRealtimeRouter({ broadcaster }));
 
   app.use(createErrorHandler(logger));
 

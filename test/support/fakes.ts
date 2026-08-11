@@ -39,6 +39,7 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
       lastActivityAt: now,
       createdAt: now,
       updatedAt: now,
+      waProfileName: null,
       ...overrides,
     };
     return this.seed(conversation);
@@ -79,6 +80,13 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     const conversation = this.conversations.get(id);
     if (conversation) {
       this.conversations.set(id, { ...conversation, customerId });
+    }
+  }
+
+  async setWaProfileName(id: string, name: string): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, waProfileName: name });
     }
   }
 }

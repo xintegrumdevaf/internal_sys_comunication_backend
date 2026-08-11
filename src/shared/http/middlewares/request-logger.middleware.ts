@@ -12,18 +12,19 @@ export function createRequestLogger(logger: Logger) {
 
   return (req: Request, res: Response, next: NextFunction): void => {
     const correlationId = (req.header("x-correlation-id") ?? randomUUID()).toString();
+    const requestLogger = withCorrelationId(httpLogger, correlationId);
     req.correlationId = correlationId;
-    req.log = withCorrelationId(httpLogger, correlationId);
+    req.log = requestLogger;
     res.setHeader("x-correlation-id", correlationId);
 
-    req.log.info(
+    requestLogger.info(
       { method: req.method, path: req.path },
       "request recibida",
     );
 
     const startedAt = Date.now();
     res.on("finish", () => {
-      req.log.info(
+      requestLogger.info(
         {
           method: req.method,
           path: req.path,

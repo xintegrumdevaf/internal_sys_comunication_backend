@@ -68,4 +68,11 @@ export interface CaseRepositoryPort {
 
   /** Eventos de `workflow_event` para timeline / resumen §D. */
   listEvents(caseId: string): Promise<Array<{ type: string; payload: Record<string, unknown>; occurredAt: Date }>>;
+
+  /**
+   * Casos `HUMAN_ACTIVE` por agente — usado por el algoritmo de
+   * auto-asignacion (docs/spec/06_BACKEND_GAPS.md §2) para elegir al agente
+   * con menor carga del departamento. Devuelve 0 para los ids sin casos.
+   */
+  countActiveCasesByAgent(agentIds: string[]): Promise<Record<string, number>>;
 }

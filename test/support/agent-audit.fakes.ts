@@ -3,6 +3,7 @@ import type { Agent, AgentRole } from "../../src/core/modules/departments/domain
 import type {
   AgentRepositoryPort,
   CreateAgentInput,
+  UpdateAgentPatch,
 } from "../../src/core/modules/departments/application/ports/agent.repository.port";
 import type { AuditRepositoryPort, RecordAuditEventInput } from "../../src/core/modules/audit/application/ports/audit.repository.port";
 import type { AuditEvent } from "../../src/core/modules/audit/domain/audit-event.entity";
@@ -20,6 +21,7 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
       primaryDepartmentId: partial.primaryDepartmentId ?? null,
       active: partial.active ?? true,
       createdAt: partial.createdAt ?? new Date(),
+      passwordHash: partial.passwordHash ?? null,
     };
     this.agents.set(agent.id, agent);
     return agent;
@@ -33,8 +35,27 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
     return this.agents.get(id) ?? null;
   }
 
+  async findByEmail(email: string): Promise<Agent | null> {
+    const needle = email.toLowerCase();
+    return [...this.agents.values()].find((a) => a.email.toLowerCase() === needle) ?? null;
+  }
+
   async create(input: CreateAgentInput): Promise<Agent> {
     return this.seed(input);
+  }
+
+  async update(id: string, patch: UpdateAgentPatch): Promise<Agent> {
+    const current = this.agents.get(id);
+    if (!current) throw new Error(`agent ${id} not found`);
+    const updated: Agent = { ...current, ...patch };
+    this.agents.set(id, updated);
+    return updated;
+  }
+
+  async countActiveAdmins(excludeAgentId?: string): Promise<number> {
+    return [...this.agents.values()].filter(
+      (a) => a.role === "admin" && a.active && a.id !== excludeAgentId,
+    ).length;
   }
 
   async addMembership(agentId: string, departmentId: string): Promise<void> {

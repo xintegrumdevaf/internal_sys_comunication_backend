@@ -205,15 +205,17 @@ export class AdvanceCaseUseCase {
       await caseRepo.setAutomationEnabled(aggregate.case.id, false, { reason: outcome.reason });
       await caseRepo.appendEvent(aggregate.case.id, "CASE_ESCALATED", { reason: outcome.reason });
       await conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+      let finalCase = result.case;
       if (this.deps.escalationService) {
-        await this.deps.escalationService.ensureEscalationRecord({
+        const { caseEntity } = await this.deps.escalationService.ensureEscalationRecord({
           caseId: result.case.id,
           reason: outcome.reason,
           correlationId: input.correlationId,
         });
+        finalCase = caseEntity;
       }
       log.warn({ status: "ESCALATED", reason: outcome.reason }, "caso escalado, automatizacion deshabilitada");
-      return { case: result.case, outcome };
+      return { case: finalCase, outcome };
     }
 
     log.warn(

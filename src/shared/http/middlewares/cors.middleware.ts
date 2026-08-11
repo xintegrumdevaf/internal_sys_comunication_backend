@@ -24,6 +24,11 @@ export function createCors(allowedOrigins: string, nodeEnv: string) {
     if (origin && (allowAny || list.includes(origin))) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
+      // Requerido para que el navegador adjunte/acepte la cookie de sesion
+      // httpOnly en requests cross-origin (docs/spec/06_BACKEND_GAPS.md
+      // §1.b). Nunca se combina con Access-Control-Allow-Origin: "*" — el
+      // navegador lo rechazaria, y aqui siempre reflejamos un origin puntual.
+      res.setHeader("Access-Control-Allow-Credentials", "true");
     }
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-agent-id, x-correlation-id");

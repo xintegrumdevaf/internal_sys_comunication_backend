@@ -194,6 +194,13 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
 
     const app = express();
     app.use(express.json());
+    // Test-only: simula una sesion ya autenticada como `agent` (no hay Redis
+    // real en este test de fakes) — igual que session.middleware.ts poblaria
+    // req.agent a partir de la cookie real (docs/spec/06_BACKEND_GAPS.md §1.b).
+    app.use((req, _res, next) => {
+      req.agent = agent;
+      next();
+    });
     app.use(
       createConversationsRouter({
         listConversations,
@@ -220,7 +227,7 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
         broadcaster,
       }),
     );
-    app.use(createRealtimeRouter({ broadcaster, agentRepo }));
+    app.use(createRealtimeRouter({ broadcaster }));
     app.use(createErrorHandler(silentLogger));
 
     const casesRes = await request(app).get(`/api/conversations/${conversation.id}/cases`);
@@ -235,16 +242,12 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     expect(timelineRes.status).toBe(200);
     expect(Array.isArray(timelineRes.body.data)).toBe(true);
 
-    const dashRes = await request(app)
-      .get("/api/dashboard")
-      .set("x-agent-id", agent.id)
-      .query({ userId: agent.id });
+    const dashRes = await request(app).get("/api/dashboard").query({ userId: agent.id });
     expect(dashRes.status).toBe(200);
     expect(dashRes.body.data.openConversations).toBeGreaterThanOrEqual(1);
 
     const transferRes = await request(app)
       .post(`/api/cases/${created.id}/transfer`)
-      .set("x-agent-id", agent.id)
       .send({ toDepartmentId: billing.id, reason: "cliente pregunta saldo" });
     expect(transferRes.status).toBe(200);
     expect(transferRes.body.data.departmentId).toBe(billing.id);
@@ -265,7 +268,6 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
 
     const completeRes = await request(app)
       .post(`/api/cases/${created.id}/complete`)
-      .set("x-agent-id", agent.id)
       .send({ resolutionNote: "resuelto" });
     expect(completeRes.status).toBe(200);
     expect(completeRes.body.data.status).toBe("COMPLETED");

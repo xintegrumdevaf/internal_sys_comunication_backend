@@ -1,5 +1,9 @@
 import type { CaseContext } from "../../../domain/contexts/case-context";
-import type { SupportInternetContext } from "../../../domain/contexts/support-internet.context";
+import {
+  normalizeTechnicalData,
+  type SupportInternetContext,
+  type SupportInternetDiagnosticTechnical,
+} from "../../../domain/contexts/support-internet.context";
 import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
@@ -30,15 +34,20 @@ type DiagnosticOutput = {
   status: "WAITING_USER" | "COMPLETED" | "ESCALATED";
   question?: string;
   diagnostic?: string;
+  technical?: SupportInternetDiagnosticTechnical;
 };
 
 /**
  * Normaliza el result de DIAGNOSTIC/CONTINUE_DIAGNOSTIC al contrato de la API
  * (docs/spec/04_N8N_WORKFLOW_SPEC.md §11). Cubre el wrap correcto de n8n y, como
  * red de seguridad, la forma cruda del microservicio MikroTik
- * (`workflow.status` + `instruction`).
+ * (`workflow.status` + `instruction`). En ambos casos, si viene `technical`
+ * (telemetria real de la ONU), se conserva — es valioso para el agente aunque
+ * el diagnostico automatico no haya podido resolverse solo.
  */
 export function normalizeDiagnosticResult(raw: Record<string, unknown>): DiagnosticOutput {
+  const technical = normalizeTechnicalData(raw.technical);
+
   const direct = typeof raw.status === "string" ? raw.status.toUpperCase() : "";
   if (direct === "WAITING_USER" || direct === "COMPLETED" || direct === "ESCALATED") {
     const question = typeof raw.question === "string" ? raw.question : undefined;
@@ -52,6 +61,7 @@ export function normalizeDiagnosticResult(raw: Record<string, unknown>): Diagnos
       status: direct,
       ...(question ? { question } : {}),
       ...(diagnostic ? { diagnostic } : {}),
+      ...(technical ? { technical } : {}),
     };
   }
 
@@ -90,6 +100,7 @@ export function normalizeDiagnosticResult(raw: Record<string, unknown>): Diagnos
     status,
     ...(status === "WAITING_USER" && instruction ? { question: instruction } : {}),
     ...(diagnosticLabel ? { diagnostic: diagnosticLabel } : {}),
+    ...(technical ? { technical } : {}),
   };
 }
 
@@ -371,7 +382,11 @@ const diagnostic: WorkflowStateHandler = async ({
   if (output.status === "WAITING_USER") {
     const nextData: SupportInternetContext = {
       ...data,
-      diagnostic: { status: "PENDING", lastQuestion: output.question },
+      diagnostic: {
+        status: "PENDING",
+        lastQuestion: output.question,
+        ...(output.technical ? { technical: output.technical } : {}),
+      },
     };
     const waiting = resetWaitingAttempts(
       withContext(nextData, context),
@@ -383,14 +398,22 @@ const diagnostic: WorkflowStateHandler = async ({
   if (output.status === "COMPLETED") {
     const nextData: SupportInternetContext = {
       ...data,
-      diagnostic: { status: "RESOLVED", result: output.diagnostic },
+      diagnostic: {
+        status: "RESOLVED",
+        result: output.diagnostic,
+        ...(output.technical ? { technical: output.technical } : {}),
+      },
     };
     return { type: "COMPLETED", context: withContext(nextData, context) };
   }
 
   const nextData: SupportInternetContext = {
     ...data,
-    diagnostic: { status: "UNRESOLVABLE", result: output.diagnostic },
+    diagnostic: {
+      status: "UNRESOLVABLE",
+      result: output.diagnostic,
+      ...(output.technical ? { technical: output.technical } : {}),
+    },
   };
   return {
     type: "ESCALATED",

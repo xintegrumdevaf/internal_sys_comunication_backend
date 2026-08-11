@@ -23,6 +23,11 @@ const envSchema = z.object({
   // origin (falla explicito en vez de abrir CORS por accidente).
   CORS_ALLOWED_ORIGINS: z.string().default(""),
 
+  // Login real (docs/spec/06_BACKEND_GAPS.md §1.b): sesion con cookie httpOnly
+  // + Redis, expiracion deslizante (se renueva en cada request autenticado;
+  // se cierra sola tras N segundos de inactividad). 43200s = 12h.
+  SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(43200),
+
   WHATSAPP_APP_SECRET: z.string().default(""),
   WHATSAPP_VERIFY_TOKEN: z.string().default(""),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),
@@ -37,6 +42,11 @@ const envSchema = z.object({
 
   // Buffer/debounce de mensajes por conversacion (docs/spec/02_STATE_MACHINE.md §12).
   MESSAGE_DEBOUNCE_MS: z.coerce.number().int().positive().default(4500),
+
+  // Auto-asignacion de casos escalados (docs/spec/06_BACKEND_GAPS.md §2):
+  // umbral de casos HUMAN_ACTIVE por agente antes de excluirlo de la seleccion
+  // automatica (sigue disponible para asignacion manual por un manager).
+  AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT: z.coerce.number().int().positive().default(6),
 
   // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
   // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,

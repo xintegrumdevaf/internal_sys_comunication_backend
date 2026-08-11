@@ -1,34 +1,25 @@
 import { Router, type Response } from "express";
-import { validationError } from "../../../../shared/errors/domain-errors";
-import type { AgentRepositoryPort } from "../../departments/application/ports/agent.repository.port";
+import { requireAuth } from "../../../../shared/http/require-auth";
 import type { RealtimeBroadcaster, RealtimeEvent } from "../application/realtime-broadcaster";
 
 export type RealtimeRouterDeps = {
   broadcaster: RealtimeBroadcaster;
-  agentRepo: AgentRepositoryPort;
 };
 
 /**
- * SSE en `/api/realtime?userId=` (03_API_CONTRACT.md §C.3).
- * Identidad: query `userId` o header `x-agent-id` (mismo nivel que el resto del frontend).
+ * SSE en `/api/realtime` (03_API_CONTRACT.md §C.3). Identidad via sesion
+ * real (docs/spec/06_BACKEND_GAPS.md §1.b): `EventSource` no puede mandar
+ * headers propios, pero si manda la cookie httpOnly con
+ * `withCredentials: true` — por eso `session.middleware.ts` ya resolvio
+ * `req.agent` antes de llegar aqui, igual que cualquier otro endpoint.
  */
 export function createRealtimeRouter(deps: RealtimeRouterDeps): Router {
   const router = Router();
 
   router.get("/api/realtime", async (req, res, next) => {
     try {
-      const userId =
-        (typeof req.query.userId === "string" && req.query.userId) ||
-        req.header("x-agent-id") ||
-        "";
-      if (!userId) {
-        throw validationError("userId (query) o header x-agent-id requerido");
-      }
-
-      const agent = await deps.agentRepo.findById(userId);
-      if (!agent || !agent.active) {
-        throw validationError("Agente no encontrado o inactivo");
-      }
+      const agent = requireAuth(req);
+      const userId = agent.id;
 
       const departmentIds = new Set<string>();
       if (agent.primaryDepartmentId) departmentIds.add(agent.primaryDepartmentId);

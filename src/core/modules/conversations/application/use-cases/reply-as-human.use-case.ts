@@ -2,6 +2,9 @@ import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
+import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
+import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
@@ -21,6 +24,14 @@ export type ReplyAsHumanDeps = {
   logger: Logger;
   /** Etapa 6: deshabilita automation del caso activo al responder como humano. */
   caseRepo?: CaseRepositoryPort;
+  /**
+   * docs/spec/06_BACKEND_GAPS.md §2 — si el caso de la conversacion ya esta
+   * `HUMAN_ACTIVE`/`ESCALATED`, solo el agente asignado (o manager/admin con
+   * alcance) puede responder; el resto queda en solo lectura. Opcionales
+   * para no romper construcciones existentes sin este chequeo.
+   */
+  agentRepo?: AgentRepositoryPort;
+  departmentRepo?: DepartmentRepositoryPort;
 };
 
 /**
@@ -36,6 +47,21 @@ export class ReplyAsHumanUseCase {
     const conversation = await conversationRepo.findById(input.conversationId);
     if (!conversation) {
       throw notFound(`Conversacion ${input.conversationId} no encontrada`);
+    }
+
+    if (caseRepo && this.deps.agentRepo && this.deps.departmentRepo) {
+      const cases = await caseRepo.listByConversation(conversation.id);
+      const humanCase = cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
+      if (humanCase) {
+        const agent = await resolveActingAgent(this.deps.agentRepo, input.agentUserId);
+        await assertCanWriteCase({
+          agent,
+          caseEntity: humanCase,
+          mode: "act",
+          agentRepo: this.deps.agentRepo,
+          departmentRepo: this.deps.departmentRepo,
+        });
+      }
     }
 
     let externalId: string;

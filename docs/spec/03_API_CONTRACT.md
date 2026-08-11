@@ -117,6 +117,14 @@ o en error:
 |---|---|
 | `GET /api/departments` | Lista de departamentos |
 | `GET /api/agents` | Lista de agentes |
+| `POST /api/agents` | Crea un agente — requiere `role=admin` (§F). Body: `{ name, email, role?, primaryDepartmentId? }` → `{ data: { agent, temporaryPassword } }` |
+| `PUT /api/agents/:id` | Edita un agente — requiere `role=admin`. Body: `{ name?, email?, role?, primaryDepartmentId?, active? }` |
+| `DELETE /api/agents/:id` | Desactiva un agente (soft delete, `active=false`) — requiere `role=admin`. No permite dejar el sistema sin ningún `role=admin` activo |
+| `POST /api/agents/:id/reset-password` | Genera una contraseña temporal nueva — requiere `role=admin` → `{ data: { agent, temporaryPassword } }` |
+| `POST /api/auth/login` | `{ email, password }` → `{ data: AgentDto }` + cookie `httpOnly` de sesión (§F) |
+| `POST /api/auth/logout` | Revoca la sesión actual → `204` |
+| `GET /api/auth/me` | Agente de la sesión actual → `{ data: AgentDto }` \| `403` sin sesión |
+| `POST /api/auth/change-password` | `{ currentPassword, newPassword }` — autoservicio, requiere sesión → `204` |
 | `GET /api/conversations?departmentId=&userId=&status=` | Bandeja de conversaciones — cada item incluye `lastMessagePreview` (ver `ConversationDto` en §C.4), para pintar el inbox sin pedir `/messages` por cada fila |
 | `GET /api/conversations/:id/messages?limit=&cursor=` | Mensajes de la conversación, orden cronológico, paginado |
 | `GET /api/conversations/:id/cases` | Casos (histórico) de la conversación |
@@ -133,9 +141,9 @@ o en error:
 
 | Endpoint | Efecto |
 |---|---|
-| `POST /api/conversations/:id/reply` `{ agentUserId, body }` | Respuesta humana; fuerza `automation.enabled=false` si no lo estaba |
-| `POST /api/conversations/:id/take-control` `{ agentUserId }` | Un agente toma la conversación |
-| `POST /api/cases/:id/claim` `{ agentUserId }` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño |
+| `POST /api/conversations/:id/reply` `{ body }` | Respuesta humana (agente = sesión actual); fuerza `automation.enabled=false` si no lo estaba |
+| `POST /api/conversations/:id/take-control` | Un agente toma la conversación |
+| `POST /api/cases/:id/claim` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño |
 | `POST /api/cases/:id/assign` `{ agentUserId }` | Asigna/reasigna el caso (requiere `manager`/`admin` del departamento del caso, o ser el pool de triage) |
 | `POST /api/cases/:id/reassign` `{ agentUserId }` | Reasigna (alias semántico de `assign` sobre un caso ya asignado) |
 | `POST /api/cases/:id/complete` `{ resolutionNote? }` | `COMPLETED` |
@@ -148,9 +156,11 @@ o en error:
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.
 
-**Autorización de escritura**: requiere `case.assigned_agent_id = self`, o el caso sin asignar (vía `claim`), o `role IN (manager, admin)` con pertenencia/alcance sobre el departamento del caso.
+**Autorización de escritura**: requiere `case.assigned_agent_id = self`, o el caso sin asignar (vía `claim`), o `role IN (manager, admin)` con pertenencia/alcance sobre el departamento del caso. Se aplica de forma consistente en `reply`, `complete`, `claim`, `disable-automation` y `reactivate-automation` cuando el caso ya está `HUMAN_ACTIVE`/`ESCALATED` (`agent-case-auth.ts`) — el resto de agentes puede **leer** la conversación/caso pero recibe `403` si intenta escribir.
 
 Toda escritura queda en `audit_event`.
+
+**Auto-asignación** (docs/spec/06_BACKEND_GAPS.md §2): al escalarse un caso con `department_id` resuelto (nunca en el pool de triage), el sistema intenta asignarlo de inmediato al agente humano con menor carga activa de ese departamento (`AutoAssignAgentService`, umbral configurable via `AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT`). Si nadie es elegible, el caso queda `ESCALATED` sin asignar para asignación manual. Se audita como `CASE_AUTO_ASSIGNED` con `actorId: null` (sistema).
 
 ### C.3 Tiempo real
 
@@ -179,6 +189,11 @@ type ConversationDto = {
   lastActivityAt: string;
   createdAt: string;
   updatedAt: string;
+  // Nombre de perfil/agenda de WhatsApp (contacts[].profile.name del webhook de
+  // Meta) — real, nunca inventado; null hasta el primer mensaje del cliente.
+  // Distinto de Customer.fullName (ese es el nombre validado por cédula). No
+  // existe foto de perfil: Meta no la expone via la API oficial (01_DATA_MODEL.md).
+  waProfileName: string | null;
   // Preview del último mensaje, para pintar el inbox sin un round-trip extra a /messages.
   // Se calcula al leer (JOIN al último message de la conversación), no se persiste aparte.
   lastMessagePreview: {
@@ -259,6 +274,8 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 - API → n8n: header `X-Internal-Api-Key` en cada llamada saliente; cada workflow de n8n valida ese header antes de ejecutar nada.
 - Autorización de agentes: por `role` (`agent | manager | admin`) + `agent_membership`/`department.visibility` (`01_DATA_MODEL.md` §7) — reemplaza el antiguo `is_global_admin` booleano.
 - Toda acción de escritura queda en `audit_event`.
+- **Sesión de agente** (login real, `POST /api/auth/login`): cookie `httpOnly` (`sid`) con un token opaco aleatorio guardado en Redis (`session:<token>` → `{ agentId, createdAt }`, TTL deslizante de `SESSION_TTL_SECONDS`, default 12h). No es JWT: una sesión se puede revocar al instante borrando la clave de Redis. Contraseñas con `argon2id` (`shared/security/password-hasher.ts`). `SameSite=Lax` es suficiente contra CSRF porque todos los `GET` son de solo lectura (sin efectos secundarios).
+- **`req.agent`** (poblado por `session.middleware.ts` a partir de la cookie) es la única fuente de identidad en cada request — ningún router confía ya en el header `x-agent-id` ni en `agentUserId`/`actorId` del body para decidir "quién hace esto" (esos campos, cuando siguen existiendo en algún body como `assign`/`reassign`, son el destino de la acción, no una afirmación de identidad).
 
 ---
 
@@ -271,3 +288,7 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 - El registro de acción→URL de n8n pasó de variables de entorno (`N8N_WEBHOOK_*`) a la tabla `n8n_workflow_registry`, gestionable vía `PUT/DELETE /api/admin/n8n-workflows/:action` (§C.2) sin redeploy.
 - Se agregó el rol `manager` y el pool de triage (`department_id IS NULL`) para casos/mensajes no clasificables automáticamente.
 - Se agregó `case.assigned_agent_id` y el endpoint `claim` para el modelo de bandeja compartida (visible a todos, editable solo por el asignado).
+
+**v3 → v4**: login real (`agent.password_hash` + `POST/GET /api/auth/*`, migración `0009_agent_password_hash.sql`). Todos los routers dejaron de confiar en `x-agent-id`/`agentUserId` del cliente como identidad — ahora resuelven siempre `req.agent` desde la cookie de sesión real. Se agregó el CRUD completo de agentes (`POST/PUT/DELETE /api/agents`, `POST /api/agents/:id/reset-password`). Se agregó auto-asignación de casos escalados por departamento (`AutoAssignAgentService`) y se cerró el hueco de autorización de escritura en `reply`/`complete` (antes solo `claim`/`disable-automation`/`reactivate-automation` lo exigían).
+
+**v4 → v5**: `ConversationDto.waProfileName` (migración `0010_conversation_wa_profile_name.sql`) — nombre real de perfil/agenda de WhatsApp, capturado del webhook sin llamada extra a la API de Meta. La foto de perfil no se agrega: no existe endpoint oficial de Meta para obtenerla (ver nota en `01_DATA_MODEL.md`).

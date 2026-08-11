@@ -1,6 +1,7 @@
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import { validationError } from "../../../../shared/errors/domain-errors";
+import { requireAuth } from "../../../../shared/http/require-auth";
 import type { ClaimCaseUseCase } from "../../escalation/application/use-cases/claim-case.use-case";
 import type { AssignCaseUseCase } from "../../escalation/application/use-cases/assign-case.use-case";
 import type { DisableAutomationUseCase } from "../../escalation/application/use-cases/disable-automation.use-case";
@@ -29,46 +30,43 @@ export type CasesRouterDeps = {
   broadcaster?: RealtimeBroadcaster;
 };
 
-const agentBodySchema = z.object({
-  agentUserId: z.string().uuid(),
-});
-
 const assignBodySchema = z.object({
-  agentUserId: z.string().uuid(),
+  agentUserId: z.string().uuid(), // a quien se asigna — parametro de negocio, no identidad
   departmentId: z.string().uuid().nullable().optional(),
 });
 
 const disableBodySchema = z.object({
   reason: z.string().min(1),
-  agentUserId: z.string().uuid().optional(),
 });
 
 const completeBodySchema = z.object({
-  agentUserId: z.string().uuid().optional(),
   resolutionNote: z.string().optional(),
 });
 
 const cancelBodySchema = z.object({
   reason: z.string().min(1),
-  agentUserId: z.string().uuid().optional(),
 });
 
 const transferBodySchema = z.object({
   toDepartmentId: z.string().uuid(),
   reason: z.string().min(1),
-  agentUserId: z.string().uuid().optional(),
 });
 
 /**
- * Acciones/lecturas de caso (03_API_CONTRACT.md §C) — Etapas 6+7.
+ * Acciones/lecturas de caso (03_API_CONTRACT.md §C).
+ * Quien ejecuta la accion ("actor") siempre viene de `req.agent` (sesion
+ * real via cookie — docs/spec/06_BACKEND_GAPS.md §1.b). Los `agentUserId`
+ * que siguen apareciendo en algunos bodies (assign/reassign) son el
+ * DESTINO de la accion ("a quien asignar"), no una afirmacion de identidad
+ * — esos si vienen del cliente porque son un parametro de negocio legitimo.
  */
 export function createCasesRouter(deps: CasesRouterDeps): Router {
   const router = Router();
 
   router.get("/api/dashboard", async (req, res, next) => {
     try {
-      const userId =
-        (typeof req.query.userId === "string" && req.query.userId) || requireAgentHeader(req);
+      const agent = requireAuth(req);
+      const userId = (typeof req.query.userId === "string" && req.query.userId) || agent.id;
       const data = await deps.getDashboard.execute(userId);
       res.json({ data });
     } catch (error) {
@@ -78,6 +76,7 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.get("/api/cases/:id", async (req, res, next) => {
     try {
+      requireAuth(req);
       const aggregate = await deps.caseRepo.findById(req.params.id);
       if (!aggregate) {
         res.status(404).json({ error: { type: "NOT_FOUND", message: "Caso no encontrado" } });
@@ -100,6 +99,7 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.get("/api/cases/:id/summary", async (req, res, next) => {
     try {
+      requireAuth(req);
       const summary = await deps.getCaseSummary.execute(req.params.id);
       res.json({ data: summary });
     } catch (error) {
@@ -109,6 +109,7 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.get("/api/cases/:id/timeline", async (req, res, next) => {
     try {
+      requireAuth(req);
       const aggregate = await deps.caseRepo.findById(req.params.id);
       if (!aggregate) {
         res.status(404).json({ error: { type: "NOT_FOUND", message: "Caso no encontrado" } });
@@ -143,23 +144,20 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/claim", async (req, res, next) => {
     try {
-      const parsed = agentBodySchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
-      }
+      const agent = requireAuth(req);
       await deps.claimCase.execute({
         caseId: req.params.id,
-        agentUserId: parsed.data.agentUserId,
+        agentUserId: agent.id,
       });
       deps.broadcaster?.publish({
         type: "CASE_CLAIMED",
         caseId: req.params.id,
-        agentUserId: parsed.data.agentUserId,
+        agentUserId: agent.id,
       });
       deps.broadcaster?.publish({
         type: "HUMAN_ASSIGNED",
         caseId: req.params.id,
-        agentUserId: parsed.data.agentUserId,
+        agentUserId: agent.id,
       });
       res.status(204).send();
     } catch (error) {
@@ -169,14 +167,14 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/assign", async (req, res, next) => {
     try {
-      const actorAgentId = requireAgentHeader(req);
+      const actor = requireAuth(req);
       const parsed = assignBodySchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
       await deps.assignCase.execute({
         caseId: req.params.id,
-        actorAgentId,
+        actorAgentId: actor.id,
         agentUserId: parsed.data.agentUserId,
         departmentId: parsed.data.departmentId,
       });
@@ -193,14 +191,14 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/reassign", async (req, res, next) => {
     try {
-      const actorAgentId = requireAgentHeader(req);
+      const actor = requireAuth(req);
       const parsed = assignBodySchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
       await deps.assignCase.execute({
         caseId: req.params.id,
-        actorAgentId,
+        actorAgentId: actor.id,
         agentUserId: parsed.data.agentUserId,
         departmentId: parsed.data.departmentId,
         reassign: true,
@@ -218,14 +216,14 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/complete", async (req, res, next) => {
     try {
+      const agent = requireAuth(req);
       const parsed = completeBodySchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
-      const agentUserId = parsed.data.agentUserId ?? requireAgentHeader(req);
       const result = await deps.completeCase.execute({
         caseId: req.params.id,
-        agentUserId,
+        agentUserId: agent.id,
         resolutionNote: parsed.data.resolutionNote,
       });
       res.json({ data: result });
@@ -236,6 +234,7 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/cancel", async (req, res, next) => {
     try {
+      requireAuth(req);
       const parsed = cancelBodySchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
@@ -252,16 +251,16 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/transfer", async (req, res, next) => {
     try {
+      const agent = requireAuth(req);
       const parsed = transferBodySchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
-      const agentUserId = parsed.data.agentUserId ?? requireAgentHeader(req);
       const result = await deps.transferCase.execute({
         caseId: req.params.id,
         toDepartmentId: parsed.data.toDepartmentId,
         reason: parsed.data.reason,
-        agentUserId,
+        agentUserId: agent.id,
       });
       res.json({ data: result });
     } catch (error) {
@@ -271,14 +270,14 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/disable-automation", async (req, res, next) => {
     try {
+      const agent = requireAuth(req);
       const parsed = disableBodySchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
-      const agentUserId = parsed.data.agentUserId ?? requireAgentHeader(req);
       const automation = await deps.disableAutomation.execute({
         caseId: req.params.id,
-        agentUserId,
+        agentUserId: agent.id,
         reason: parsed.data.reason,
       });
       res.json({ data: automation });
@@ -289,11 +288,10 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
 
   router.post("/api/cases/:id/reactivate-automation", async (req, res, next) => {
     try {
-      const agentUserId =
-        typeof req.body?.agentUserId === "string" ? req.body.agentUserId : requireAgentHeader(req);
+      const agent = requireAuth(req);
       const result = await deps.reactivateAutomation.execute({
         caseId: req.params.id,
-        agentUserId,
+        agentUserId: agent.id,
       });
       deps.broadcaster?.publish({ type: "AUTOMATION_ENABLED", caseId: req.params.id });
       res.json({ data: result });
@@ -303,10 +301,4 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
   });
 
   return router;
-}
-
-function requireAgentHeader(req: Request): string {
-  const agentId = req.header("x-agent-id");
-  if (!agentId) throw validationError("Header x-agent-id requerido");
-  return agentId;
 }

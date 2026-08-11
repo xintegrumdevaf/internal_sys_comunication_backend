@@ -14,6 +14,7 @@ type ConversationRow = {
   last_activity_at: Date;
   created_at: Date;
   updated_at: Date;
+  wa_profile_name: string | null;
 };
 
 function mapRow(row: ConversationRow): Conversation {
@@ -26,6 +27,7 @@ function mapRow(row: ConversationRow): Conversation {
     lastActivityAt: row.last_activity_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    waProfileName: row.wa_profile_name,
   };
 }
 
@@ -79,6 +81,13 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     await this.pool.query(
       `UPDATE conversation SET customer_id = $2, updated_at = now() WHERE id = $1`,
       [id, customerId],
+    );
+  }
+
+  async setWaProfileName(id: string, name: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET wa_profile_name = $2, updated_at = now() WHERE id = $1`,
+      [id, name],
     );
   }
 

@@ -314,4 +314,22 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       occurredAt: row.occurred_at,
     }));
   }
+
+  async countActiveCasesByAgent(agentIds: string[]): Promise<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const id of agentIds) result[id] = 0;
+    if (agentIds.length === 0) return result;
+
+    const { rows } = await this.pool.query<{ assigned_agent_id: string; count: string }>(
+      `SELECT assigned_agent_id, COUNT(*)::text AS count
+       FROM "case"
+       WHERE status = 'HUMAN_ACTIVE' AND assigned_agent_id = ANY($1::uuid[])
+       GROUP BY assigned_agent_id`,
+      [agentIds],
+    );
+    for (const row of rows) {
+      result[row.assigned_agent_id] = Number(row.count);
+    }
+    return result;
+  }
 }

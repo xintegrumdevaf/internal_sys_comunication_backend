@@ -22,4 +22,11 @@ export interface ConversationRepositoryPort {
    * conversación para no volver a pedir cédula en casos posteriores.
    */
   setCustomerId(id: string, customerId: string | null): Promise<void>;
+  /**
+   * Nombre de perfil de WhatsApp (`contacts[].profile.name` del webhook de
+   * Meta) — se actualiza en cada mensaje entrante que lo traiga, nunca se
+   * borra con un valor vacío (la persona puede cambiarlo, pero un mensaje
+   * sin `contacts` no debe pisar el último nombre conocido).
+   */
+  setWaProfileName(id: string, name: string): Promise<void>;
 }

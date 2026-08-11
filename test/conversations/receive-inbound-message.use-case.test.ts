@@ -64,6 +64,47 @@ describe("ReceiveInboundMessageUseCase", () => {
     expect(Number(rows[0].count)).toBe(1);
   });
 
+  it("persiste el nombre de perfil de WhatsApp del primer mensaje que lo trae", async () => {
+    const waPhone = uniquePhone();
+
+    const result = await useCase.execute({
+      waPhone,
+      externalId: randomUUID(),
+      body: "Hola",
+      type: "text",
+      waProfileName: "Sheena Nelson",
+    });
+
+    expect(result.conversation.waProfileName).toBe("Sheena Nelson");
+
+    const { rows } = await pool.query("SELECT wa_profile_name FROM conversation WHERE id = $1", [
+      result.conversation.id,
+    ]);
+    expect(rows[0].wa_profile_name).toBe("Sheena Nelson");
+  });
+
+  it("un mensaje sin contacts (waProfileName null) no borra el nombre ya conocido", async () => {
+    const waPhone = uniquePhone();
+
+    const first = await useCase.execute({
+      waPhone,
+      externalId: randomUUID(),
+      body: "Hola",
+      type: "text",
+      waProfileName: "Ana Torres",
+    });
+    const second = await useCase.execute({
+      waPhone,
+      externalId: randomUUID(),
+      body: "Otro mensaje",
+      type: "text",
+      waProfileName: null,
+    });
+
+    expect(first.conversation.waProfileName).toBe("Ana Torres");
+    expect(second.conversation.waProfileName).toBe("Ana Torres");
+  });
+
   it("una conversacion existente se reutiliza para un segundo mensaje del mismo wa_phone", async () => {
     const waPhone = uniquePhone();
 

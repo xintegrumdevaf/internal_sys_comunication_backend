@@ -194,6 +194,17 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
       .filter((e) => e.caseId === caseId)
       .map((e) => ({ type: e.type, payload: e.payload, occurredAt: new Date() }));
   }
+
+  async countActiveCasesByAgent(agentIds: string[]): Promise<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const id of agentIds) result[id] = 0;
+    for (const c of this.cases.values()) {
+      if (c.status === "HUMAN_ACTIVE" && c.assignedAgentId && agentIds.includes(c.assignedAgentId)) {
+        result[c.assignedAgentId] = (result[c.assignedAgentId] ?? 0) + 1;
+      }
+    }
+    return result;
+  }
 }
 
 export class WorkflowExecutionRepositoryFake implements WorkflowExecutionRepositoryPort {
