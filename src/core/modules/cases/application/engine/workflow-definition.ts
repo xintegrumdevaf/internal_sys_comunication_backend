@@ -1,4 +1,5 @@
 import type { CaseContext } from "../../domain/contexts/case-context";
+import type { ConversationIdentityPort } from "../../../customers/application/ports/conversation-identity.port";
 import type { N8nGatewayPort } from "../ports/n8n-gateway.port";
 import type { WaitingStep } from "./waiting-step";
 
@@ -32,6 +33,11 @@ export type WorkflowStepInput = {
   text?: string;
   /** Entities de la interpretacion actual (02_STATE_MACHINE.md §13). */
   entities?: Record<string, unknown>;
+  /**
+   * Identidad validada en la conversación (02_STATE_MACHINE.md §14).
+   * Opcional en tests unitarios de un solo paso; AdvanceCase lo inyecta siempre.
+   */
+  identity?: ConversationIdentityPort;
 };
 
 export type WorkflowStateHandler = (input: WorkflowStepInput) => Promise<WorkflowStepOutcome>;

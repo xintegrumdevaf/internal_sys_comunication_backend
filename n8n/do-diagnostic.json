@@ -4,7 +4,7 @@
     {
       "parameters": {
         "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"conversationId\": \"59356467474\",\n  \"sector\": \"pomasqui\",\n  \"olt_name\": \"main\",\n  \"pon\": \"3\",\n  \"serial\": \"D011A66CB67C\"\n}"
+        "jsonExample": "{\n  \"input\": {\n    \"conversationId\": \"59356467474\",\n    \"sector\": \"pomasqui\",\n    \"oltName\": \"main\",\n    \"pon\": \"3\",\n    \"serial\": \"D011A66CB67C\"\n  }\n}"
       },
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.2,
@@ -24,23 +24,23 @@
           "parameters": [
             {
               "name": "sector",
-              "value": "={{ $json.body.sector }}"
+              "value": "={{ $json.body.input.sector }}"
             },
             {
               "name": "olt_name",
-              "value": "={{ $json.body.olt_name }}"
+              "value": "={{ $json.body.input.oltName }}"
             },
             {
               "name": "pon",
-              "value": "={{ $json.body.pon }}"
+              "value": "={{ $json.body.input.pon }}"
             },
             {
               "name": "serial",
-              "value": "={{ $json.body.serial }}"
+              "value": "={{ $json.body.input.serial }}"
             },
             {
               "name": "conversationId",
-              "value": "={{ $json.body.conversationId }}"
+              "value": "={{ $json.body.input.conversationId }}"
             }
           ]
         },

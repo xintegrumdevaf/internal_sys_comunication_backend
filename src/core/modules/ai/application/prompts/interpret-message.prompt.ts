@@ -54,7 +54,14 @@ Número entre 0 y 1. Usa menos de 0.6 si el mensaje es ambiguo. Ante la duda, ba
 - Nunca agregues texto fuera del JSON.
 - Nunca inventes datos técnicos que el cliente no dijo.
 - Nunca extraigas claves que no estén en "datos requeridos" del contexto.
-- Si no estás seguro, usa type=UNCLEAR con confidence baja.`;
+- Si un mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, ayúdame con mi internet" → \`support.internet\`, no \`billing.balance\`).
+- Si no estás seguro, usa type=UNCLEAR con confidence baja.
+
+## Ejemplos clave
+Mensaje: "Ya no tengo deuda pendiente, valida mi problema de internet."
+Sin caso activo.
+→ {"type":"NEW_INTENT","intent":"support.internet","entities":{},"confidence":0.85}
+(nota: "deuda" es solo contexto; el pedido accionable es soporte de internet)`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

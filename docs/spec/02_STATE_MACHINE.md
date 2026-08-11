@@ -57,42 +57,6 @@ stateDiagram-v2
 
 Regla explícita: al volver de `WAITING_USER_DIAGNOSTIC` el motor continúa **desde `DIAGNOSTIC`**, nunca desde `VALIDATE_CLIENT` ni `CHECK_BALANCE`, salvo que una regla de negocio lo exija (p. ej. han pasado más de X horas y se requiere re-validar saldo).
 
-## 3.1 `BILLING_BALANCE` (Etapa 8)
-
-```mermaid
-stateDiagram-v2
-    [*] --> VALIDATE_CLIENT
-    VALIDATE_CLIENT --> WAITING_USER_CLIENT: falta nationalId
-    WAITING_USER_CLIENT --> VALIDATE_CLIENT: usuario responde
-    VALIDATE_CLIENT --> CHECK_BALANCE: cliente OK
-    CHECK_BALANCE --> RESPOND_BALANCE: purpose balance
-    RESPOND_BALANCE --> [*]: COMPLETED
-    CHECK_BALANCE --> WAITING_USER_RECEIPT: purpose record_payment sin datos
-    CHECK_BALANCE --> RECORD_PAYMENT: amount+reference presentes
-    WAITING_USER_RECEIPT --> RECORD_PAYMENT: amount+reference
-    RECORD_PAYMENT --> [*]: COMPLETED
-    RECORD_PAYMENT --> [*]: ESCALATED
-```
-
-WaitingSteps (§13): `WAITING_USER_CLIENT` (`requireAll: ["nationalId"]`), `WAITING_USER_RECEIPT` (`requireAll: ["amount","reference"]`). Reutiliza acciones genéricas `VALIDATE_CLIENT`/`CHECK_BALANCE` y `RECORD_PAYMENT`.
-
-## 3.2 `SALES_PACKAGES` (Etapa 8)
-
-```mermaid
-stateDiagram-v2
-    [*] --> COLLECT_PREFERENCE
-    COLLECT_PREFERENCE --> WAITING_USER_SPEED: falta requestedSpeed
-    WAITING_USER_SPEED --> QUERY_PACKAGES
-    COLLECT_PREFERENCE --> QUERY_PACKAGES
-    QUERY_PACKAGES --> RESPOND_OFFER: found
-    QUERY_PACKAGES --> [*]: ESCALATED not found
-    RESPOND_OFFER --> [*]: COMPLETED packages
-    RESPOND_OFFER --> WAITING_USER_UPGRADE: purpose upgrade
-    WAITING_USER_UPGRADE --> [*]: ESCALATED a ventas
-```
-
-Usa `QUERY_KNOWLEDGE_BASE`. Un upgrade confirmado escala a departamento `SALES` (no inventa acción de cambio de plan en n8n).
-
 ## 4. Un solo caso automatizado activo por conversación — arbitraje
 
 `conversation.active_case_id` apunta al único `Case` en estado automatizable. Ante una nueva interpretación de intención mientras hay un caso activo, la API (no el LLM) decide:
@@ -203,5 +167,49 @@ Ejemplos:
    - `waitingAttempts >= maxAttempts` → `ESCALATED` (`automation.enabled=false`), con `reason: "No fue posible obtener {campos faltantes} tras {N} intentos"` en el resumen estructurado (`03_API_CONTRACT.md` §D) — el departamento de la escalación es el mismo del `Case` (`§9` de este documento), no uno genérico.
 
 **La IA nunca decide escalar.** Solo reporta qué pudo extraer (`entities`) y con qué confianza; el motor es quien compara eso contra `requireAll`/`requireAny` y decide reintentar o escalar. Esto es deliberado: si dejáramos que el LLM decidiera "no puedo procesar esto, escalo", perderíamos determinismo justo en el punto más importante (cuándo un cliente necesita un humano).
+
+## 14. Reutilización de identidad ya validada en la misma conversación (obligatorio, no opcional)
+
+**Regla dura**: si `VALIDATE_CLIENT` ya identificó al cliente en algún caso previo de esta misma conversación, **ningún caso posterior de esa conversación vuelve a pedir la cédula**. Esto no es una optimización, es un requisito — pedir la misma identificación varias veces en una sola conversación es exactamente el defecto que se buscaba eliminar desde el diseño original (`00_OVERVIEW.md` §5: "la IA nunca inventa ni vuelve a pedir datos ya obtenidos").
+
+Mecanismo (vive en la API, no en el prompt ni en n8n):
+
+1. Cuando `VALIDATE_CLIENT` resuelve un único contrato con éxito, la API:
+   - resuelve o crea el `Customer` correspondiente (por `national_id`),
+   - fija `conversation.customer_id` (columna que ya existe, `01_DATA_MODEL.md` §2 — hasta ahora se declaraba pero nada la escribía),
+   - dado que `contract.customer_id` ya vincula al contrato con ese `Customer`, la identidad queda recuperable sin volver a llamar a n8n.
+2. **Antes** de que cualquier `WorkflowDefinition` (sea `SUPPORT_INTERNET`, `BILLING_BALANCE`, o el que sea) entre a un `WaitingStep` que pida cédula/identidad, el motor debe chequear primero: ¿`conversation.customer_id IS NOT NULL`? Si sí:
+   - se resuelve el `contract` activo desde la tabla `contract` directamente (sin llamar al webhook `VALIDATE_CLIENT` de n8n, sin generar ningún `WaitingStep` ni pregunta al cliente),
+   - se puebla `case.context.data.client`/`contract` con esos datos,
+   - el workflow continúa al siguiente estado como si el paso ya se hubiera completado.
+3. Esto vale **dentro de la conversación actual**, no entre conversaciones distintas del mismo cliente en otro momento — reidentificar en una conversación nueva sigue siendo válido (una conversación puede expirar y el cliente volver días después; ver `02_STATE_MACHINE.md` §8).
+4. `CHECK_BALANCE` **sí** se sigue ejecutando fresco cada vez que un workflow lo necesita (el saldo cambia; la identidad no) — esta regla es solo para no repetir la validación de identidad, no para cachear datos que legítimamente pueden cambiar.
+
+**Bug relacionado a vigilar por separado**: si el `pendingQuestion` que ve el cliente al pedir la cédula es un texto genérico compartido entre `SUPPORT_INTERNET` y `BILLING_BALANCE` (en vez de uno específico por workflow, como ya permite el tipo `WaitingStep` de §13), puede aparecer una respuesta que mezcla temas (ej. preguntar de "saldo" en medio de un caso de soporte de internet). Cada `WorkflowDefinition` debe declarar su propio texto de `pendingQuestion` para el paso `VALIDATE_CLIENT`, aunque la acción de n8n subyacente sea la misma acción compartida (`04_N8N_WORKFLOW_SPEC.md` §6.1) — compartir la acción no significa compartir el texto que ve el cliente.
+
+## 15. `BILLING_BALANCE` — diagrama y plantillas (dos ramas obligatoriamente distintas)
+
+Nunca se documentó explícitamente este workflow más allá de "reutiliza `CHECK_BALANCE`/`RECORD_PAYMENT`" — eso dejó a criterio de la implementación cómo ramificar la respuesta, y terminó en una sola plantilla genérica reusada para los dos casos (con y sin deuda), lo cual no tiene sentido de negocio. Se formaliza así:
+
+```mermaid
+stateDiagram-v2
+    [*] --> VALIDATE_CLIENT: entrada por intent=billing.balance
+    VALIDATE_CLIENT --> CHECK_BALANCE: cliente validado (o identidad ya conocida, §14)
+    CHECK_BALANCE --> RESPOND_NO_DEBT: hasDebt=false
+    RESPOND_NO_DEBT --> [*]: COMPLETED
+    CHECK_BALANCE --> RESPOND_DEBT_WITH_OPTIONS: hasDebt=true
+    RESPOND_DEBT_WITH_OPTIONS --> [*]: COMPLETED
+
+    [*] --> RECORD_PAYMENT: entrada directa por intent=billing.record_payment (cliente ya mandó comprobante sin que se le pidiera)
+    RECORD_PAYMENT --> [*]: COMPLETED (pago registrado) / ESCALATE (datos del comprobante incompletos, §13)
+```
+
+**Regla dura de plantillas** (elimina el bug del "pide comprobante con saldo $0"):
+- `RESPOND_NO_DEBT` (hasDebt=false): confirma que no hay saldo pendiente. **Nunca** menciona comprobantes, pagos, ni invita a enviar nada — no hay nada que conciliar.
+- `RESPOND_DEBT_WITH_OPTIONS` (hasDebt=true): muestra el monto exacto (obligatorio, `06_AI_PROMPTS.md` §4) y **solo ahí** tiene sentido invitar a enviar el comprobante si ya pagó, o explicar formas de pago si no.
+- Estas son dos `templateHint` distintos, nunca el mismo texto condicionado a medias — la ramificación (`hasDebt` true/false) ocurre en el motor de workflow antes de llamar a `composeReply`, no dentro del prompt.
+
+Dos entradas posibles al mismo `workflow_type` (`billing.balance` vs `billing.record_payment`) son válidas y ya están en el catálogo de intents (`06_AI_PROMPTS.md` §2) — el motor decide el estado inicial según cuál disparó el caso, no siempre arranca en `VALIDATE_CLIENT`.
+
 
 

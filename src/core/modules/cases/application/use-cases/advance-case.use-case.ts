@@ -10,6 +10,7 @@ import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
 import type { N8nGatewayPort } from "../ports/n8n-gateway.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
+import type { ConversationIdentityPort } from "../../../customers/application/ports/conversation-identity.port";
 import type { EscalationService } from "../../../escalation/application/services/escalation.service";
 import type { WorkflowStepOutcome } from "../engine/workflow-definition";
 import { WorkflowEngine } from "../engine/workflow-engine";
@@ -25,6 +26,8 @@ export type AdvanceCaseDeps = {
   engine: WorkflowEngine;
   gateway: N8nGatewayPort;
   logger: Logger;
+  /** docs/spec/02_STATE_MACHINE.md §14 — reutilización de identidad por conversación. */
+  identity?: ConversationIdentityPort;
   escalationService?: EscalationService;
 };
 
@@ -128,6 +131,7 @@ export class AdvanceCaseUseCase {
           gateway: instrumentedGateway,
           text: input.text,
           entities,
+          identity: this.deps.identity,
         });
         log.info(
           { workflowType: aggregate.case.workflowType, stateBefore, outcome: outcome.type },

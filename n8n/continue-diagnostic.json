@@ -24,11 +24,11 @@
           "parameters": [
             {
               "name": "conversationId",
-              "value": "={{ $json.body.conversationId }}"
+              "value": "={{ $json.body.input.conversationId }}"
             },
             {
               "name": "message",
-              "value": "={{ $json.body.message }}"
+              "value": "={{ $json.body.input.message }}"
             }
           ]
         },

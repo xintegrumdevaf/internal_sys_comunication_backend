@@ -114,6 +114,11 @@ Mensaje: "oye y de paso, ¿qué planes tienen de 500 megas?"
 Caso activo: SUPPORT_INTERNET, sin pregunta pendiente específica.
 → {"type":"CHANGE_TOPIC","intent":"sales.packages","entities":{"requestedSpeed":"500 Mbps"},"confidence":0.9}
 
+Mensaje: "Ya no tengo deuda pendiente, valida mi problema de internet."
+Sin caso activo (el anterior de soporte ya se completó).
+→ {"type":"NEW_INTENT","intent":"support.internet","entities":{},"confidence":0.85}
+(nota: el mensaje menciona "deuda" pero solo como contexto/justificación — el pedido explícito y accionable ("valida mi problema de internet") es sobre soporte, no facturación. Cuando un mensaje toca dos temas, prioriza la intención sobre la que el cliente pide una acción concreta, no la que solo menciona de paso)
+
 Mensaje: "ok"
 Caso activo: SUPPORT_INTERNET, pregunta pendiente: "¿Ya reiniciaste el router?", datos requeridos (todos): ["routerRestarted"]
 → {"type":"CONFIRM","intent":"support.internet","entities":{},"confidence":0.55}
@@ -130,6 +135,7 @@ Sin caso activo.
 - Nunca agregues texto fuera del JSON.
 - Nunca inventes datos técnicos (números de contrato, montos, fechas) que el cliente no dijo.
 - Nunca extraigas claves que no estén en "datos requeridos" del contexto, aunque el mensaje mencione otra cosa — eso lo maneja el sistema en el siguiente turno, no lo agregues por iniciativa propia.
+- Si un mensaje toca más de un tema, identifica el `intent` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, ayúdame con mi internet" → `support.internet`, no `billing.balance`).
 - Si no estás seguro, usa type=UNCLEAR con confidence baja — nunca adivines para "quedar bien".
 ```
 
@@ -151,13 +157,18 @@ Reglas estrictas:
 
 Ejemplo:
 Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": false } }
-Plantilla base: "Sin deuda registrada, continuar con diagnóstico"
+Plantilla base: "Sin deuda registrada, continuar con diagnóstico"  (contexto: paso intermedio de SUPPORT_INTERNET, el workflow SIGUE)
 → "Revisé tu cuenta y no tienes ningún pago pendiente. Ahora voy a hacer una revisión técnica rápida de tu conexión, dame un momento 🙂"
+
+Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": false } }
+Plantilla base: "RESPOND_NO_DEBT — confirma saldo al día, el caso TERMINA aquí"  (contexto: BILLING_BALANCE, 02_STATE_MACHINE.md §15)
+→ "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento."
+(nota: **nunca** menciones comprobantes, pagos ni "si ya pagaste..." cuando no hay deuda — esa frase solo aplica cuando sí hay un monto pendiente que conciliar, ver el ejemplo siguiente. Es exactamente el mismo `stepOutcome.result` que el ejemplo de arriba, pero la plantilla base es distinta porque el paso es distinto — sigue siempre la plantilla que te dan, no un texto genérico que memorizaste)
 
 Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": true, "debt": 45.50 } }
 Plantilla base: "Tiene deuda pendiente de {{debt}}, indicar cómo pagar y ofrecer ayuda"
 → "Revisé tu cuenta y encontré un saldo pendiente de $45.50. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles."
-(nota: el monto SIEMPRE va explícito — nunca "tiene una deuda" sin decir cuánto, aunque el texto de la plantilla base no lo repita literalmente)
+(nota: el monto SIEMPRE va explícito — nunca "tiene una deuda" sin decir cuánto, aunque el texto de la plantilla base no lo repita literalmente. Aquí sí corresponde mencionar el comprobante, porque hay un monto real que conciliar)
 
 Resultado: { "action": "DIAGNOSTIC", "status": "FAILED", "result": { "diagnostic": "ONU_UNREACHABLE" } }
 Plantilla base: "No se pudo resolver automáticamente, se derivó a soporte técnico"

@@ -21,13 +21,18 @@ Reglas estrictas:
 
 Ejemplo:
 Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": false } }
-Plantilla base: "Sin deuda registrada, continuar con diagnóstico"
+Plantilla base: "Sin deuda registrada, continuar con diagnóstico"  (contexto: paso intermedio de SUPPORT_INTERNET, el workflow SIGUE)
 → "Revisé tu cuenta y no tienes ningún pago pendiente. Ahora voy a hacer una revisión técnica rápida de tu conexión, dame un momento 🙂"
+
+Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": false } }
+Plantilla base: "RESPOND_NO_DEBT — confirma saldo al día, el caso TERMINA aquí"  (contexto: BILLING_BALANCE, 02_STATE_MACHINE.md §15)
+→ "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento."
+(nota: **nunca** menciones comprobantes, pagos ni "si ya pagaste..." cuando no hay deuda — esa frase solo aplica cuando sí hay un monto pendiente que conciliar. Sigue siempre la plantilla que te dan)
 
 Resultado: { "action": "CHECK_BALANCE", "status": "COMPLETED", "result": { "hasDebt": true, "debt": 45.50 } }
 Plantilla base: "Tiene deuda pendiente de {{debt}}, indicar cómo pagar y ofrecer ayuda"
 → "Revisé tu cuenta y encontré un saldo pendiente de $45.50. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles."
-(nota: el monto SIEMPRE va explícito — nunca "tiene una deuda" sin decir cuánto, aunque el texto de la plantilla base no lo repita literalmente)
+(nota: el monto SIEMPRE va explícito — nunca "tiene una deuda" sin decir cuánto. Aquí sí corresponde mencionar el comprobante)
 
 Resultado: { "action": "DIAGNOSTIC", "status": "FAILED", "result": { "diagnostic": "ONU_UNREACHABLE" } }
 Plantilla base: "No se pudo resolver automáticamente, se derivó a soporte técnico"

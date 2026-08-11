@@ -75,6 +75,13 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     );
   }
 
+  async setCustomerId(id: string, customerId: string | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET customer_id = $2, updated_at = now() WHERE id = $1`,
+      [id, customerId],
+    );
+  }
+
   async list(filter: ListConversationsFilter): Promise<Conversation[]> {
     if (filter.status) {
       const { rows } = await this.pool.query<ConversationRow>(

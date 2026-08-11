@@ -4,11 +4,12 @@ import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
 /**
- * BILLING_BALANCE (docs/spec/05_BUILD_PLAN.md Etapa 8 + §13 WaitingSteps).
+ * BILLING_BALANCE (docs/spec/02_STATE_MACHINE.md §15 + §13 WaitingSteps).
  *
  * VALIDATE_CLIENT → CHECK_BALANCE →
- *   purpose=balance → RESPOND_BALANCE → COMPLETED
- *   purpose=record_payment → (entities completas) RECORD_PAYMENT | WAITING_USER_RECEIPT
+ *   hasDebt=false → RESPOND_NO_DEBT → COMPLETED
+ *   hasDebt=true  → RESPOND_DEBT_WITH_OPTIONS → COMPLETED
+ *   purpose=record_payment → RECORD_PAYMENT | WAITING_USER_RECEIPT
  */
 
 type ValidateClientContractResult = {
@@ -101,6 +102,7 @@ const validateClient: WorkflowStateHandler = async ({
   context,
   gateway,
   entities,
+  identity,
 }) => {
   let data = requireBillingContext(context);
   data = {
@@ -108,6 +110,18 @@ const validateClient: WorkflowStateHandler = async ({
     purpose: resolvePurpose(data, entities),
   };
   data = mergePaymentFromEntities(data, entities);
+
+  // §14: identidad ya validada en esta conversación → saltar cédula y n8n.
+  if (identity) {
+    const reused = await identity.tryGetValidatedIdentity(conversationId);
+    if (reused) {
+      const nextData: BillingBalanceContext = {
+        ...data,
+        client: { nationalId: reused.nationalId, fullName: reused.fullName },
+      };
+      return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+    }
+  }
 
   const nationalIdFromEntities =
     typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
@@ -149,6 +163,21 @@ const validateClient: WorkflowStateHandler = async ({
     ...data,
     client: { nationalId: data.client.nationalId, fullName: found.name },
   };
+  if (identity) {
+    const router = found.router;
+    await identity.rememberValidatedIdentity({
+      conversationId,
+      nationalId: data.client.nationalId,
+      fullName: found.name,
+      contract: {
+        contractNumber: found.id,
+        sector: router?.sector,
+        oltName: router?.olt_name,
+        pon: router?.pon,
+        serial: router?.serial,
+      },
+    });
+  }
   return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
 };
 
@@ -194,10 +223,22 @@ const checkBalance: WorkflowStateHandler = async ({
     return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context: waiting };
   }
 
-  return { type: "CONTINUE", nextState: "RESPOND_BALANCE", context: withContext(data, context) };
+  // §15: dos estados distintos — la plantilla se elige por estado, no condicionado a medias.
+  if (output.hasDebt) {
+    return {
+      type: "CONTINUE",
+      nextState: "RESPOND_DEBT_WITH_OPTIONS",
+      context: withContext(data, context),
+    };
+  }
+  return { type: "CONTINUE", nextState: "RESPOND_NO_DEBT", context: withContext(data, context) };
 };
 
-const respondBalance: WorkflowStateHandler = async ({ context }) => {
+const respondNoDebt: WorkflowStateHandler = async ({ context }) => {
+  return { type: "COMPLETED", context };
+};
+
+const respondDebtWithOptions: WorkflowStateHandler = async ({ context }) => {
   return { type: "COMPLETED", context };
 };
 
@@ -283,8 +324,10 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     WAITING_USER_CLIENT: "Para consultar tu saldo, ¿me confirmas tu número de cédula?",
     WAITING_USER_RECEIPT:
       "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
-    RESPOND_BALANCE:
-      "Tu saldo actual: {{debt}}. {{balanceMessage}} Si ya pagaste, envíame el comprobante por este chat.",
+    RESPOND_NO_DEBT:
+      "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
+    RESPOND_DEBT_WITH_OPTIONS:
+      "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
     COMPLETED:
       "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
     ESCALATED:
@@ -295,7 +338,8 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,
     CHECK_BALANCE: checkBalance,
-    RESPOND_BALANCE: respondBalance,
+    RESPOND_NO_DEBT: respondNoDebt,
+    RESPOND_DEBT_WITH_OPTIONS: respondDebtWithOptions,
     WAITING_USER_RECEIPT: waitingReceipt,
     RECORD_PAYMENT: recordPayment,
   },

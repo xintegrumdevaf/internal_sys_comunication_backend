@@ -32,6 +32,67 @@ type DiagnosticOutput = {
   diagnostic?: string;
 };
 
+/**
+ * Normaliza el result de DIAGNOSTIC/CONTINUE_DIAGNOSTIC al contrato de la API
+ * (docs/spec/04_N8N_WORKFLOW_SPEC.md §11). Cubre el wrap correcto de n8n y, como
+ * red de seguridad, la forma cruda del microservicio MikroTik
+ * (`workflow.status` + `instruction`).
+ */
+export function normalizeDiagnosticResult(raw: Record<string, unknown>): DiagnosticOutput {
+  const direct = typeof raw.status === "string" ? raw.status.toUpperCase() : "";
+  if (direct === "WAITING_USER" || direct === "COMPLETED" || direct === "ESCALATED") {
+    const question = typeof raw.question === "string" ? raw.question : undefined;
+    const diagnostic =
+      typeof raw.diagnostic === "string"
+        ? raw.diagnostic
+        : typeof (raw.diagnostic as { status?: unknown } | undefined)?.status === "string"
+          ? String((raw.diagnostic as { status: string }).status)
+          : undefined;
+    return {
+      status: direct,
+      ...(question ? { question } : {}),
+      ...(diagnostic ? { diagnostic } : {}),
+    };
+  }
+
+  const workflow = (raw.workflow ?? {}) as { status?: unknown; currentStep?: unknown };
+  const workflowStatus = typeof workflow.status === "string" ? workflow.status.toLowerCase() : "";
+  const instruction =
+    typeof raw.instruction === "string"
+      ? raw.instruction.trim()
+      : typeof raw.question === "string"
+        ? raw.question.trim()
+        : "";
+
+  const diagObj = raw.diagnostic as
+    | { status?: string; findings?: Array<{ type?: string }> }
+    | string
+    | undefined;
+  const diagnosticLabel =
+    typeof diagObj === "string"
+      ? diagObj
+      : diagObj?.findings?.[0]?.type || diagObj?.status || (typeof workflow.currentStep === "string" ? workflow.currentStep : undefined);
+
+  let status: DiagnosticOutput["status"];
+  if (workflowStatus === "waiting_user" || workflowStatus === "waiting") {
+    status = "WAITING_USER";
+  } else if (["completed", "complete", "resolved", "done"].includes(workflowStatus)) {
+    status = "COMPLETED";
+  } else if (["escalated", "failed", "error", "unresolvable"].includes(workflowStatus)) {
+    status = "ESCALATED";
+  } else if (instruction) {
+    status = "WAITING_USER";
+  } else {
+    status = "ESCALATED";
+  }
+
+  return {
+    status,
+    ...(status === "WAITING_USER" && instruction ? { question: instruction } : {}),
+    ...(diagnosticLabel ? { diagnostic: diagnosticLabel } : {}),
+  };
+}
+
 function requireSupportInternetContext(context: CaseContext): SupportInternetContext {
   if (context.workflowType !== "SUPPORT_INTERNET") {
     throw new Error(`Contexto invalido para SUPPORT_INTERNET: workflowType='${context.workflowType}'`);
@@ -54,8 +115,30 @@ const validateClient: WorkflowStateHandler = async ({
   context,
   gateway,
   entities,
+  identity,
 }) => {
   let data = requireSupportInternetContext(context);
+
+  // §14: si esta conversación ya validó identidad, no pedir cédula ni llamar n8n.
+  if (identity) {
+    const reused = await identity.tryGetValidatedIdentity(conversationId);
+    if (reused) {
+      const nextData: SupportInternetContext = {
+        ...data,
+        pendingContracts: undefined,
+        client: { nationalId: reused.nationalId, fullName: reused.fullName },
+        contract: {
+          id: reused.contract.id,
+          sector: reused.contract.sector,
+          oltName: reused.contract.oltName,
+          pon: reused.contract.pon,
+          serial: reused.contract.serial,
+          ...(reused.contract.router ? { router: reused.contract.router } : {}),
+        },
+      };
+      return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+    }
+  }
 
   // Fusionar entities del WaitingStep (nationalId) antes de llamar a n8n.
   const nationalIdFromEntities =
@@ -113,10 +196,11 @@ const validateClient: WorkflowStateHandler = async ({
   }
 
   const found = output.contracts[0]!;
+  const nationalId = data.client.nationalId;
   const nextData: SupportInternetContext = {
     ...data,
     pendingContracts: undefined,
-    client: { nationalId: found.id, fullName: found.name },
+    client: { nationalId, fullName: found.name },
     contract: {
       id: found.id,
       sector: found.router.sector,
@@ -125,10 +209,29 @@ const validateClient: WorkflowStateHandler = async ({
       serial: found.router.serial,
     },
   };
+  if (identity) {
+    await identity.rememberValidatedIdentity({
+      conversationId,
+      nationalId,
+      fullName: found.name,
+      contract: {
+        contractNumber: found.id,
+        sector: found.router.sector,
+        oltName: found.router.olt_name,
+        pon: found.router.pon,
+        serial: found.router.serial,
+      },
+    });
+  }
   return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
 };
 
-const disambiguateContract: WorkflowStateHandler = async ({ context, entities }) => {
+const disambiguateContract: WorkflowStateHandler = async ({
+  conversationId,
+  context,
+  entities,
+  identity,
+}) => {
   const data = requireSupportInternetContext(context);
   const pending = data.pendingContracts ?? [];
   if (pending.length === 0) {
@@ -157,11 +260,12 @@ const disambiguateContract: WorkflowStateHandler = async ({ context, entities })
     return { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context: waiting };
   }
 
+  const nationalId = data.client?.nationalId ?? matched.id;
   const nextData: SupportInternetContext = {
     ...data,
     pendingContracts: undefined,
     client: {
-      nationalId: data.client?.nationalId ?? matched.id,
+      nationalId,
       fullName: matched.name,
     },
     contract: {
@@ -172,6 +276,20 @@ const disambiguateContract: WorkflowStateHandler = async ({ context, entities })
       serial: matched.serial,
     },
   };
+  if (identity && data.client?.nationalId) {
+    await identity.rememberValidatedIdentity({
+      conversationId,
+      nationalId: data.client.nationalId,
+      fullName: matched.name,
+      contract: {
+        contractNumber: matched.id,
+        sector: matched.sector,
+        oltName: matched.oltName,
+        pon: matched.pon,
+        serial: matched.serial,
+      },
+    });
+  }
   return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
 };
 
@@ -228,7 +346,7 @@ const diagnostic: WorkflowStateHandler = async ({
     ? { conversationId, message: message ?? "" }
     : {
         sector: data.contract?.sector ?? null,
-        olt_name: data.contract?.oltName ?? null,
+        oltName: data.contract?.oltName ?? null,
         pon: data.contract?.pon ?? null,
         serial: data.contract?.serial ?? null,
         conversationId,
@@ -246,7 +364,9 @@ const diagnostic: WorkflowStateHandler = async ({
     return { type: "ESCALATED", reason: result.error.message, context };
   }
 
-  const output = result.result as DiagnosticOutput;
+  const output = normalizeDiagnosticResult(
+    (result.result ?? {}) as Record<string, unknown>,
+  );
 
   if (output.status === "WAITING_USER") {
     const nextData: SupportInternetContext = {

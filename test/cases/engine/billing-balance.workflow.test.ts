@@ -32,7 +32,7 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
   });
 
-  it("consulta saldo: VALIDATE → CHECK_BALANCE → RESPOND_BALANCE → COMPLETED con monto", async () => {
+  it("consulta saldo con deuda: CHECK_BALANCE → RESPOND_DEBT_WITH_OPTIONS → COMPLETED", async () => {
     const engine = new WorkflowEngine([billingBalanceWorkflow]);
     const gateway = new N8nGatewayFake({
       VALIDATE_CLIENT: () => ({
@@ -58,14 +58,51 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
       "BILLING_BALANCE",
       baseInput("CHECK_BALANCE", step1.context, gateway),
     );
-    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_BALANCE" });
+    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_DEBT_WITH_OPTIONS" });
     if (step2.type !== "CONTINUE") throw new Error("unreachable");
     if (step2.context.workflowType !== "BILLING_BALANCE") throw new Error("unreachable");
     expect(step2.context.data.balance).toEqual({ hasDebt: true, amount: 45.5 });
 
     const step3 = await engine.step(
       "BILLING_BALANCE",
-      baseInput("RESPOND_BALANCE", step2.context, gateway),
+      baseInput("RESPOND_DEBT_WITH_OPTIONS", step2.context, gateway),
+    );
+    expect(step3.type).toBe("COMPLETED");
+  });
+
+  it("consulta saldo sin deuda: CHECK_BALANCE → RESPOND_NO_DEBT → COMPLETED", async () => {
+    const engine = new WorkflowEngine([billingBalanceWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [{ id: "1", name: "Ana", router: { sector: "a", olt_name: "o", pon: "1", serial: "S" } }],
+        },
+      }),
+      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false, debt: 0 } }),
+    });
+
+    const ctx: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: { purpose: "balance", client: { nationalId: "1", fullName: "" } },
+    };
+    const step1 = await engine.step("BILLING_BALANCE", baseInput("VALIDATE_CLIENT", ctx, gateway));
+    if (step1.type !== "CONTINUE") throw new Error("unreachable");
+
+    const step2 = await engine.step(
+      "BILLING_BALANCE",
+      baseInput("CHECK_BALANCE", step1.context, gateway),
+    );
+    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_NO_DEBT" });
+    if (step2.type !== "CONTINUE") throw new Error("unreachable");
+    if (step2.context.workflowType !== "BILLING_BALANCE") throw new Error("unreachable");
+    expect(step2.context.data.balance).toEqual({ hasDebt: false, amount: 0 });
+
+    const step3 = await engine.step(
+      "BILLING_BALANCE",
+      baseInput("RESPOND_NO_DEBT", step2.context, gateway),
     );
     expect(step3.type).toBe("COMPLETED");
   });

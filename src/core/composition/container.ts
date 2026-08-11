@@ -23,6 +23,10 @@ import { ReplyAsHumanUseCase } from "../modules/conversations/application/use-ca
 import { createWhatsAppWebhookRouter } from "../modules/conversations/presentation/whatsapp-webhook.router";
 import { createConversationsRouter } from "../modules/conversations/presentation/conversations.router";
 
+import { CustomerRepositoryPg } from "../modules/customers/infrastructure/postgres/customer.repository.pg";
+import { ContractRepositoryPg } from "../modules/customers/infrastructure/postgres/contract.repository.pg";
+import { ConversationIdentityService } from "../modules/customers/application/services/conversation-identity.service";
+
 import { DepartmentRepositoryPg } from "../modules/departments/infrastructure/postgres/department.repository.pg";
 import { AgentRepositoryPg } from "../modules/departments/infrastructure/postgres/agent.repository.pg";
 import { ListDepartmentsUseCase } from "../modules/departments/application/use-cases/list-departments.use-case";
@@ -112,6 +116,13 @@ export function createContainer(): Container {
   const auditRepo = new AuditRepositoryPg(pgPool);
   const conversationRepo = new ConversationRepositoryPg(pgPool);
   const messageRepo = new MessageRepositoryPg(pgPool);
+  const customerRepo = new CustomerRepositoryPg(pgPool);
+  const contractRepo = new ContractRepositoryPg(pgPool);
+  const conversationIdentity = new ConversationIdentityService(
+    conversationRepo,
+    customerRepo,
+    contractRepo,
+  );
   const whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const agentRepo = new AgentRepositoryPg(pgPool);
@@ -216,6 +227,7 @@ export function createContainer(): Container {
     engine: workflowEngine,
     gateway: n8nGateway,
     logger: casesLogger,
+    identity: conversationIdentity,
     escalationService,
   });
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({

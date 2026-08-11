@@ -17,4 +17,9 @@ export interface ConversationRepositoryPort {
    * la transicion (`CaseArbitrationService`/`AdvanceCaseUseCase`), no aqui.
    */
   setActiveCaseId(id: string, caseId: string | null): Promise<void>;
+  /**
+   * docs/spec/02_STATE_MACHINE.md §14: fija el Customer ya validado en esta
+   * conversación para no volver a pedir cédula en casos posteriores.
+   */
+  setCustomerId(id: string, customerId: string | null): Promise<void>;
 }

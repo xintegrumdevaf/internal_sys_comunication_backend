@@ -74,6 +74,13 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
       this.conversations.set(id, { ...conversation, activeCaseId: caseId });
     }
   }
+
+  async setCustomerId(id: string, customerId: string | null): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, customerId });
+    }
+  }
 }
 
 export class MessageRepositoryFake implements MessageRepositoryPort {

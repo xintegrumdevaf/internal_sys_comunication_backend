@@ -137,8 +137,85 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
 
     const lastBody = whatsappSender.sent[whatsappSender.sent.length - 1]!.body;
     expect(lastBody).toMatch(/45\.50|45\.5/);
+    expect(lastBody.toLowerCase()).toContain("comprobante");
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
     expect(gateway.actionsCalledFor("CHECK_BALANCE")).toBe(1);
+  });
+
+  it("billing.balance sin deuda: mensaje final NO menciona comprobante", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+    const whatsappSender = new WhatsAppSenderFake();
+    const departmentRepo = new DepartmentRepositoryFake();
+    departmentRepo.seed({ slug: "billing", name: "Facturacion" });
+
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: true,
+          contractNumbers: 1,
+          contracts: [
+            { id: "1", name: "Ana", router: { sector: "pifo", olt_name: "o", pon: "1", serial: "S" } },
+          ],
+        },
+      }),
+      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false, debt: 0 } }),
+    });
+
+    const engine = new WorkflowEngine([billingBalanceWorkflow]);
+    const advanceCase = new AdvanceCaseUseCase({
+      caseRepo,
+      workflowExecutionRepo: new WorkflowExecutionRepositoryFake(),
+      conversationRepo,
+      engine,
+      gateway,
+      logger: silentLogger,
+    });
+    const fakeAi = new FakeAIProvider();
+    fakeAi.composeImpl = async (input) => input.templateHint?.trim() || "ok";
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver: new DepartmentResolverService(departmentRepo),
+      arbitrationService: new CaseArbitrationService(caseRepo, silentLogger),
+      interpretationProvider: new QueuedInterpretationProvider([
+        {
+          type: "NEW_INTENT",
+          intent: "billing.balance",
+          entities: { nationalId: "16272728" },
+          confidence: 0.95,
+        },
+      ]),
+      engine,
+      advanceCase,
+      composeReply: new ComposeCustomerReplyUseCase(fakeAi),
+      transcribeAudio: new TranscribeAudioUseCase(fakeAi),
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      logger: silentLogger,
+    });
+
+    const conversation = conversationRepo.createOpen();
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "e8-no-debt",
+      messages: textMessages(conversation.id, messageRepo, "cuanto debo?"),
+    });
+
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.status).toBe("COMPLETED");
+    if (cases[0]!.context.workflowType !== "BILLING_BALANCE") throw new Error("unreachable");
+    expect(cases[0]!.context.data.balance?.hasDebt).toBe(false);
+
+    const lastBody = whatsappSender.sent[whatsappSender.sent.length - 1]!.body.toLowerCase();
+    expect(lastBody).not.toContain("comprobante");
+    expect(lastBody).not.toMatch(/env[ií]a/);
+    expect(lastBody).toMatch(/saldo pendiente|sin.*deuda|no tienes/);
   });
 
   it("billing.record_payment con entities completas llama RECORD_PAYMENT", async () => {
@@ -285,7 +362,7 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
     expect(whatsappSender.sent[0]!.body).toMatch(/500/);
   });
 
-  it("resolveReplyTemplate BILLING incluye debt formateado", () => {
+  it("resolveReplyTemplate BILLING con deuda: monto + comprobante", () => {
     const resolved = resolveReplyTemplate({
       definition: billingBalanceWorkflow,
       outcome: {
@@ -300,8 +377,31 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
         data: { purpose: "balance", balance: { hasDebt: true, amount: 45.5 } },
       },
     });
-    expect(resolved.action).toBe("RESPOND_BALANCE");
+    expect(resolved.action).toBe("RESPOND_DEBT_WITH_OPTIONS");
     expect(resolved.resultVars.debt).toBe("45.50");
     expect(resolved.templateHint).toContain("{{debt}}");
+    expect(resolved.templateHint.toLowerCase()).toContain("comprobante");
+  });
+
+  it("resolveReplyTemplate BILLING sin deuda: NO menciona comprobante ni invita a enviar", () => {
+    const resolved = resolveReplyTemplate({
+      definition: billingBalanceWorkflow,
+      outcome: {
+        type: "COMPLETED",
+        context: {
+          workflowType: "BILLING_BALANCE",
+          data: { purpose: "balance", balance: { hasDebt: false, amount: 0 } },
+        },
+      },
+      context: {
+        workflowType: "BILLING_BALANCE",
+        data: { purpose: "balance", balance: { hasDebt: false, amount: 0 } },
+      },
+    });
+    expect(resolved.action).toBe("RESPOND_NO_DEBT");
+    const hint = resolved.templateHint.toLowerCase();
+    expect(hint).not.toContain("comprobante");
+    expect(hint).not.toMatch(/env[ií]a/);
+    expect(hint).toMatch(/no tienes ningún saldo pendiente|sin.*saldo pendiente|no.*saldo pendiente/);
   });
 });

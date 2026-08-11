@@ -102,13 +102,18 @@ export function resolveReplyTemplate(input: {
 
   // CONTINUE leftover / ACTIVE
   const balance = (contextData.balance ?? {}) as Record<string, unknown>;
-  if (templates.RESPOND_BALANCE && balance.hasDebt !== undefined) {
-    return balanceInquiryReply(templates, contextData, balance, "ACTIVE");
+  if (
+    outcome.nextState === "RESPOND_NO_DEBT" ||
+    outcome.nextState === "RESPOND_DEBT_WITH_OPTIONS" ||
+    (templates.RESPOND_NO_DEBT && balance.hasDebt === false) ||
+    (templates.RESPOND_DEBT_WITH_OPTIONS && balance.hasDebt === true)
+  ) {
+    return billingBalanceReply(templates, contextData, balance, "ACTIVE", outcome.nextState);
   }
   if (balance.hasDebt === true || outcome.nextState === "RESPOND_DEBT") {
     return debtReply(templates, contextData, balance, "ACTIVE");
   }
-  if (outcome.nextState === "RESPOND_OFFER" || outcome.nextState === "RESPOND_BALANCE") {
+  if (outcome.nextState === "RESPOND_OFFER") {
     const offer = (contextData.offer ?? {}) as Record<string, unknown>;
     return {
       templateHint: templates[outcome.nextState] ?? templates.ACTIVE ?? "Seguimos con tu caso.",
@@ -157,9 +162,12 @@ function resolveCompleted(
     };
   }
 
-  // BILLING consulta de saldo (plantilla RESPOND_BALANCE).
-  if (templates.RESPOND_BALANCE && balance.hasDebt !== undefined) {
-    return balanceInquiryReply(templates, contextData, balance, "COMPLETED");
+  // BILLING consulta de saldo (§15): dos plantillas distintas según hasDebt.
+  if (
+    (templates.RESPOND_NO_DEBT || templates.RESPOND_DEBT_WITH_OPTIONS) &&
+    balance.hasDebt !== undefined
+  ) {
+    return billingBalanceReply(templates, contextData, balance, "COMPLETED");
   }
 
   // SUPPORT cierre por deuda.
@@ -183,30 +191,45 @@ function resolveCompleted(
   };
 }
 
-function balanceInquiryReply(
+function billingBalanceReply(
   templates: Record<string, string>,
   contextData: Record<string, unknown>,
   balance: Record<string, unknown>,
   status: string,
+  nextState?: string,
 ): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string } {
+  const hasDebt = balance.hasDebt === true || nextState === "RESPOND_DEBT_WITH_OPTIONS";
   const debtFormatted = formatDebtAmount(balance.amount) ?? formatDebtAmount(balance.debt);
-  const debtValue = debtFormatted ?? (balance.hasDebt ? "" : "0.00");
-  const balanceMessage =
-    balance.hasDebt === true
-      ? "Tienes un saldo pendiente; cuando pagues podemos ayudarte con lo que necesites."
-      : "No tienes saldo pendiente en este momento.";
+  const debtValue = debtFormatted ?? (hasDebt ? "" : "0.00");
+  const flat = flattenContext(contextData);
+
+  if (!hasDebt) {
+    return {
+      templateHint:
+        templates.RESPOND_NO_DEBT ??
+        "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
+      resultVars: {
+        ...flat,
+        hasDebt: false,
+        debt: debtValue,
+        amount: balance.amount ?? balance.debt ?? 0,
+      },
+      action: "RESPOND_NO_DEBT",
+      status,
+    };
+  }
+
   return {
     templateHint:
-      templates.RESPOND_BALANCE ??
-      "Tu saldo actual: {{debt}}. {{balanceMessage}}",
+      templates.RESPOND_DEBT_WITH_OPTIONS ??
+      "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
     resultVars: {
-      ...flattenContext(contextData),
-      hasDebt: balance.hasDebt === true,
+      ...flat,
+      hasDebt: true,
       debt: debtValue,
       amount: balance.amount ?? balance.debt,
-      balanceMessage,
     },
-    action: "RESPOND_BALANCE",
+    action: "RESPOND_DEBT_WITH_OPTIONS",
     status,
   };
 }
