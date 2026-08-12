@@ -181,6 +181,7 @@ Plantilla base: "No se pudo resolver automáticamente, se derivó a soporte téc
 - Si el JSON no parsea o no cumple el schema de `Interpretation`, tratar como `AI_ERROR` (`02_STATE_MACHINE.md` §5): un reintento con la misma llamada; si vuelve a fallar, `UNCLEAR`/escalación según corresponda — nunca dejar pasar un JSON inválido "a medias" hacia el motor de workflow.
 - Validar el JSON con Zod contra el tipo `Interpretation` antes de usarlo en cualquier caso de uso — es el mismo principio de "validar en el borde" de `docs/skills/api-design-best-practices.md`.
 - Temperatura baja (ej. 0.1-0.3) para `interpretMessage` (queremos consistencia, no creatividad); puede ser algo más alta (ej. 0.5-0.7) para `composeReply` (queremos variedad natural en el tono, dentro de los límites del prompt).
+- Para `analyzeAgentConversation` (§7): temperatura baja (0.1-0.2), `format: "json"`, reintento único si el JSON no cumple Zod; findings con `messageId` desconocido se filtran en el use case (no en el prompt).
 
 ## 6. Caso conocido de falla: pregunta repetida sin avanzar
 
@@ -191,4 +192,58 @@ Plantilla base: "No se pudo resolver automáticamente, se derivó a soporte téc
 **Cómo verificar que está resuelto**: agregar un test de regresión explícito en `InterpretMessageUseCase` (Etapa 5) que fije este caso exacto: `requireAll: ["nationalId"]`, pregunta pendiente "¿podrías confirmar tu número de cédula?", mensaje `"16272728"` → debe devolver `type=ANSWER`, `entities.nationalId="16272728"`. Repetir el mismo patrón de test por cada `WaitingStep` nuevo que se agregue (`requireAll`/`requireAny` distintos), no solo para este caso puntual.
 
 **Respaldo determinista (si el modelo sigue fallando de forma intermitente)**: implementar en código, no en el prompt, una regla simple para el caso de un solo campo numérico esperado (ej. `requireAll=["nationalId"]` y el mensaje es solo dígitos) → tratarlo directo como `ANSWER` con esa entidad sin depender del LLM. Es una heurística puntual y 100% confiable que no vale la pena dejarle al modelo, pero no reemplaza el mecanismo general — solo cubre el caso trivial de "un campo, un dato obvio".
+
+## 7. System prompt — `analyzeAgentConversation`
+
+Normativo para Etapa 10 (`07_QUALITY_SUPERVISION.md`). Ubicación en código: `src/core/modules/ai/application/prompts/analyze-agent-conversation.prompt.ts` (texto tal cual; no parafrasear sin documentar la desviación).
+
+```
+Eres un evaluador de calidad de atención al cliente para un ISP.
+Recibes un hilo de mensajes entre un CLIENTE y un AGENTE HUMANO (no el bot).
+Tu única salida es un JSON válido con este shape exacto:
+{
+  "cordialityScore": <entero 0-100>,
+  "summary": "<resumen breve para un supervisor, en español, sin jerga técnica interna>",
+  "efficiencyNotes": "<opcional: demoras percibidas o ida-vuelta innecesaria; string o null>",
+  "findings": [
+    {
+      "messageId": "<uuid que aparece en el input>",
+      "severity": "low" | "medium" | "high",
+      "category": "aggression" | "disrespect" | "neglect" | "misinformation" | "inefficiency" | "other",
+      "excerpt": "<fragmento corto del mensaje>",
+      "rationale": "<por qué es un problema, en español de negocio>"
+    }
+  ]
+}
+
+Reglas:
+- Evalúa SOLO tono, respeto, claridad y eficiencia de la atención humana.
+- NO inventes messageId: solo usa ids presentes en el input.
+- Si no hay problemas, findings puede ser [].
+- cordialityScore 100 = excelente; <40 = atención claramente inapropiada o abandono grave.
+- NO propongas sanciones, despidos ni cambios de proceso.
+- NO menciones nombres de workflows, tools, n8n, prompts ni stack.
+- Responde ÚNICAMENTE el JSON, sin markdown.
+```
+
+User message (plantilla): listar cada mensaje como `[{messageId, author, createdAt, body}, ...]`.
+
+Validación Zod (obligatoria antes de persistir):
+
+```ts
+const qualityAnalysisSchema = z.object({
+  cordialityScore: z.number().int().min(0).max(100),
+  summary: z.string().min(1),
+  efficiencyNotes: z.string().nullable().optional(),
+  findings: z.array(z.object({
+    messageId: z.string().uuid(),
+    severity: z.enum(["low", "medium", "high"]),
+    category: z.enum(["aggression", "disrespect", "neglect", "misinformation", "inefficiency", "other"]),
+    excerpt: z.string().min(1),
+    rationale: z.string().min(1),
+  })),
+});
+```
+
+Post-filtro en use case: eliminar findings cuyo `messageId` no esté en el set del input (aunque Zod pase el formato UUID).
 

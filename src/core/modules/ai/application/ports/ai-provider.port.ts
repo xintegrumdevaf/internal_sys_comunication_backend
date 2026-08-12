@@ -53,9 +53,39 @@ export type ReceiptData = {
   date?: string;
 };
 
+export type AnalyzeAgentConversationInput = {
+  correlationId: string;
+  conversationId: string;
+  caseId: string;
+  agentId: string;
+  messages: Array<{
+    messageId: string;
+    author: "customer" | "agent";
+    body: string;
+    createdAt: string;
+  }>;
+};
+
+export type QualityAnalysisFinding = {
+  messageId: string;
+  severity: "low" | "medium" | "high";
+  category: "aggression" | "disrespect" | "neglect" | "misinformation" | "inefficiency" | "other";
+  excerpt: string;
+  rationale: string;
+};
+
+export type QualityAnalysis = {
+  cordialityScore: number;
+  summary: string;
+  efficiencyNotes?: string;
+  findings: QualityAnalysisFinding[];
+};
+
 export interface AIProviderPort {
   interpretMessage(input: InterpretMessageInput): Promise<Interpretation>;
   composeReply(input: ComposeReplyInput): Promise<string>;
   transcribeAudio(mediaUrl: string, mimeType: string): Promise<{ transcript: string }>;
   extractReceiptData(mediaUrl: string, mimeType: string): Promise<ReceiptData>;
+  /** Evaluación de calidad de atención humana (07_QUALITY_SUPERVISION.md). */
+  analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis>;
 }

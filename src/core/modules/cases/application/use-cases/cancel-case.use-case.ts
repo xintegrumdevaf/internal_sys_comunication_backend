@@ -4,6 +4,7 @@ import type { Case, CaseStatus } from "../../domain/case.entity";
 import { ACTIVATABLE_CASE_STATUSES } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
+import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";
 
 const CANCELLABLE_STATUSES: CaseStatus[] = ["ACTIVE", "PAUSED", "WAITING_USER"];
 
@@ -11,6 +12,7 @@ export type CancelCaseDeps = {
   caseRepo: CaseRepositoryPort;
   conversationRepo: ConversationRepositoryPort;
   logger: Logger;
+  enqueueQualityReview?: EnqueueQualityReviewService;
 };
 
 /** docs/spec/02_STATE_MACHINE.md §2 — cancelacion explicita, cualquier estado activo -> CANCELLED. */
@@ -41,6 +43,15 @@ export class CancelCaseUseCase {
 
     if (wasActivatable) {
       await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+    }
+
+    if (this.deps.enqueueQualityReview) {
+      void this.deps.enqueueQualityReview.tryAutoEnqueue(result.case).catch((err) => {
+        this.deps.logger.warn(
+          { err, caseId: result.case.id },
+          "no se pudo encolar quality_review tras cancel",
+        );
+      });
     }
 
     this.deps.logger.info(

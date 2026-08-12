@@ -80,6 +80,8 @@ export class ReplyAsHumanUseCase {
       author: "agent",
       body: input.body,
       externalId,
+      agentId: input.agentUserId,
+      caseId: conversation.activeCaseId,
     });
 
     await conversationRepo.touchLastActivity(conversation.id);

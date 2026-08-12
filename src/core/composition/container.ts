@@ -96,6 +96,19 @@ import { TransferCaseUseCase } from "../modules/cases/application/use-cases/tran
 import { GetDashboardUseCase } from "../modules/cases/application/use-cases/get-dashboard.use-case";
 import { TakeControlUseCase } from "../modules/conversations/application/use-cases/take-control.use-case";
 
+import { QualityReviewRepositoryPg } from "../modules/quality/infrastructure/postgres/quality-review.repository.pg";
+import { EnqueueQualityReviewService } from "../modules/quality/application/services/enqueue-quality-review.service";
+import { RunQualityAnalysisUseCase } from "../modules/quality/application/use-cases/run-quality-analysis.use-case";
+import { RequestOnDemandReviewUseCase } from "../modules/quality/application/use-cases/request-on-demand-review.use-case";
+import { ListQualityReviewsUseCase } from "../modules/quality/application/use-cases/list-quality-reviews.use-case";
+import { GetQualityReviewUseCase } from "../modules/quality/application/use-cases/get-quality-review.use-case";
+import { GetAgentQualityStatsUseCase } from "../modules/quality/application/use-cases/get-agent-quality-stats.use-case";
+import { AddCoachingNoteUseCase } from "../modules/quality/application/use-cases/add-coaching-note.use-case";
+import { MarkReviewReviewedUseCase } from "../modules/quality/application/use-cases/mark-review-reviewed.use-case";
+import { BatchEnqueueQualityReviewsUseCase } from "../modules/quality/application/use-cases/batch-enqueue-quality-reviews.use-case";
+import { resolveQualityDepartmentScope } from "../modules/quality/application/quality-auth";
+import { createQualityRouter } from "../modules/quality/presentation/quality.router";
+
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
  * Aqui, y solo aqui, se instancian adapters de infraestructura y se
@@ -155,7 +168,6 @@ export function createContainer(): Container {
   ]);
   const departmentResolver = new DepartmentResolverService(departmentRepo);
   const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
-  const expirationService = new ExpirationService(caseRepo, casesLogger);
 
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
@@ -168,6 +180,7 @@ export function createContainer(): Container {
       baseUrl: env.OLLAMA_BASE_URL,
       model: env.OLLAMA_MODEL,
       timeoutMs: env.AI_CALL_TIMEOUT_MS,
+      qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
     },
     aiLogger,
   );
@@ -175,6 +188,42 @@ export function createContainer(): Container {
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
+
+  // --- Calidad (Etapa 10) — antes de complete/expiration que encolan reviews ---
+  const qualityLogger = logger.child({ module: "quality" });
+  const qualityRepo = new QualityReviewRepositoryPg(pgPool);
+  const runQualityAnalysis = new RunQualityAnalysisUseCase({
+    qualityRepo,
+    messageRepo,
+    aiProvider,
+    logger: qualityLogger,
+    chunkSize: env.QUALITY_ANALYSIS_CHUNK_SIZE,
+  });
+  const enqueueQualityReview = new EnqueueQualityReviewService({
+    qualityRepo,
+    messageRepo,
+    runQualityAnalysis,
+    logger: qualityLogger,
+    qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
+    chunkSize: env.QUALITY_ANALYSIS_CHUNK_SIZE,
+  });
+  const expirationService = new ExpirationService(caseRepo, casesLogger, enqueueQualityReview);
+  const listQualityReviews = new ListQualityReviewsUseCase({ qualityRepo, agentRepo });
+  const getQualityReview = new GetQualityReviewUseCase({ qualityRepo, agentRepo });
+  const getAgentQualityStats = new GetAgentQualityStatsUseCase({ qualityRepo, agentRepo });
+  const requestOnDemandReview = new RequestOnDemandReviewUseCase({
+    qualityRepo,
+    caseRepo,
+    agentRepo,
+    enqueueService: enqueueQualityReview,
+  });
+  const addCoachingNote = new AddCoachingNoteUseCase({ qualityRepo, agentRepo, auditRepo });
+  const markReviewReviewed = new MarkReviewReviewedUseCase({ qualityRepo, agentRepo, auditRepo });
+  const batchEnqueueQualityReviews = new BatchEnqueueQualityReviewsUseCase({
+    qualityRepo,
+    agentRepo,
+    enqueueService: enqueueQualityReview,
+  });
 
   // --- Realtime (Etapa 7) — antes de use cases que emiten eventos ---
   const broadcaster = new RealtimeBroadcaster();
@@ -269,7 +318,12 @@ export function createContainer(): Container {
     escalationService,
     broadcaster,
   });
-  const cancelCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: casesLogger });
+  const cancelCase = new CancelCaseUseCase({
+    caseRepo,
+    conversationRepo,
+    logger: casesLogger,
+    enqueueQualityReview,
+  });
   const completeCase = new CompleteCaseUseCase({
     caseRepo,
     conversationRepo,
@@ -277,6 +331,7 @@ export function createContainer(): Container {
     logger: casesLogger,
     agentRepo,
     departmentRepo,
+    enqueueQualityReview,
   });
   const transferCase = new TransferCaseUseCase({
     caseRepo,
@@ -441,8 +496,31 @@ export function createContainer(): Container {
   );
   app.use(createEscalationsRouter({ listEscalations }));
   app.use(createRealtimeRouter({ broadcaster }));
+  app.use(
+    createQualityRouter({
+      listReviews: listQualityReviews,
+      getReview: getQualityReview,
+      getAgentStats: getAgentQualityStats,
+      requestOnDemand: requestOnDemandReview,
+      addCoachingNote,
+      markReviewed: markReviewReviewed,
+      batchEnqueue: batchEnqueueQualityReviews,
+      getPendingCount: async ({ actor, agentId, departmentId }) => {
+        const departmentIds = await resolveQualityDepartmentScope(
+          actor,
+          agentRepo,
+          departmentId,
+        );
+        return qualityRepo.countByStatus("pending", { agentId, departmentIds });
+      },
+    }),
+  );
 
   app.use(createErrorHandler(logger));
+
+  void enqueueQualityReview.reclaimPending().catch((err) => {
+    qualityLogger.warn({ err }, "reclaimPending de quality fallo al arrancar");
+  });
 
   const shutdown = async (): Promise<void> => {
     inboundBuffer.clearAllTimers();

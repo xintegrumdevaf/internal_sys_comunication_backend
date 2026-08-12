@@ -34,15 +34,21 @@ describe("ReplyAsHumanUseCase", () => {
     const conversation = await conversationRepo.findOrCreateByWaPhone(waPhone);
     const whatsappSender = new FakeWhatsAppSender();
     const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo, logger: silentLogger });
+    const agentUserId = randomUUID();
+    await pool.query(
+      `INSERT INTO agent (id, name, email, role) VALUES ($1, 'Agent Test', $2, 'agent')`,
+      [agentUserId, `agent-${agentUserId.slice(0, 8)}@test.local`],
+    );
 
     const message = await useCase.execute({
       conversationId: conversation.id,
-      agentUserId: randomUUID(),
+      agentUserId,
       body: "Ya estamos revisando tu caso",
     });
 
     expect(message.direction).toBe("outbound");
     expect(message.author).toBe("agent");
+    expect(message.agentId).toBe(agentUserId);
     expect(whatsappSender.sentTo).toEqual([waPhone]);
 
     const { rows } = await pool.query(
@@ -50,6 +56,12 @@ describe("ReplyAsHumanUseCase", () => {
       [conversation.id],
     );
     expect(rows.length).toBeGreaterThanOrEqual(1);
+
+    const msgRows = await pool.query<{ agent_id: string | null }>(
+      `SELECT agent_id FROM message WHERE id = $1`,
+      [message.id],
+    );
+    expect(msgRows.rows[0]?.agent_id).toBe(agentUserId);
   });
 
   it("lanza NOT_FOUND si la conversacion no existe", async () => {

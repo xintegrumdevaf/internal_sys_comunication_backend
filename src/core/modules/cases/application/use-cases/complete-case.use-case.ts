@@ -8,6 +8,7 @@ import type { AgentRepositoryPort } from "../../../departments/application/ports
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
+import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";
 
 const COMPLETABLE: CaseStatus[] = ["ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
 const ASSIGNMENT_GUARDED: CaseStatus[] = ["HUMAN_ACTIVE", "ESCALATED"];
@@ -27,6 +28,8 @@ export class CompleteCaseUseCase {
        */
       agentRepo?: AgentRepositoryPort;
       departmentRepo?: DepartmentRepositoryPort;
+      /** Etapa 10: encola analisis de calidad post-cierre (fire-and-forget). */
+      enqueueQualityReview?: EnqueueQualityReviewService;
     },
   ) {}
 
@@ -74,6 +77,16 @@ export class CompleteCaseUseCase {
       metadata: { resolutionNote: input.resolutionNote ?? null },
     });
     this.deps.logger.info({ caseId: result.case.id }, "caso completado por agente");
+
+    if (this.deps.enqueueQualityReview) {
+      void this.deps.enqueueQualityReview.tryAutoEnqueue(result.case).catch((err) => {
+        this.deps.logger.warn(
+          { err, caseId: result.case.id },
+          "no se pudo encolar review de calidad tras completar",
+        );
+      });
+    }
+
     return result.case;
   }
 }

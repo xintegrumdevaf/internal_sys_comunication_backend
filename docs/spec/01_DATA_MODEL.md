@@ -114,6 +114,7 @@ CREATE TABLE message (
   case_id          UUID,                        -- nullable: no todo mensaje pertenece a un case (ej. saludo)
   direction        TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
   author           TEXT NOT NULL CHECK (author IN ('customer','ai','agent','system')),
+  agent_id         UUID REFERENCES agent(id),   -- obligatorio en replies humanos nuevos (07_QUALITY_SUPERVISION.md §6); null en inbound/ai/system e histórico
   external_id      TEXT,                        -- waMessageId
   body             TEXT NOT NULL,
   type             TEXT NOT NULL DEFAULT 'text',
@@ -125,6 +126,7 @@ CREATE TABLE message (
   UNIQUE (conversation_id, external_id)          -- idempotencia de ingesta
 );
 CREATE INDEX idx_message_conversation ON message(conversation_id, created_at);
+CREATE INDEX idx_message_agent ON message(agent_id) WHERE agent_id IS NOT NULL;
 
 CREATE TABLE case (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -233,12 +235,64 @@ CREATE TABLE audit_event (
   occurred_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_audit_resource ON audit_event(resource_type, resource_id, occurred_at);
+
+-- Supervisión de calidad de atenciones humanas (07_QUALITY_SUPERVISION.md). Etapa 10.
+CREATE TABLE quality_review (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  conversation_id   UUID NOT NULL REFERENCES conversation(id),
+  case_id           UUID NOT NULL REFERENCES case(id),
+  agent_id          UUID NOT NULL REFERENCES agent(id),
+  department_id     UUID REFERENCES department(id),
+  cordiality_score  INT CHECK (cordiality_score IS NULL OR (cordiality_score >= 0 AND cordiality_score <= 100)),
+  efficiency_notes  TEXT,
+  summary           TEXT,                       -- salida IA; expuesto en DTO
+  error_message     TEXT,                       -- motivo de failed / watchdog
+  status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','ready','failed','reviewed')),
+  trigger_kind      TEXT NOT NULL CHECK (trigger_kind IN ('auto_case_closed','on_demand')), -- DTO: trigger (evitar palabra reservada SQL TRIGGER)
+  model_raw         JSONB,                      -- salida validada + chunkScores/chunkSummaries; no exponer al frontend
+  idempotency_key   TEXT NOT NULL UNIQUE,
+  messages_total    INT NOT NULL DEFAULT 0,      -- turnos customer+agent del caso
+  messages_analyzed INT NOT NULL DEFAULT 0,      -- tramos ya enviados a la IA
+  chunk_size        INT NOT NULL DEFAULT 40,     -- QUALITY_ANALYSIS_CHUNK_SIZE al encolar
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at        TIMESTAMPTZ,                -- claim del worker durable
+  completed_at      TIMESTAMPTZ
+);
+CREATE INDEX idx_quality_review_agent_completed ON quality_review(agent_id, completed_at);
+CREATE INDEX idx_quality_review_department_status ON quality_review(department_id, status);
+CREATE INDEX idx_quality_review_case ON quality_review(case_id);
+CREATE INDEX idx_quality_review_pending_claim ON quality_review (created_at) WHERE status = 'pending';
+
+CREATE TABLE quality_finding (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  review_id    UUID NOT NULL REFERENCES quality_review(id) ON DELETE CASCADE,
+  message_id   UUID NOT NULL REFERENCES message(id),
+  severity     TEXT NOT NULL CHECK (severity IN ('low','medium','high')),
+  category     TEXT NOT NULL CHECK (category IN ('aggression','disrespect','neglect','misinformation','inefficiency','other')),
+  excerpt      TEXT NOT NULL,
+  rationale    TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_quality_finding_review ON quality_finding(review_id);
+CREATE INDEX idx_quality_finding_message ON quality_finding(message_id);
+
+CREATE TABLE quality_coaching_note (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  review_id         UUID NOT NULL REFERENCES quality_review(id) ON DELETE CASCADE,
+  author_agent_id   UUID NOT NULL REFERENCES agent(id),
+  body              TEXT NOT NULL,
+  ack_status        TEXT NOT NULL DEFAULT 'open' CHECK (ack_status IN ('open','acknowledged')),
+  acknowledged_at   TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_quality_coaching_note_review ON quality_coaching_note(review_id);
 ```
 
 ## 3. Reglas de integridad relevantes
 
 - `message (conversation_id, external_id)` único → cualquier reintento de Meta con el mismo `waMessageId` es un no-op (se detecta el conflicto y se responde el mensaje ya existente, no se duplica).
 - `workflow_execution.idempotency_key` único → una acción reintentada con la misma key no se reaplica.
+- `quality_review.idempotency_key` único → el análisis automático por caso+agente (`…:auto`) no se duplica; ver `07_QUALITY_SUPERVISION.md` §4.
 - `conversation.active_case_id` solo puede apuntar a un `case` en estado `ACTIVE` o `WAITING_USER` — se valida a nivel de aplicación (no CHECK cruzado por simplicidad de DDL, pero sí invariante de dominio obligatoria).
 - `case.version` y `workflow_instance.version`: toda actualización usa `UPDATE ... WHERE id = :id AND version = :expected`; conflicto de fila (`0 rows affected`) implica reintento a nivel de aplicación (optimistic concurrency, ver `02_STATE_MACHINE.md`).
 

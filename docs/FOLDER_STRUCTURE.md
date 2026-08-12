@@ -134,13 +134,14 @@ isp-platform/
 │           │       └── admin/
 │           │           └── n8n-workflows.router.ts    ← GET/PUT/DELETE catálogo, solo admin (Etapa 3)
 │           │
-│           ├── ai/                    ← Etapa 5, nuevo módulo (interpretación/composición, YA NO en n8n)
+│           ├── ai/                    ← Etapa 5 (+ Etapa 10: analyzeAgentConversation)
 │           │   ├── application/
 │           │   │   ├── ports/
-│           │   │   │   └── ai-provider.port.ts    ← interpretMessage, composeReply, transcribeAudio, extractReceiptData
+│           │   │   │   └── ai-provider.port.ts    ← interpretMessage, composeReply, transcribeAudio, extractReceiptData, analyzeAgentConversation
 │           │   │   ├── prompts/                    ← normativo, 06_AI_PROMPTS.md — NO es detalle de infraestructura
 │           │   │   │   ├── interpret-message.prompt.ts
-│           │   │   │   └── compose-reply.prompt.ts
+│           │   │   │   ├── compose-reply.prompt.ts
+│           │   │   │   └── analyze-agent-conversation.prompt.ts  ← Etapa 10, 06_AI_PROMPTS.md §7
 │           │   │   └── use-cases/
 │           │   │       ├── interpret-message.use-case.ts
 │           │   │       ├── compose-customer-reply.use-case.ts
@@ -193,6 +194,30 @@ isp-platform/
 │           │   └── presentation/
 │           │       └── audit.router.ts
 │           │
+│           ├── quality/              ← Etapa 10 (07_QUALITY_SUPERVISION.md)
+│           │   ├── domain/
+│           │   │   ├── quality-review.entity.ts
+│           │   │   ├── quality-finding.entity.ts
+│           │   │   └── quality-coaching-note.entity.ts
+│           │   ├── application/
+│           │   │   ├── ports/
+│           │   │   │   └── quality-review.repository.port.ts
+│           │   │   ├── services/
+│           │   │   │   └── enqueue-quality-review.service.ts
+│           │   │   └── use-cases/
+│           │   │       ├── run-quality-analysis.use-case.ts
+│           │   │       ├── list-quality-reviews.use-case.ts
+│           │   │       ├── get-quality-review.use-case.ts
+│           │   │       ├── get-agent-quality-stats.use-case.ts
+│           │   │       ├── request-on-demand-review.use-case.ts
+│           │   │       ├── add-coaching-note.use-case.ts
+│           │   │       └── mark-review-reviewed.use-case.ts
+│           │   ├── infrastructure/
+│           │   │   └── postgres/
+│           │   │       └── quality-review.repository.pg.ts
+│           │   └── presentation/
+│           │       └── quality.router.ts
+│           │
 │           └── realtime/             ← Etapa 7
 │               ├── application/
 │               │   └── realtime-broadcaster.ts       ← emite MESSAGE_RECEIVED/SENT, CASE_CLAIMED, etc.
@@ -213,6 +238,7 @@ isp-platform/
     ├── cases/
     ├── ai/
     ├── escalation/
+    ├── quality/
     └── e2e/
         └── support-internet-flow.e2e.test.ts   ← caso A del brief original: no tengo internet → resolver
 ```
@@ -227,3 +253,4 @@ isp-platform/
 - `core/modules/escalation` nace en la Etapa 6, con soporte de triage/claim.
 - `core/modules/realtime` nace en la Etapa 7.
 - Workflows adicionales (`billing-balance`, `sales-packages`) en la Etapa 8, siguiendo el mismo patrón de `support-internet.workflow.ts` sin tocar `workflow-engine.ts` ni `ai-provider.port.ts`.
+- `core/modules/quality` (supervisión de calidad de atenciones humanas) nace en la Etapa 10; extiende `AIProviderPort` con `analyzeAgentConversation` sin romper adapters existentes.

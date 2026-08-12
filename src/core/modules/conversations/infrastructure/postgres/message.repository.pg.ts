@@ -12,6 +12,7 @@ type MessageRow = {
   case_id: string | null;
   direction: "inbound" | "outbound";
   author: MessageAuthor;
+  agent_id: string | null;
   external_id: string | null;
   body: string;
   type: string;
@@ -29,6 +30,7 @@ function mapRow(row: MessageRow): Message {
     caseId: row.case_id,
     direction: row.direction,
     author: row.author,
+    agentId: row.agent_id,
     externalId: row.external_id,
     body: row.body,
     type: row.type,
@@ -77,10 +79,17 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
 
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
     const { rows } = await this.pool.query<MessageRow>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type)
-       VALUES ($1, 'outbound', $2, $3, $4, 'text')
+      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, agent_id, case_id)
+       VALUES ($1, 'outbound', $2, $3, $4, 'text', $5, $6)
        RETURNING *`,
-      [input.conversationId, input.author, input.externalId ?? null, input.body],
+      [
+        input.conversationId,
+        input.author,
+        input.externalId ?? null,
+        input.body,
+        input.agentId ?? null,
+        input.caseId ?? null,
+      ],
     );
     return mapRow(rows[0]!);
   }
@@ -132,5 +141,19 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       result.set(row.conversation_id, mapRow(row));
     }
     return result;
+  }
+
+  async listByCaseAuthors(
+    caseId: string,
+    authors: Array<"customer" | "agent">,
+  ): Promise<Message[]> {
+    if (authors.length === 0) return [];
+    const { rows } = await this.pool.query<MessageRow>(
+      `SELECT * FROM message
+       WHERE case_id = $1 AND author = ANY($2::text[])
+       ORDER BY created_at ASC`,
+      [caseId, authors],
+    );
+    return rows.map(mapRow);
   }
 }

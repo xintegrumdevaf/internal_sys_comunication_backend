@@ -135,4 +135,12 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
     );
     return rows.length > 0;
   }
+
+  async listMembershipDepartmentIds(agentId: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ department_id: string }>(
+      `SELECT department_id FROM agent_membership WHERE agent_id = $1`,
+      [agentId],
+    );
+    return rows.map((r) => r.department_id);
+  }
 }
