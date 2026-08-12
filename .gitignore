@@ -6,3 +6,4 @@ coverage/
 
 # Contiene la API key de n8n en texto plano (N8N_API_KEY) — nunca a git.
 .cursor/mcp.json
+.vscode/
