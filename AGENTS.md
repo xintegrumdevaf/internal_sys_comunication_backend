@@ -8,7 +8,7 @@ Backend de una plataforma omnicanal de atención automatizada para un ISP (Whats
 
 ## Fuente de verdad del diseño
 
-**Toda decisión de arquitectura, modelo de datos, contratos y orden de construcción está en `docs/spec/00_OVERVIEW.md` a `docs/spec/05_BUILD_PLAN.md`.** Léelos en ese orden antes de escribir código. `docs/spec/historical/` es solo contexto de una auditoría previa — no es normativo, no lo uses como fuente de requisitos. `docs/FOLDER_STRUCTURE.md` (fuera de `spec/`, no es normativo de negocio) tiene el árbol de carpetas de `src/` esperado por etapa — consúltalo al crear archivos nuevos para mantener la ubicación consistente.
+**Toda decisión de arquitectura, modelo de datos, contratos y orden de construcción está en `docs/spec/00_OVERVIEW.md` a `docs/spec/05_BUILD_PLAN.md`, más `docs/spec/06_AI_PROMPTS.md` y `docs/spec/07_QUALITY_SUPERVISION.md`.** Léelos en ese orden antes de escribir código. `docs/spec/historical/` es solo contexto de una auditoría previa — no es normativo, no lo uses como fuente de requisitos. `docs/FOLDER_STRUCTURE.md` (fuera de `spec/`, no es normativo de negocio) tiene el árbol de carpetas de `src/` esperado por etapa — consúltalo al crear archivos nuevos para mantener la ubicación consistente.
 
 No inventes entidades, endpoints, nombres de estado ni eventos que no estén en esos documentos. Si algo no está cubierto y hace falta, propone una adición al documento correspondiente antes de codificarlo.
 
@@ -23,7 +23,7 @@ No inventes entidades, endpoints, nombres de estado ni eventos que no estén en 
 ## No-negociables (repetidos de `00_OVERVIEW.md` §5 — no los rompas nunca)
 
 - Sin lógica de negocio en controllers ni en prompts de IA.
-- La IA nunca decide transiciones de negocio: solo produce `{ type, intent, entities, confidence }` (contrato en `03_API_CONTRACT.md` §B.2). La API decide qué hacer con eso.
+- La IA nunca decide transiciones de negocio ni sanciones: produce `{ type, intent, entities, confidence }` (NLU, `03_API_CONTRACT.md` §A), texto de reply sobre plantilla, o `QualityAnalysis` tipado (`07_QUALITY_SUPERVISION.md`). La API decide qué hacer con eso.
 - n8n nunca es dueño de estado de negocio ni envía mensajes directamente al canal (WhatsApp). Ver `04_N8N_WORKFLOW_SPEC.md` §3 para la lista explícita de lo que NO debe existir en n8n.
 - Idempotencia obligatoria: ingesta de mensajes (`UNIQUE(conversation_id, external_id)`) y todo intercambio API↔n8n (`idempotencyKey`/`executionId`).
 - Un único caso automatizado activo por conversación (`conversation.active_case_id`).

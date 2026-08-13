@@ -16,6 +16,8 @@ interface AIProviderPort {
   composeReply(input: ComposeReplyInput): Promise<string>;
   transcribeAudio(mediaUrl: string, mimeType: string): Promise<{ transcript: string }>;
   extractReceiptData(mediaUrl: string, mimeType: string): Promise<{ amount?: number; reference?: string; date?: string }>;
+  /** Evaluación de calidad de atención humana (07_QUALITY_SUPERVISION.md). No decide sanciones ni cambia el caso. */
+  analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis>;
 }
 
 type InterpretMessageInput = {
@@ -49,6 +51,32 @@ type ComposeReplyInput = {
   templateHint?: string;                     // plantilla base cuando el paso ya define una (02_STATE_MACHINE.md §13); el LLM solo naturaliza, no decide contenido
   missingFields?: string[];                  // cuando se re-pregunta por datos incompletos (02_STATE_MACHINE.md §13) — para que la respuesta sea específica ("no pude leer el número de comprobante") en vez de repetir la pregunta completa
 };
+
+type AnalyzeAgentConversationInput = {
+  correlationId: string;
+  conversationId: string;
+  caseId: string;
+  agentId: string;
+  messages: Array<{
+    messageId: string;
+    author: "customer" | "agent";
+    body: string;
+    createdAt: string;
+  }>;
+};
+
+type QualityAnalysis = {
+  cordialityScore: number; // 0-100
+  summary: string;         // para supervisor, sin jerga interna ni nombres de tools/workflows
+  efficiencyNotes?: string;
+  findings: Array<{
+    messageId: string;
+    severity: "low" | "medium" | "high";
+    category: "aggression" | "disrespect" | "neglect" | "misinformation" | "inefficiency" | "other";
+    excerpt: string;
+    rationale: string;
+  }>;
+};
 ```
 
 ### A.1 Flujo end-to-end de un mensaje (texto o media)
@@ -65,6 +93,9 @@ type ComposeReplyInput = {
 
 ### A.3 Timeouts y fallback
 Timeout configurable (`AI_CALL_TIMEOUT_MS`, default ~8-10s) por llamada al provider; si expira o falla, se trata como `AI_ERROR` (`02_STATE_MACHINE.md` §5) — reintento único, y si persiste, `UNCLEAR`/escalación según corresponda.
+
+### A.4 Análisis de calidad (`analyzeAgentConversation`)
+Usado solo por el módulo `quality` (`07_QUALITY_SUPERVISION.md`). Timeout puede ser mayor que el de NLU (análisis de hilos más largos; configurable, ej. `AI_QUALITY_TIMEOUT_MS`). Fallo → `quality_review.status=failed`; **nunca** altera el caso ni el mensaje al cliente. Prompt y schema Zod en `06_AI_PROMPTS.md` §7. Findings cuyo `messageId` no esté en el input se descartan tras validar.
 
 ---
 
@@ -136,6 +167,10 @@ o en error:
 | `GET /api/audit?limit=` | Auditoría reciente |
 | `GET /api/dashboard?userId=` | KPIs y resumen para el agente autenticado |
 | `GET /api/admin/n8n-workflows` | Catálogo de acciones → URL (`n8n_workflow_registry`), solo `admin` |
+| `GET /api/quality/agents?from=&to=&departmentId=` | Ranking/eficiencia por agente (`07_QUALITY_SUPERVISION.md` §5.1) — solo `manager`/`admin` |
+| `GET /api/quality/reviews?agentId=&from=&to=&minScore=&maxScore=&status=&departmentId=` | Lista de reviews de calidad — solo `manager`/`admin` |
+| `GET /api/quality/reviews/:id` | Detalle: review + findings + coaching notes (+ mensajes referenciados o ids) — solo `manager`/`admin` |
+| `GET /api/quality/pending-count?agentId=&departmentId=` | Cuántas reviews están `pending` (análisis en curso) — solo `manager`/`admin` |
 
 ### C.2 Acciones
 
@@ -153,16 +188,24 @@ o en error:
 | `POST /api/cases/:id/transfer` `{ toDepartmentId, reason }` | Transferencia de departamento, auditada |
 | `PUT /api/admin/n8n-workflows/:action` `{ url, timeoutMs?, maxRetries?, active? }` | Crea/actualiza la entrada del catálogo (`admin` únicamente) — efecto inmediato, sin redeploy |
 | `DELETE /api/admin/n8n-workflows/:action` | Desactiva una entrada del catálogo |
+| `POST /api/quality/reviews` `{ caseId }` | Encola análisis on-demand (`07_QUALITY_SUPERVISION.md` §4.2) — solo `manager`/`admin` con alcance al depto del caso |
+| `POST /api/quality/analyze-batch` `{ from?, to?, agentId?, departmentId?, limit? }` | Encola hasta `limit` (default 3, max 10) análisis de casos cerrados **sin** review útil — cola serial; solo `manager`/`admin` |
+| `POST /api/quality/reviews/:id/notes` `{ body }` | Crea `quality_coaching_note` — solo `manager`/`admin` con alcance |
+| `PATCH /api/quality/reviews/:id` `{ status: "reviewed" }` | Marca review como revisada por el supervisor — solo `manager`/`admin` |
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.
 
 **Autorización de escritura**: requiere `case.assigned_agent_id = self`, o el caso sin asignar (vía `claim`), o `role IN (manager, admin)` con pertenencia/alcance sobre el departamento del caso. Se aplica de forma consistente en `reply`, `complete`, `claim`, `disable-automation` y `reactivate-automation` cuando el caso ya está `HUMAN_ACTIVE`/`ESCALATED` (`agent-case-auth.ts`) — el resto de agentes puede **leer** la conversación/caso pero recibe `403` si intenta escribir.
+
+**Autorización de calidad** (`/api/quality/*`): solo `role IN (manager, admin)`. `admin` ve todo; `manager` solo reviews/stats cuyo `department_id` ∈ sus memberships. `agent` → `403`. Detalle en `07_QUALITY_SUPERVISION.md` §3.
 
 Toda escritura queda en `audit_event`.
 
 **Auto-asignación** (docs/spec/06_BACKEND_GAPS.md §2): al escalarse un caso con `department_id` resuelto (nunca en el pool de triage), el sistema intenta asignarlo de inmediato al agente humano con menor carga activa de ese departamento (`AutoAssignAgentService`, umbral configurable via `AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT`). Elegibles: `active === true` **y** `autoAssignEnabled === true` **y** pertenencia al departamento (`primaryDepartmentId` o `agent_membership`). Si nadie es elegible, el caso queda `ESCALATED` sin asignar para asignación manual. Se audita como `CASE_AUTO_ASSIGNED` con `actorId: null` (sistema).
 
 `PUT /api/agents/:id` acepta patch parcial `{ "autoAssignEnabled": true | false }`. En `POST /api/agents`, si se omite el campo se persiste `false` (opt-in). El campo viaja en `AgentDto` de list/create/update/deactivate/login/me/reset-password.
+
+**Calidad post-cierre** (`07_QUALITY_SUPERVISION.md` §4.1): al completar/expirar/cancelar un caso que tuvo mensajes `author=agent`, se encola `quality_review` idempotente (`…:auto`). El fallo del job no revierte el cierre del caso.
 
 ### C.3 Tiempo real
 
@@ -212,6 +255,7 @@ type MessageDto = {
   caseId: string | null;
   direction: "inbound" | "outbound";
   author: "customer" | "ai" | "agent" | "system";
+  agentId: string | null;           // set en replies humanos (07_QUALITY_SUPERVISION.md §6)
   body: string;
   type: "text" | "audio" | "image" | "document";
   createdAt: string;
@@ -240,6 +284,56 @@ type AgentDto = {
   /** Opt-in al pool de auto-asignación al escalar. Default `false`. */
   autoAssignEnabled: boolean;
   createdAt: string;
+};
+
+type AgentQualityStatsDto = {
+  agentId: string;
+  agentName: string;
+  departmentId: string | null;
+  casesCompleted: number;
+  avgCordialityScore: number | null;
+  criticalReviewCount: number;
+  avgFirstHumanReplyMs: number | null;
+};
+
+type QualityFindingDto = {
+  id: string;
+  messageId: string;
+  severity: "low" | "medium" | "high";
+  category: "aggression" | "disrespect" | "neglect" | "misinformation" | "inefficiency" | "other";
+  excerpt: string;
+  rationale: string;
+};
+
+type QualityCoachingNoteDto = {
+  id: string;
+  reviewId: string;
+  authorAgentId: string;
+  body: string;
+  ackStatus: "open" | "acknowledged";
+  acknowledgedAt: string | null;
+  createdAt: string;
+};
+
+type QualityReviewDto = {
+  id: string;
+  conversationId: string;
+  caseId: string;
+  agentId: string;
+  departmentId: string | null;
+  cordialityScore: number | null;
+  efficiencyNotes: string | null;
+  status: "pending" | "ready" | "failed" | "reviewed";
+  trigger: "auto_case_closed" | "on_demand";
+  summary: string | null;            // review final al completar tramos; nunca model_raw crudo
+  messagesTotal: number;             // turnos customer+agent del caso
+  messagesAnalyzed: number;          // progreso de tramos
+  chunkSize: number;                 // QUALITY_ANALYSIS_CHUNK_SIZE al encolar
+  findings: QualityFindingDto[];
+  notes: QualityCoachingNoteDto[];
+  startedAt: string | null;
+  createdAt: string;
+  completedAt: string | null;
 };
 ```
 

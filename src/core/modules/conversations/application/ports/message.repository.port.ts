@@ -16,6 +16,10 @@ export type InsertOutboundMessageInput = {
   author: MessageAuthor;
   body: string;
   externalId?: string | null;
+  /** Reply humano: agente de la sesion (07_QUALITY_SUPERVISION.md §6). */
+  agentId?: string | null;
+  /** Caso activo de la conversacion al momento del reply, si existe. */
+  caseId?: string | null;
 };
 
 export type ListMessagesOptions = {
@@ -37,5 +41,13 @@ export interface MessageRepositoryPort {
   findByIds(ids: string[]): Promise<Message[]>;
   /** Último mensaje por conversación (01_DATA_MODEL.md §6 lastMessagePreview). */
   findLastByConversationIds(conversationIds: string[]): Promise<Map<string, Message>>;
+  /**
+   * Ventana de mensajes de un caso para analisis de calidad
+   * (07_QUALITY_SUPERVISION.md §4.3) — solo autores indicados, orden cronologico.
+   */
+  listByCaseAuthors(
+    caseId: string,
+    authors: Array<"customer" | "agent">,
+  ): Promise<Message[]>;
 }
 

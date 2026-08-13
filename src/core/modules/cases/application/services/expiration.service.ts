@@ -1,6 +1,7 @@
 import { TERMINAL_CASE_STATUSES, type Case } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { Logger } from "../../../../../shared/logging/logger";
+import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";
 
 /**
  * docs/spec/02_STATE_MACHINE.md §8: `case.expires_at = last_activity_at +
@@ -11,6 +12,7 @@ export class ExpirationService {
   constructor(
     private readonly caseRepo: CaseRepositoryPort,
     private readonly logger: Logger,
+    private readonly enqueueQualityReview?: EnqueueQualityReviewService,
   ) {}
 
   isExpired(caseEntity: Case, now: Date = new Date()): boolean {
@@ -51,6 +53,15 @@ export class ExpirationService {
         "caso vencido por inactividad",
       );
       expired.push(result.case);
+
+      if (this.enqueueQualityReview) {
+        void this.enqueueQualityReview.tryAutoEnqueue(result.case).catch((err) => {
+          this.logger.warn(
+            { err, caseId: result.case.id },
+            "no se pudo encolar review de calidad tras expirar",
+          );
+        });
+      }
     }
 
     if (candidates.length > 0) {

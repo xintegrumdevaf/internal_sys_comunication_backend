@@ -37,4 +37,6 @@ export interface AgentRepositoryPort {
   countActiveAdmins(excludeAgentId?: string): Promise<number>;
   addMembership(agentId: string, departmentId: string): Promise<void>;
   belongsToDepartment(agentId: string, departmentId: string): Promise<boolean>;
+  /** Departamentos con membership (alcance manager en calidad / triage). */
+  listMembershipDepartmentIds(agentId: string): Promise<string[]>;
 }

@@ -101,6 +101,7 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       caseId: null,
       direction: "inbound",
       author: "customer",
+      agentId: null,
       externalId: randomUUID(),
       body,
       type: "text",
@@ -135,9 +136,10 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     const message: Message = {
       id: randomUUID(),
       conversationId: input.conversationId,
-      caseId: null,
+      caseId: input.caseId ?? null,
       direction: "outbound",
       author: input.author,
+      agentId: input.agentId ?? null,
       externalId: input.externalId ?? null,
       body: input.body,
       type: "text",
@@ -149,6 +151,16 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     };
     this.messages.push(message);
     return message;
+  }
+
+  async listByCaseAuthors(
+    caseId: string,
+    authors: Array<"customer" | "agent">,
+  ): Promise<Message[]> {
+    const set = new Set(authors);
+    return this.messages
+      .filter((m) => m.caseId === caseId && set.has(m.author as "customer" | "agent"))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
 
   async listByConversation(

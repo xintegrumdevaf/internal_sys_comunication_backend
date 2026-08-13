@@ -1,13 +1,15 @@
 import type {
   AIProviderPort,
+  AnalyzeAgentConversationInput,
   ComposeReplyInput,
   InterpretMessageInput,
   Interpretation,
+  QualityAnalysis,
   ReceiptData,
 } from "../../application/ports/ai-provider.port";
 
 /**
- * Fake inyectable para tests de Etapa 5 (docs/spec/05_BUILD_PLAN.md aceptacion).
+ * Fake inyectable para tests de Etapa 5+ (docs/spec/05_BUILD_PLAN.md aceptacion).
  */
 export class FakeAIProvider implements AIProviderPort {
   interpretImpl: (input: InterpretMessageInput) => Promise<Interpretation> = async () => ({
@@ -26,6 +28,12 @@ export class FakeAIProvider implements AIProviderPort {
 
   extractReceiptImpl: (mediaUrl: string, mimeType: string) => Promise<ReceiptData> = async () => ({});
 
+  analyzeImpl: (input: AnalyzeAgentConversationInput) => Promise<QualityAnalysis> = async () => ({
+    cordialityScore: 85,
+    summary: "OK",
+    findings: [],
+  });
+
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
     return this.interpretImpl(input);
   }
@@ -40,5 +48,9 @@ export class FakeAIProvider implements AIProviderPort {
 
   async extractReceiptData(mediaUrl: string, mimeType: string): Promise<ReceiptData> {
     return this.extractReceiptImpl(mediaUrl, mimeType);
+  }
+
+  async analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis> {
+    return this.analyzeImpl(input);
   }
 }

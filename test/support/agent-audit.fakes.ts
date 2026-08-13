@@ -66,6 +66,13 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
   async belongsToDepartment(agentId: string, departmentId: string): Promise<boolean> {
     return this.memberships.has(`${agentId}:${departmentId}`);
   }
+
+  async listMembershipDepartmentIds(agentId: string): Promise<string[]> {
+    const prefix = `${agentId}:`;
+    return [...this.memberships]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length));
+  }
 }
 
 export class AuditRepositoryFake implements AuditRepositoryPort {

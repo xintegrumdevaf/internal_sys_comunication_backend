@@ -88,6 +88,24 @@ Orden de construcción para un agente de IA que construye el sistema **desde cer
 **Aceptación (tests en `test/hardening/etapa-9-acceptance.test.ts`):** logs del pipeline de un batch comparten el mismo `correlationId`; una ráfaga en la misma conversación produce un solo flush; dos conversaciones en paralelo no cruzan flushes; un reintento HTTP retryable reusa la misma `idempotencyKey` y deja una sola `workflow_execution` COMPLETED.
 
 **Decisión documentada:** `DIAGNOSTIC` / `CONTINUE_DIAGNOSTIC` permanecen síncronos (contrato `03`/`04`); no se introduce cola async hasta medir latencias reales en producción.
+
+## Etapa 10 — Supervisión de calidad de atenciones humanas
+
+Normativo: `07_QUALITY_SUPERVISION.md`, DDL en `01_DATA_MODEL.md`, contratos en `03` §A/§C y prompt en `06_AI_PROMPTS.md` §7.
+
+- Migración: `message.agent_id`; tablas `quality_review`, `quality_finding`, `quality_coaching_note`.
+- `reply-as-human` (y equivalentes) setean `message.agent_id` desde la sesión.
+- Extender `AIProviderPort` + `OllamaAdapter` con `analyzeAgentConversation`; prompt en `application/prompts/`; Zod + post-filtro de `messageId`.
+- Módulo `src/core/modules/quality/`: encolar al cerrar caso con mensajes agent (`…:auto` idempotente); on-demand; listados/stats; notes; mark reviewed.
+- Routers `/api/quality/*` con auth `manager`/`admin` y alcance por departamento.
+- Fallo del job → `status=failed`; nunca revierte el cierre del caso ni notifica al cliente.
+
+**Aceptación (tests):** migración aplica; reply humano persiste `agent_id`; cierre de caso con mensajes agent crea una sola review `…:auto`; Zod/post-filtro descarta `messageId` inventado; manager no ve reviews de otro depto y admin sí; on-demand con `pending` existente no duplica job; coaching note queda en `audit_event`; fake AI produce findings persistidos y score en rango 0–100.
+
+## Etapa futura (no Etapa 10) — Chat interno staff persistente
+
+Documentado en `07_QUALITY_SUPERVISION.md` §8. Fuera de alcance de la Etapa 10: hilos/mensajes staff↔staff en Postgres + realtime. El frontend sigue con chat local + deep-link desde calidad hasta esa etapa.
+
 ---
 
 ## Regla de trabajo para cada etapa
@@ -98,6 +116,6 @@ Orden de construcción para un agente de IA que construye el sistema **desde cer
 4. Corregir errores.
 5. Verificar compilación y migraciones.
 6. Verificar integración con la etapa anterior.
-7. Documentar cualquier desviación respecto a `00`-`04` y por qué.
+7. Documentar cualquier desviación respecto a `00`-`04`/`06`/`07` y por qué.
 
 No se avanza a la siguiente etapa si la anterior deja el sistema inconsistente.
