@@ -11,6 +11,8 @@ export type CreateAgentInput = {
   email: string;
   role?: AgentRole;
   primaryDepartmentId?: string | null;
+  /** Si se omite → `false` (opt-in al pool de auto-asignacion). */
+  autoAssignEnabled?: boolean;
   /** Admin que ejecuta el alta (para audit_event). */
   actorId: string;
 };
@@ -70,6 +72,7 @@ export class CreateAgentUseCase {
       email,
       role: input.role ?? "agent",
       primaryDepartmentId: input.primaryDepartmentId ?? null,
+      autoAssignEnabled: input.autoAssignEnabled ?? false,
       passwordHash,
     });
 
@@ -78,7 +81,11 @@ export class CreateAgentUseCase {
       resourceType: "agent",
       resourceId: agent.id,
       actorId: input.actorId,
-      metadata: { role: agent.role, primaryDepartmentId: agent.primaryDepartmentId },
+      metadata: {
+        role: agent.role,
+        primaryDepartmentId: agent.primaryDepartmentId,
+        autoAssignEnabled: agent.autoAssignEnabled,
+      },
     });
     this.deps.logger.info({ agentId: agent.id, actorId: input.actorId }, "agente creado");
 

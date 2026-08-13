@@ -34,8 +34,20 @@ async function seedHumanActiveCase(caseRepo: CaseRepositoryFake, agentId: string
 describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
   it("elige al agente con menor carga activa del departamento", async () => {
     const { agentRepo, caseRepo, service } = build();
-    const busy = agentRepo.seed({ name: "Busy", email: "busy@isp.local", role: "agent", primaryDepartmentId: "dept-1" });
-    const free = agentRepo.seed({ name: "Free", email: "free@isp.local", role: "agent", primaryDepartmentId: "dept-1" });
+    const busy = agentRepo.seed({
+      name: "Busy",
+      email: "busy@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
+    const free = agentRepo.seed({
+      name: "Free",
+      email: "free@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
     await seedHumanActiveCase(caseRepo, busy.id, "dept-1");
     await seedHumanActiveCase(caseRepo, busy.id, "dept-1");
 
@@ -45,8 +57,20 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
 
   it("desempata por nombre cuando la carga es igual", async () => {
     const { agentRepo, service } = build();
-    agentRepo.seed({ name: "Zulema", email: "z@isp.local", role: "agent", primaryDepartmentId: "dept-1" });
-    const ana = agentRepo.seed({ name: "Ana", email: "a@isp.local", role: "agent", primaryDepartmentId: "dept-1" });
+    agentRepo.seed({
+      name: "Zulema",
+      email: "z@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
+    const ana = agentRepo.seed({
+      name: "Ana",
+      email: "a@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
 
     const chosen = await service.pickAgentForDepartment("dept-1");
     expect(chosen?.id).toBe(ana.id);
@@ -54,9 +78,28 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
 
   it("excluye agentes inactivos y con roles admin/manager fuera del pool operativo por defecto", async () => {
     const { agentRepo, service } = build();
-    agentRepo.seed({ name: "Inactivo", email: "i@isp.local", role: "agent", primaryDepartmentId: "dept-1", active: false });
-    agentRepo.seed({ name: "AdminX", email: "adm@isp.local", role: "admin", primaryDepartmentId: "dept-1" });
-    const manager = agentRepo.seed({ name: "Manager", email: "m@isp.local", role: "manager", primaryDepartmentId: "dept-1" });
+    agentRepo.seed({
+      name: "Inactivo",
+      email: "i@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: false,
+      autoAssignEnabled: true,
+    });
+    agentRepo.seed({
+      name: "AdminX",
+      email: "adm@isp.local",
+      role: "admin",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
+    const manager = agentRepo.seed({
+      name: "Manager",
+      email: "m@isp.local",
+      role: "manager",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
 
     const chosen = await service.pickAgentForDepartment("dept-1");
     expect(chosen?.id).toBe(manager.id); // manager si es elegible, admin no
@@ -64,7 +107,13 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
 
   it("excluye a un agente que ya alcanzo el umbral de carga", async () => {
     const { agentRepo, caseRepo, service } = build(1);
-    const overloaded = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent", primaryDepartmentId: "dept-1" });
+    const overloaded = agentRepo.seed({
+      name: "Ana",
+      email: "ana@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
     await seedHumanActiveCase(caseRepo, overloaded.id, "dept-1");
 
     const chosen = await service.pickAgentForDepartment("dept-1");
@@ -73,11 +122,54 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
 
   it("incluye agentes con membership explicita aunque su primaryDepartmentId sea otro", async () => {
     const { agentRepo, service } = build();
-    const member = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent", primaryDepartmentId: "dept-2" });
+    const member = agentRepo.seed({
+      name: "Ana",
+      email: "ana@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-2",
+      autoAssignEnabled: true,
+    });
     await agentRepo.addMembership(member.id, "dept-1");
 
     const chosen = await service.pickAgentForDepartment("dept-1");
     expect(chosen?.id).toBe(member.id);
+  });
+
+  it("ignora agentes active del departamento con autoAssignEnabled=false", async () => {
+    const { agentRepo, service } = build();
+    agentRepo.seed({
+      name: "Sin OptIn",
+      email: "no@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: false,
+    });
+    const optedIn = agentRepo.seed({
+      name: "Con OptIn",
+      email: "yes@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
+
+    const chosen = await service.pickAgentForDepartment("dept-1");
+    expect(chosen?.id).toBe(optedIn.id);
+  });
+
+  it("devuelve null si solo hay agentes active sin autoAssignEnabled", async () => {
+    const { agentRepo, service } = build();
+    agentRepo.seed({
+      name: "Ana",
+      email: "ana@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: false,
+    });
+
+    const chosen = await service.pickAgentForDepartment("dept-1");
+    expect(chosen).toBeNull();
   });
 
   it("devuelve null si no hay ningun agente elegible en el departamento", async () => {

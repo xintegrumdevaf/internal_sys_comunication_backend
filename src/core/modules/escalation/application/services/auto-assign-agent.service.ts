@@ -17,8 +17,8 @@ export type AutoAssignAgentDeps = {
  * Elige el agente humano que debe recibir un caso recien escalado dentro de
  * un departamento (docs/spec/06_BACKEND_GAPS.md §2). Reglas:
  *
- * 1. Solo agentes `active` con `role` `agent` o `manager` (los `admin` no
- *    reciben carga operativa automatica).
+ * 1. Solo agentes `active` con `autoAssignEnabled` y `role` `agent` o
+ *    `manager` (los `admin` no reciben carga operativa automatica).
  * 2. Elegibles: `primaryDepartmentId` del departamento, o con
  *    `agent_membership` explicita en el (departamentos `restricted` con
  *    varios agentes asignados via membership).
@@ -35,7 +35,9 @@ export class AutoAssignAgentService {
 
   async pickAgentForDepartment(departmentId: string): Promise<Agent | null> {
     const allAgents = await this.deps.agentRepo.list();
-    const roleEligible = allAgents.filter((a) => a.active && (a.role === "agent" || a.role === "manager"));
+    const roleEligible = allAgents.filter(
+      (a) => a.active && a.autoAssignEnabled && (a.role === "agent" || a.role === "manager"),
+    );
 
     const eligible: Agent[] = [];
     for (const agent of roleEligible) {

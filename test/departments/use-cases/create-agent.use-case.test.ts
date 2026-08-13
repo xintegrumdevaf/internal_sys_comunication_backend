@@ -30,12 +30,38 @@ describe("CreateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 POST /api/agents)
       role: "agent",
       primaryDepartmentId: support.id,
       active: true,
+      autoAssignEnabled: false,
     });
     expect(agent.passwordHash).toBeTruthy();
     expect(temporaryPassword).toHaveLength(12);
     expect(auditRepo.events).toContainEqual(
       expect.objectContaining({ action: "AGENT_CREATED", resourceId: agent.id, actorId: "admin-1" }),
     );
+  });
+
+  it("persiste autoAssignEnabled=false cuando el campo se omite en el alta", async () => {
+    const { useCase } = build();
+
+    const { agent } = await useCase.execute({
+      name: "Luis Perez",
+      email: "luis@isp.local",
+      actorId: "admin-1",
+    });
+
+    expect(agent.autoAssignEnabled).toBe(false);
+  });
+
+  it("persiste autoAssignEnabled=true cuando el admin lo envia en el alta", async () => {
+    const { useCase } = build();
+
+    const { agent } = await useCase.execute({
+      name: "Luis Perez",
+      email: "luis@isp.local",
+      autoAssignEnabled: true,
+      actorId: "admin-1",
+    });
+
+    expect(agent.autoAssignEnabled).toBe(true);
   });
 
   it("normaliza el email a minusculas para el chequeo de unicidad (case-insensitive)", async () => {

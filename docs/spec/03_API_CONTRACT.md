@@ -160,7 +160,9 @@ o en error:
 
 Toda escritura queda en `audit_event`.
 
-**Auto-asignación** (docs/spec/06_BACKEND_GAPS.md §2): al escalarse un caso con `department_id` resuelto (nunca en el pool de triage), el sistema intenta asignarlo de inmediato al agente humano con menor carga activa de ese departamento (`AutoAssignAgentService`, umbral configurable via `AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT`). Si nadie es elegible, el caso queda `ESCALATED` sin asignar para asignación manual. Se audita como `CASE_AUTO_ASSIGNED` con `actorId: null` (sistema).
+**Auto-asignación** (docs/spec/06_BACKEND_GAPS.md §2): al escalarse un caso con `department_id` resuelto (nunca en el pool de triage), el sistema intenta asignarlo de inmediato al agente humano con menor carga activa de ese departamento (`AutoAssignAgentService`, umbral configurable via `AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT`). Elegibles: `active === true` **y** `autoAssignEnabled === true` **y** pertenencia al departamento (`primaryDepartmentId` o `agent_membership`). Si nadie es elegible, el caso queda `ESCALATED` sin asignar para asignación manual. Se audita como `CASE_AUTO_ASSIGNED` con `actorId: null` (sistema).
+
+`PUT /api/agents/:id` acepta patch parcial `{ "autoAssignEnabled": true | false }`. En `POST /api/agents`, si se omite el campo se persiste `false` (opt-in). El campo viaja en `AgentDto` de list/create/update/deactivate/login/me/reset-password.
 
 ### C.3 Tiempo real
 
@@ -231,8 +233,13 @@ type CaseDto = {
 type AgentDto = {
   id: string;
   name: string;
+  email: string;
   role: "agent" | "manager" | "admin";
   primaryDepartmentId: string | null;
+  active: boolean;
+  /** Opt-in al pool de auto-asignación al escalar. Default `false`. */
+  autoAssignEnabled: boolean;
+  createdAt: string;
 };
 ```
 
@@ -292,3 +299,5 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 **v3 → v4**: login real (`agent.password_hash` + `POST/GET /api/auth/*`, migración `0009_agent_password_hash.sql`). Todos los routers dejaron de confiar en `x-agent-id`/`agentUserId` del cliente como identidad — ahora resuelven siempre `req.agent` desde la cookie de sesión real. Se agregó el CRUD completo de agentes (`POST/PUT/DELETE /api/agents`, `POST /api/agents/:id/reset-password`). Se agregó auto-asignación de casos escalados por departamento (`AutoAssignAgentService`) y se cerró el hueco de autorización de escritura en `reply`/`complete` (antes solo `claim`/`disable-automation`/`reactivate-automation` lo exigían).
 
 **v4 → v5**: `ConversationDto.waProfileName` (migración `0010_conversation_wa_profile_name.sql`) — nombre real de perfil/agenda de WhatsApp, capturado del webhook sin llamada extra a la API de Meta. La foto de perfil no se agrega: no existe endpoint oficial de Meta para obtenerla (ver nota en `01_DATA_MODEL.md`).
+
+**v5 → v6**: opt-in de auto-asignación por agente (`agent.auto_assign_enabled` / `AgentDto.autoAssignEnabled`, migración `0011_agent_auto_assign_enabled.sql`). Default `false`. `AutoAssignAgentService` solo considera agentes `active && autoAssignEnabled` con pertenencia al departamento.

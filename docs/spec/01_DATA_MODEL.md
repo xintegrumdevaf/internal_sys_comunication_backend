@@ -50,6 +50,9 @@ CREATE TABLE agent (
   role                  TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('agent','manager','admin')),
   primary_department_id UUID REFERENCES department(id),
   active                BOOLEAN NOT NULL DEFAULT true,
+  -- Opt-in al pool de auto-asignación al escalar (default false). Migración 0011.
+  auto_assign_enabled   BOOLEAN NOT NULL DEFAULT false,
+  password_hash         TEXT,                         -- argon2; null = sin contraseña todavía (migración 0009)
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

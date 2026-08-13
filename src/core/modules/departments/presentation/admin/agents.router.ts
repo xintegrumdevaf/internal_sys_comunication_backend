@@ -22,6 +22,7 @@ const createBodySchema = z.object({
   email: z.string().trim().email(),
   role: roleSchema.optional(),
   primaryDepartmentId: z.string().uuid().nullable().optional(),
+  autoAssignEnabled: z.boolean().optional(),
 });
 
 const updateBodySchema = z.object({
@@ -30,6 +31,7 @@ const updateBodySchema = z.object({
   role: roleSchema.optional(),
   primaryDepartmentId: z.string().uuid().nullable().optional(),
   active: z.boolean().optional(),
+  autoAssignEnabled: z.boolean().optional(),
 });
 
 /**

@@ -77,6 +77,26 @@ describe("UpdateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 PUT /api/agents/:
     ).rejects.toMatchObject({ type: "BUSINESS_ERROR" });
   });
 
+  it("permite activar y desactivar autoAssignEnabled via patch parcial", async () => {
+    const { agentRepo, useCase } = build();
+    const agent = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent" });
+    expect(agent.autoAssignEnabled).toBe(false);
+
+    const enabled = await useCase.execute({
+      agentId: agent.id,
+      patch: { autoAssignEnabled: true },
+      actorId: "admin-1",
+    });
+    expect(enabled.autoAssignEnabled).toBe(true);
+
+    const disabled = await useCase.execute({
+      agentId: agent.id,
+      patch: { autoAssignEnabled: false },
+      actorId: "admin-1",
+    });
+    expect(disabled.autoAssignEnabled).toBe(false);
+  });
+
   it("si hay mas de un admin activo, si permite degradar o desactivar a uno de ellos", async () => {
     const { agentRepo, useCase } = build();
     const admin1 = agentRepo.seed({ name: "Admin 1", email: "admin1@isp.local", role: "admin" });

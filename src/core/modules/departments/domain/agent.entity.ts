@@ -7,6 +7,12 @@ export interface Agent {
   role: AgentRole;
   primaryDepartmentId: string | null;
   active: boolean;
+  /**
+   * Opt-in al pool de auto-asignacion al escalar (`AutoAssignAgentService`).
+   * Default `false`: un agente activo del departamento no recibe casos
+   * automaticos hasta que un admin lo active via `PUT /api/agents/:id`.
+   */
+  autoAssignEnabled: boolean;
   createdAt: Date;
   /**
    * Hash argon2 de la contrasena (nunca texto plano). `null` = agente sin

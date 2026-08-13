@@ -13,6 +13,7 @@ type AgentRow = {
   role: AgentRole;
   primary_department_id: string | null;
   active: boolean;
+  auto_assign_enabled: boolean;
   created_at: Date;
   password_hash: string | null;
 };
@@ -25,6 +26,7 @@ function mapRow(row: AgentRow): Agent {
     role: row.role,
     primaryDepartmentId: row.primary_department_id,
     active: row.active,
+    autoAssignEnabled: row.auto_assign_enabled,
     createdAt: row.created_at,
     passwordHash: row.password_hash,
   };
@@ -52,8 +54,8 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
 
   async create(input: CreateAgentInput): Promise<Agent> {
     const { rows } = await this.pool.query<AgentRow>(
-      `INSERT INTO agent (name, email, role, primary_department_id, password_hash)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO agent (name, email, role, primary_department_id, auto_assign_enabled, password_hash)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING *`,
       [
@@ -61,6 +63,7 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
         input.email,
         input.role ?? "agent",
         input.primaryDepartmentId ?? null,
+        input.autoAssignEnabled ?? false,
         input.passwordHash ?? null,
       ],
     );
@@ -91,6 +94,10 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
     if (patch.active !== undefined) {
       sets.push(`active = $${i++}`);
       values.push(patch.active);
+    }
+    if (patch.autoAssignEnabled !== undefined) {
+      sets.push(`auto_assign_enabled = $${i++}`);
+      values.push(patch.autoAssignEnabled);
     }
     if (patch.passwordHash !== undefined) {
       sets.push(`password_hash = $${i++}`);

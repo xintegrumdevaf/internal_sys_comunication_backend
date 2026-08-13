@@ -5,6 +5,8 @@ export type CreateAgentInput = {
   email: string;
   role?: AgentRole;
   primaryDepartmentId?: string | null;
+  /** Si se omite, el repo persiste `false` (opt-in). */
+  autoAssignEnabled?: boolean;
   /** Hash argon2 ya calculado — nunca texto plano llega hasta aqui. */
   passwordHash?: string | null;
 };
@@ -16,6 +18,7 @@ export type UpdateAgentPatch = Partial<{
   role: AgentRole;
   primaryDepartmentId: string | null;
   active: boolean;
+  autoAssignEnabled: boolean;
   /** Hash argon2 ya calculado — nunca texto plano llega hasta aqui. */
   passwordHash: string | null;
 }>;

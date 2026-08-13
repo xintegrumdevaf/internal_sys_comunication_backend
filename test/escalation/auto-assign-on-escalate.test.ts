@@ -40,7 +40,13 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
   it("asigna automaticamente el caso al agente disponible del departamento y pasa a HUMAN_ACTIVE", async () => {
     const { caseRepo, departmentRepo, agentRepo, auditRepo, broadcaster, escalationService } = buildStack();
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
-    const agent = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent", primaryDepartmentId: support.id });
+    const agent = agentRepo.seed({
+      name: "Ana",
+      email: "ana@isp.local",
+      role: "agent",
+      primaryDepartmentId: support.id,
+      autoAssignEnabled: true,
+    });
     const conversation = { id: "conv-1" };
     const { case: created } = await caseRepo.create({
       conversationId: conversation.id,
@@ -115,7 +121,13 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
   it("respeta el umbral de carga: no fuerza la asignacion a un agente sobrecargado", async () => {
     const { caseRepo, departmentRepo, agentRepo, escalationService } = buildStack(1);
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
-    const agent = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent", primaryDepartmentId: support.id });
+    const agent = agentRepo.seed({
+      name: "Ana",
+      email: "ana@isp.local",
+      role: "agent",
+      primaryDepartmentId: support.id,
+      autoAssignEnabled: true,
+    });
 
     // Ya tiene 1 caso activo -> alcanza el umbral de 1
     const { case: existing } = await caseRepo.create({
