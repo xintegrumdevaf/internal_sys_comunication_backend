@@ -1,0 +1,52 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - test
+      - main
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Deploy to Coolify (Test Environment)
+        if: github.ref == 'refs/heads/test' && success()
+        run: |
+          if [ -n "${{ secrets.COOLIFY_WEBHOOK_TEST }}" ]; then
+            echo "Triggering Coolify Test deployment..."
+            curl -s -X GET "${{ secrets.COOLIFY_WEBHOOK_TEST }}"
+          else
+            echo "COOLIFY_WEBHOOK_TEST is not set. Skipping deployment."
+          fi
+
+      - name: Deploy to Coolify (Main Environment)
+        if: github.ref == 'refs/heads/main' && success()
+        run: |
+          if [ -n "${{ secrets.COOLIFY_WEBHOOK_MAIN }}" ]; then
+            echo "Triggering Coolify Main deployment..."
+            curl -s -X GET "${{ secrets.COOLIFY_WEBHOOK_MAIN }}"
+          else
+            echo "COOLIFY_WEBHOOK_MAIN is not set. Skipping deployment."
+          fi

@@ -10,16 +10,16 @@ services:
       POSTGRES_USER: isp
       POSTGRES_PASSWORD: isp
       POSTGRES_DB: isp_platform
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
  
   redis:
     image: redis:7
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"
  
   # Opcional: para probar el 04_N8N_WORKFLOW_SPEC.md en local antes de tocar el n8n de producción
   n8n:
@@ -44,6 +44,33 @@ services:
       DB_POSTGRESDB_PASSWORD: isp
     depends_on:
       - postgres
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - APP_PUBLIC_URL=${APP_PUBLIC_URL:-http://localhost:3000}
+      - DATABASE_URL=postgresql://isp:isp@postgres:5432/isp_platform
+      - REDIS_URL=redis://redis:6379/0
+      - API_INTERNAL_KEY=${API_INTERNAL_KEY:-dev-local-internal-key-change-me}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
+      - SESSION_TTL_SECONDS=${SESSION_TTL_SECONDS:-43200}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN:-}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN:-}
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:4b}
+    depends_on:
+      - postgres
+      - redis
  
 volumes:
   pgdata:

@@ -339,7 +339,7 @@ async function seedScenario(
     conversationId: conversation.id,
     workflowType: "SUPPORT_INTERNET",
     departmentId: deps.supportDepartmentId,
-    context: {},
+    context: {} as any,
     initialState: "HUMAN_ACTIVE",
     expiresAt: null,
   });

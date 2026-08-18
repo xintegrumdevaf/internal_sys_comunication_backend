@@ -20,7 +20,7 @@ async function run(): Promise<void> {
       )
     `);
 
-    const migrationsDir = join(__dirname, "..", "migrations");
+    const migrationsDir = join(process.cwd(), "migrations");
     const files = readdirSync(migrationsDir)
       .filter((file) => file.endsWith(".sql"))
       .sort();
