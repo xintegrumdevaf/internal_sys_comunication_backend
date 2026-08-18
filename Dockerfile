@@ -5,13 +5,13 @@ RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
 WORKDIR /app
 
 FROM base AS builder
-COPY package.json pnpm-lock.yaml tsconfig.json ./
+COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.build.json ./
 COPY pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src ./src
 COPY scripts ./scripts
 COPY migrations ./migrations
-RUN pnpm run build
+RUN pnpm run build:prod
 
 FROM base AS runner
 COPY package.json pnpm-lock.yaml ./

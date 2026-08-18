@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "build:prod": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
