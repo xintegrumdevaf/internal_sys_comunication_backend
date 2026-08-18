@@ -48,7 +48,8 @@ export class GeminiAdapter implements AIProviderPort {
     const { system, user } = buildInterpretMessagePrompt(input);
     const started = Date.now();
     try {
-      const raw = await this.generateContent(system, user, { jsonMode: true, temperature: 0.2 });
+      const payload = this.buildBasePayload(system, user, { jsonMode: true, temperature: 0.2 });
+      const raw = await this.callGemini(payload, this.config.timeoutMs);
       const interpretation = parseInterpretation(raw);
       log.info(
         {
@@ -77,20 +78,101 @@ export class GeminiAdapter implements AIProviderPort {
 
   async composeReply(input: ComposeReplyInput): Promise<string> {
     const { system, user } = buildComposeReplyPrompt(input);
-    const raw = await this.generateContent(system, user, { jsonMode: false, temperature: 0.55 });
+    const payload = this.buildBasePayload(system, user, { jsonMode: false, temperature: 0.55 });
+    const raw = await this.callGemini(payload, this.config.timeoutMs);
     return raw.trim().replace(/^["']|["']$/g, "");
   }
 
-  async transcribeAudio(_mediaUrl: string, _mimeType: string): Promise<{ transcript: string }> {
-    throw new DomainError("AI_ERROR", "transcribeAudio no disponible en este adapter Gemini", {
-      retryable: false,
-    });
+  async transcribeAudio(mediaUrl: string, mimeType: string): Promise<{ transcript: string }> {
+    const started = Date.now();
+    try {
+      const base64Data = await this.downloadMediaAsBase64(mediaUrl);
+      const system = "Sos un transcriptor de audio profesional e inteligente. Transcribí el audio palabra por palabra. Si está en español, mantenelo en español. Si el audio está en otro idioma, transcribilo en ese mismo idioma (no lo traduzcas). Devolvé únicamente la transcripción limpia, sin comentarios ni explicaciones adicionales.";
+      const user = "Transcribí este archivo de audio de forma limpia:";
+      
+      const payload = {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: user },
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+        systemInstruction: {
+          parts: [{ text: system }],
+        },
+        generationConfig: {
+          temperature: 0.1,
+        },
+      };
+
+      const raw = await this.callGemini(payload, this.config.timeoutMs);
+      this.logger.info(
+        { durationMs: Date.now() - started, mimeType },
+        "Gemini transcripcion de audio OK",
+      );
+      return { transcript: raw.trim() };
+    } catch (error) {
+      this.logger.warn(
+        { started, err: error instanceof Error ? error.message : String(error) },
+        "Gemini transcripcion de audio FALLO",
+      );
+      throw error;
+    }
   }
 
-  async extractReceiptData(_mediaUrl: string, _mimeType: string): Promise<ReceiptData> {
-    throw new DomainError("AI_ERROR", "extractReceiptData no disponible en este adapter Gemini", {
-      retryable: false,
-    });
+  async extractReceiptData(mediaUrl: string, mimeType: string): Promise<ReceiptData> {
+    const started = Date.now();
+    try {
+      const base64Data = await this.downloadMediaAsBase64(mediaUrl);
+      const system = "Sos un extractor de datos de recibos de pago. Analizá la imagen provista y extraé los siguientes campos en formato JSON:\n- amount: el monto total pagado como un número con decimales (por ejemplo, 12500.50).\n- reference: el número de transacción o referencia como texto.\n- date: la fecha de la transacción en formato YYYY-MM-DD.\n\nDevolvé ÚNICAMENTE el objeto JSON correspondiente. Si no lográs identificar alguno de los campos, dejalo como null.";
+      const user = "Extraé los datos del siguiente recibo:";
+
+      const payload = {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: user },
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+        systemInstruction: {
+          parts: [{ text: system }],
+        },
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+        },
+      };
+
+      const raw = await this.callGemini(payload, this.config.timeoutMs);
+      const data = parseReceiptData(raw);
+      this.logger.info(
+        { durationMs: Date.now() - started, amount: data.amount, reference: data.reference },
+        "Gemini extraccion de recibo OK",
+      );
+      return data;
+    } catch (error) {
+      this.logger.warn(
+        { started, err: error instanceof Error ? error.message : String(error) },
+        "Gemini extraccion de recibo FALLO",
+      );
+      throw error;
+    }
   }
 
   async analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis> {
@@ -104,11 +186,8 @@ export class GeminiAdapter implements AIProviderPort {
     const timeoutMs = Math.max(this.config.timeoutMs, this.config.qualityTimeoutMs ?? this.config.timeoutMs);
     const started = Date.now();
     try {
-      const raw = await this.generateContent(system, user, {
-        jsonMode: true,
-        temperature: 0.15,
-        timeoutMs,
-      });
+      const payload = this.buildBasePayload(system, user, { jsonMode: true, temperature: 0.15 });
+      const raw = await this.callGemini(payload, timeoutMs);
       const analysis = parseQualityAnalysis(raw);
       log.info(
         {
@@ -132,45 +211,64 @@ export class GeminiAdapter implements AIProviderPort {
     }
   }
 
-  private async generateContent(
+  private buildBasePayload(
     system: string,
     user: string,
-    options: { jsonMode: boolean; temperature: number; timeoutMs?: number },
-  ): Promise<string> {
-    const timeoutMs = options.timeoutMs ?? this.config.timeoutMs;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const payload: Record<string, unknown> = {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: user,
-              },
-            ],
-          },
-        ],
-        systemInstruction: {
+    options: { jsonMode: boolean; temperature: number },
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      contents: [
+        {
+          role: "user",
           parts: [
             {
-              text: system,
+              text: user,
             },
           ],
         },
-        generationConfig: {
-          temperature: options.temperature,
-        },
+      ],
+      systemInstruction: {
+        parts: [
+          {
+            text: system,
+          },
+        ],
+      },
+      generationConfig: {
+        temperature: options.temperature,
+      },
+    };
+
+    if (options.jsonMode) {
+      payload.generationConfig = {
+        ...((payload.generationConfig as Record<string, unknown>) || {}),
+        responseMimeType: "application/json",
       };
+    }
+    return payload;
+  }
 
-      if (options.jsonMode) {
-        payload.generationConfig = {
-          ...((payload.generationConfig as Record<string, unknown>) || {}),
-          responseMimeType: "application/json",
-        };
+  private async downloadMediaAsBase64(url: string): Promise<string> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
+      const buffer = await response.arrayBuffer();
+      return Buffer.from(buffer).toString("base64");
+    } catch (error) {
+      throw new DomainError(
+        "AI_ERROR",
+        `No se pudo descargar la media para Gemini: ${error instanceof Error ? error.message : String(error)}`,
+        { retryable: true },
+      );
+    }
+  }
 
+  private async callGemini(payload: Record<string, unknown>, timeoutMs: number): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent?key=${this.config.apiKey}`;
       const response = await fetch(url, {
         method: "POST",
@@ -252,6 +350,31 @@ function parseInterpretation(raw: string): Interpretation {
         ? (obj.entities as Record<string, unknown>)
         : {},
     confidence: Number.isFinite(confidence) ? confidence : 0,
+  };
+}
+
+function parseReceiptData(raw: string): ReceiptData {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new DomainError("AI_ERROR", "Datos de recibo no es JSON valido", { retryable: true });
+    }
+    parsed = JSON.parse(match[0]);
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new DomainError("AI_ERROR", "Datos de recibo invalidos", { retryable: true });
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const amount = obj.amount !== undefined && obj.amount !== null ? Number(obj.amount) : undefined;
+  return {
+    amount: amount && Number.isFinite(amount) ? amount : undefined,
+    reference: typeof obj.reference === "string" || typeof obj.reference === "number" ? String(obj.reference) : undefined,
+    date: typeof obj.date === "string" ? obj.date : undefined,
   };
 }
 
