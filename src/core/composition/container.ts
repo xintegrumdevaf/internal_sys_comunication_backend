@@ -53,6 +53,8 @@ import { WorkflowExecutionRepositoryPg } from "../modules/cases/infrastructure/p
 import { N8nWorkflowRegistryRepositoryPg } from "../modules/cases/infrastructure/postgres/n8n-workflow-registry.repository.pg";
 import { AiInterpretationAdapter } from "../modules/cases/infrastructure/ai/ai-interpretation.adapter";
 import { OllamaAdapter } from "../modules/ai/infrastructure/ollama/ollama-adapter";
+import { GeminiAdapter } from "../modules/ai/infrastructure/gemini/gemini-adapter";
+import { AIProviderPort } from "../modules/ai/application/ports/ai-provider.port";
 import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases/compose-customer-reply.use-case";
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
 import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
@@ -175,15 +177,31 @@ export function createContainer(): Container {
 
   // --- AI (Etapa 5) ---
   const aiLogger = logger.child({ module: "ai" });
-  const aiProvider = new OllamaAdapter(
-    {
-      baseUrl: env.OLLAMA_BASE_URL,
-      model: env.OLLAMA_MODEL,
-      timeoutMs: env.AI_CALL_TIMEOUT_MS,
-      qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
-    },
-    aiLogger,
-  );
+  let aiProvider: AIProviderPort;
+  if (env.AI_PROVIDER === "gemini") {
+    if (!env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY es requerida cuando AI_PROVIDER=gemini");
+    }
+    aiProvider = new GeminiAdapter(
+      {
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        timeoutMs: env.AI_CALL_TIMEOUT_MS,
+        qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
+      },
+      aiLogger,
+    );
+  } else {
+    aiProvider = new OllamaAdapter(
+      {
+        baseUrl: env.OLLAMA_BASE_URL,
+        model: env.OLLAMA_MODEL,
+        timeoutMs: env.AI_CALL_TIMEOUT_MS,
+        qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
+      },
+      aiLogger,
+    );
+  }
   const interpretationProvider = new AiInterpretationAdapter(aiProvider, aiLogger);
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);

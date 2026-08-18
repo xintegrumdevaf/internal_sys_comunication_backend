@@ -35,9 +35,11 @@ const envSchema = z.object({
 
   // AIProviderPort (docs/spec/03_API_CONTRACT.md §A) — implementado en la
   // Etapa 5, se valida desde ahora porque ya vive en .env.example.
-  AI_PROVIDER: z.enum(["ollama"]).default("ollama"),
+  AI_PROVIDER: z.enum(["ollama", "gemini"]).default("ollama"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:4b"),
+  GEMINI_API_KEY: z.string().default(""),
+  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
   AI_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   /** Timeout para analyzeAgentConversation (Ollama local puede tardar varios minutos). */
   AI_QUALITY_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
