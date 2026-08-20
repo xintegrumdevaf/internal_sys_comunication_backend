@@ -2,7 +2,7 @@ import type { CaseContext } from "../../domain/contexts/case-context";
 import type { WorkflowDefinition, WorkflowStepOutcome } from "../engine/workflow-definition";
 
 const CLARIFY_TEMPLATE =
-  "No estoy seguro de cómo ayudarte. ¿Es un problema de internet, de facturación/pagos, o quieres hablar con un asesor?";
+  "¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un asesor?";
 
 const REQUEST_HUMAN_TEMPLATE =
   "Te conectamos con un asesor humano. En breve te atenderán por este mismo chat.";
@@ -75,8 +75,16 @@ export function resolveReplyTemplate(input: {
       templates[outcome.nextState] ??
       templates.WAITING_USER_CLIENT ??
       CLARIFY_TEMPLATE;
-    if (missingFields && missingFields.length > 0) {
-      templateHint = `No pude obtener ${missingFields.join(" y ")}. ${templateHint}`;
+    const friendlyMissingFields = missingFields?.map(f => {
+      if (f === "nationalId") return "tu número de cédula";
+      if (f === "address") return "tu dirección";
+      if (f === "fullName") return "el nombre completo del titular";
+      if (f === "answer") return "una respuesta clara";
+      return f;
+    });
+
+    if (friendlyMissingFields && friendlyMissingFields.length > 0) {
+      templateHint = `Aún me falta ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
     }
     return {
       templateHint,
