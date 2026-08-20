@@ -44,6 +44,9 @@ No está bajo `/api`.
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | `GET` | `/api/departments` | sesión | Lista departamentos (`slug`, `visibility`, …) |
+| `POST` | `/api/departments` | sesión de `role=admin` | Crea un departamento. Body: `{ name, slug, visibility }` |
+| `PUT` | `/api/departments/:id` | sesión de `role=admin` | Edita un departamento. Body: `{ name?, slug?, visibility?, active? }` |
+| `DELETE` | `/api/departments/:id` | sesión de `role=admin` | Desactiva un departamento (soft delete) |
 | `GET` | `/api/agents` | sesión | Lista agentes (incluye `id`, `role`, `primaryDepartmentId`) |
 | `POST` | `/api/agents` | sesión de `role=admin` | Crea un agente. Body: `{ name, email, role?, primaryDepartmentId? }` → `{ agent, temporaryPassword }` |
 | `PUT` | `/api/agents/:id` | sesión de `role=admin` | Edita un agente. Body: `{ name?, email?, role?, primaryDepartmentId?, active? }` |

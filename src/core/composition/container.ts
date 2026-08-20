@@ -38,6 +38,10 @@ import { DeactivateAgentUseCase } from "../modules/departments/application/use-c
 import { ResetAgentPasswordUseCase } from "../modules/departments/application/use-cases/reset-agent-password.use-case";
 import { createDepartmentsRouter } from "../modules/departments/presentation/departments.router";
 import { createAgentsAdminRouter } from "../modules/departments/presentation/admin/agents.router";
+import { CreateDepartmentUseCase } from "../modules/departments/application/use-cases/create-department.use-case";
+import { UpdateDepartmentUseCase } from "../modules/departments/application/use-cases/update-department.use-case";
+import { DeactivateDepartmentUseCase } from "../modules/departments/application/use-cases/deactivate-department.use-case";
+import { createDepartmentsAdminRouter } from "../modules/departments/presentation/admin/departments.router";
 
 import { SessionStoreRedis } from "../modules/auth/infrastructure/redis/session-store.repository.redis";
 import { LoginUseCase } from "../modules/auth/application/use-cases/login.use-case";
@@ -425,6 +429,10 @@ export function createContainer(): Container {
   const deactivateAgent = new DeactivateAgentUseCase({ agentRepo, auditRepo, logger });
   const resetAgentPassword = new ResetAgentPasswordUseCase({ agentRepo, auditRepo, logger });
 
+  const createDepartment = new CreateDepartmentUseCase({ departmentRepo, auditRepo, logger });
+  const updateDepartment = new UpdateDepartmentUseCase({ departmentRepo, auditRepo, logger });
+  const deactivateDepartment = new DeactivateDepartmentUseCase({ departmentRepo, auditRepo, logger });
+
   const login = new LoginUseCase({
     agentRepo,
     sessionStore,
@@ -486,6 +494,13 @@ export function createContainer(): Container {
       updateAgent,
       deactivateAgent,
       resetAgentPassword,
+    }),
+  );
+  app.use(
+    createDepartmentsAdminRouter({
+      createDepartment,
+      updateDepartment,
+      deactivateDepartment,
     }),
   );
   app.use(createAuditRouter(auditRepo));

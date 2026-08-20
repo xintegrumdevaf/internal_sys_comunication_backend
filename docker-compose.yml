@@ -11,6 +11,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-isp}
       POSTGRES_DB: ${DB_NAME:-isp_platform}
       POSTGRES_MULTIPLE_DATABASES: ${DB_NAME:-isp_platform},${N8N_DB_NAME:-n8n}
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
@@ -18,6 +20,8 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    ports:
+      - "6379:6379"
 
   # Opcional: para probar el 04_N8N_WORKFLOW_SPEC.md en local antes de tocar el n8n de producción
   n8n:

@@ -14,6 +14,7 @@ import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/ap
 import type { Department } from "../../src/core/modules/departments/domain/department.entity";
 import type {
   CreateDepartmentInput,
+  UpdateDepartmentInput,
   DepartmentRepositoryPort,
 } from "../../src/core/modules/departments/application/ports/department.repository.port";
 
@@ -239,5 +240,29 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
 
   async create(input: CreateDepartmentInput): Promise<Department> {
     return this.seed(input);
+  }
+
+  async update(id: string, input: UpdateDepartmentInput): Promise<Department> {
+    const department = this.departments.get(id);
+    if (!department) throw new Error("Not found");
+    const updated = { ...department, ...input } as Department;
+    this.departments.set(id, updated);
+    return updated;
+  }
+
+  async deactivate(id: string): Promise<Department> {
+    const department = this.departments.get(id);
+    if (!department) throw new Error("Not found");
+    const updated = { ...department, active: false };
+    this.departments.set(id, updated);
+    return updated;
+  }
+
+  async hasActiveAgents(_id: string): Promise<boolean> {
+    return false;
+  }
+
+  async hasOpenCases(_id: string): Promise<boolean> {
+    return false;
   }
 }

@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { Department, DepartmentVisibility } from "../../domain/department.entity";
 import type {
   CreateDepartmentInput,
+  UpdateDepartmentInput,
   DepartmentRepositoryPort,
 } from "../../application/ports/department.repository.port";
 
@@ -59,5 +60,66 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
       [input.slug, input.name, input.visibility ?? "shared"],
     );
     return mapRow(rows[0]!);
+  }
+  async update(id: string, input: UpdateDepartmentInput): Promise<Department> {
+    const fields: string[] = [];
+    const values: any[] = [id];
+    let query = `UPDATE department SET `;
+
+    if (input.name !== undefined) {
+      values.push(input.name);
+      fields.push(`name = $${values.length}`);
+    }
+    if (input.slug !== undefined) {
+      values.push(input.slug);
+      fields.push(`slug = $${values.length}`);
+    }
+    if (input.visibility !== undefined) {
+      values.push(input.visibility);
+      fields.push(`visibility = $${values.length}`);
+    }
+    if (input.active !== undefined) {
+      values.push(input.active);
+      fields.push(`active = $${values.length}`);
+    }
+
+    if (fields.length === 0) {
+      // Nothing to update, just return the current state
+      const current = await this.findById(id);
+      if (!current) throw new Error("Department not found");
+      return current;
+    }
+
+    query += fields.join(", ");
+    query += ` WHERE id = $1 RETURNING *`;
+
+    const { rows } = await this.pool.query<DepartmentRow>(query, values);
+    if (!rows[0]) throw new Error("Department not found");
+    return mapRow(rows[0]);
+  }
+
+  async deactivate(id: string): Promise<Department> {
+    const { rows } = await this.pool.query<DepartmentRow>(
+      `UPDATE department SET active = false WHERE id = $1 RETURNING *`,
+      [id],
+    );
+    if (!rows[0]) throw new Error("Department not found");
+    return mapRow(rows[0]);
+  }
+
+  async hasActiveAgents(id: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ count: string }>(
+      `SELECT count(*) FROM agent WHERE primary_department_id = $1 AND active = true`,
+      [id],
+    );
+    return parseInt(rows[0]!.count, 10) > 0;
+  }
+
+  async hasOpenCases(id: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ count: string }>(
+      `SELECT count(*) FROM case_record WHERE department_id = $1 AND status NOT IN ('COMPLETED', 'EXPIRED', 'CANCELLED')`,
+      [id],
+    );
+    return parseInt(rows[0]!.count, 10) > 0;
   }
 }
