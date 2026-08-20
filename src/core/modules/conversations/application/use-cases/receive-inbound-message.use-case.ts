@@ -97,6 +97,8 @@ export class ReceiveInboundMessageUseCase {
         type: "MESSAGE_RECEIVED",
         conversationId: conversation.id,
         messageId: message.id,
+        bodyPreview: input.body.substring(0, 100) || (input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
+        authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
       });
     }
 

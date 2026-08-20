@@ -7,6 +7,8 @@ export type RealtimeEvent =
       type: "MESSAGE_RECEIVED";
       conversationId: string;
       messageId: string;
+      bodyPreview?: string;
+      authorName?: string;
     }
   | {
       type: "MESSAGE_SENT";
