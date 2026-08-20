@@ -1,28 +1,43 @@
 {
+  "id": "TPjzKrzIMZ6K4bCo",
   "name": "apply-bank-account",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-19T17:46:24.045Z",
+  "updatedAt": "2026-08-19T20:38:50.486Z",
+  "isArchived": false,
+  "versionId": "f9c9ae4b-7efa-42cb-a131-2c75f6c335d4",
+  "versionCounter": 4,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
   "nodes": [
     {
-      "id": "wh-ba",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [0, 0],
       "parameters": {
         "httpMethod": "POST",
         "path": "apply-bank-account",
         "responseMode": "responseNode",
         "options": {}
-      }
+      },
+      "id": "wh-ba",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "38af6024-0b87-418c-88b5-1cf023c78b66"
     },
     {
-      "id": "if-auth-ba",
-      "name": "Auth Valid",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [220, 0],
       "parameters": {
         "conditions": {
-          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
             {
               "id": "auth-ba-1",
@@ -35,115 +50,215 @@
               "rightValue": "={{ $env.API_INTERNAL_KEY }}"
             }
           ],
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          }
+          "combinator": "and"
         },
         "options": {}
-      }
+      },
+      "id": "if-auth-ba",
+      "name": "Auth Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        0
+      ]
     },
     {
+      "parameters": {},
       "id": "set-unauth-ba",
       "name": "Unauthorized Body",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.5,
-      "position": [440, 200],
-      "parameters": {
-        "mode": "raw",
-        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
-        "options": {}
-      }
+      "position": [
+        448,
+        208
+      ]
     },
     {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
       "id": "resp-unauth-ba",
       "name": "Respond Unauthorized",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
-      "position": [660, 200],
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ $json }}",
-        "options": { "responseCode": 401 }
-      }
+      "position": [
+        672,
+        208
+      ]
     },
     {
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst input = body.input || {};\nconst nationalId = String(input.nationalId || input.id || '').trim() || null;\nconst idempotencyKey = String(body.idempotencyKey || '').trim() || null;\n\nconst accounts = [\n  {\n    bank: 'Banco Pichincha',\n    accountType: 'Corriente',\n    accountNumber: '2100123456',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  },\n  {\n    bank: 'Banco Guayaquil',\n    accountType: 'Ahorros',\n    accountNumber: '0012345678',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  }\n];\n\nconst result = { accounts, nationalId };\nreturn [{ json: {\n  success: true,\n  result,\n  error: null,\n  nationalId,\n  idempotencyKey,\n  resultJson: JSON.stringify(result)\n} }];"
+      },
       "id": "code-ba",
       "name": "Build Bank Accounts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, -40],
-      "parameters": {
-        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst input = body.input || {};\nconst nationalId = String(input.nationalId || input.id || '').trim() || null;\nconst idempotencyKey = String(body.idempotencyKey || '').trim() || null;\n\nconst accounts = [\n  {\n    bank: 'Banco Pichincha',\n    accountType: 'Corriente',\n    accountNumber: '2100123456',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  },\n  {\n    bank: 'Banco Guayaquil',\n    accountType: 'Ahorros',\n    accountNumber: '0012345678',\n    holder: 'ISP Demo S.A.',\n    taxId: '1799999999001'\n  }\n];\n\nconst result = { accounts, nationalId };\nreturn [{ json: {\n  success: true,\n  result,\n  error: null,\n  nationalId,\n  idempotencyKey,\n  resultJson: JSON.stringify(result)\n} }];"
-      }
+      "position": [
+        448,
+        -48
+      ]
     },
     {
-      "id": "pg-log-ba",
-      "name": "Log Request",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [660, -40],
-      "onError": "continueRegularOutput",
-      "credentials": {
-        "postgres": { "id": "Wii5eNTA7a51xCts", "name": "Postgres RAG" }
-      },
       "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO n8n_bank_account_requests (idempotency_key, national_id, result)\nVALUES (NULLIF($1, ''), NULLIF($2, ''), $3::jsonb)\nON CONFLICT (idempotency_key) DO UPDATE SET result = EXCLUDED.result\nRETURNING id;",
         "options": {
           "queryReplacement": "={{ $json.idempotencyKey || '' }},={{ $json.nationalId || '' }},={{ $json.resultJson }}"
         }
-      }
+      },
+      "id": "pg-log-ba",
+      "name": "Log Request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        -48
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "Wii5eNTA7a51xCts",
+          "name": "Postgres RAG"
+        }
+      },
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {},
       "id": "set-ok-ba",
       "name": "Format Success",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.5,
-      "position": [880, -40],
-      "parameters": {
-        "mode": "raw",
-        "jsonOutput": "={{ { success: true, result: $('Build Bank Accounts').item.json.result, error: null } }}",
-        "options": {}
-      }
+      "position": [
+        880,
+        -48
+      ]
     },
     {
-      "id": "resp-ok-ba",
-      "name": "Respond to Webhook",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
-      "position": [1100, -40],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}",
         "options": {}
-      }
+      },
+      "id": "resp-ok-ba",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1104,
+        -48
+      ]
     }
   ],
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "Auth Valid", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Auth Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Auth Valid": {
       "main": [
-        [{ "node": "Build Bank Accounts", "type": "main", "index": 0 }],
-        [{ "node": "Unauthorized Body", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Build Bank Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Unauthorized Body": {
-      "main": [[{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Bank Accounts": {
-      "main": [[{ "node": "Log Request", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Log Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Log Request": {
-      "main": [[{ "node": "Format Success", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Format Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Format Success": {
-      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" }
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "TPjzKrzIMZ6K4bCo",
+      "projectId": "R4O5jmSN5K1lXeim",
+      "project": {
+        "id": "R4O5jmSN5K1lXeim",
+        "name": "Vinicio Montaño <administracion@x-finitygo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T00:23:43.097Z",
+        "updatedAt": "2026-08-19T00:33:51.960Z"
+      },
+      "createdAt": "2026-08-19T17:46:24.048Z",
+      "updatedAt": "2026-08-19T17:46:24.048Z"
+    }
+  ],
+  "activeVersion": null
 }

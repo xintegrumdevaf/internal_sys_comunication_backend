@@ -1,24 +1,21 @@
 {
+  "id": "K9QgtEMayo5vcRu1",
   "name": "continue-diagnostic",
+  "description": null,
+  "active": true,
+  "activeVersionId": "90038829-3fe9-4c19-882f-e60d815dbf0d",
+  "createdAt": "2026-08-19T17:46:43.070Z",
+  "updatedAt": "2026-08-19T20:44:36.228Z",
+  "isArchived": false,
+  "versionId": "90038829-3fe9-4c19-882f-e60d815dbf0d",
+  "versionCounter": 9,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
   "nodes": [
     {
       "parameters": {
-        "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"conversationId\": \"59356467474\",\n  \"message\": \"aqui hay informacion importante\"\n}"
-      },
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -1280,
-        -160
-      ],
-      "id": "72c1549f-e297-4770-9ccb-2cfc62850207",
-      "name": "When Executed by Another Workflow"
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:3001/api/v1/diagnostic/continue",
+        "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic/continue",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -76,22 +73,7 @@
       "name": "Respond to Webhook"
     }
   ],
-  "pinData": {
-    "When Executed by Another Workflow": [
-      {
-        "json": {
-          "conversationId": "593738398",
-          "message": "aqui hay informacion importante"
-        }
-      }
-    ]
-  },
   "connections": {
-    "When Executed by Another Workflow": {
-      "main": [
-        []
-      ]
-    },
     "Continue diagnostic onu": {
       "main": [
         [
@@ -115,18 +97,141 @@
       ]
     }
   },
-  "active": true,
+  "nodeGroups": [],
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "eec75dad-3b35-436c-8190-d0ad49d215b1",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
-  },
-  "nodeGroups": [],
-  "id": "QQjk8MCcs1jw3Mnu",
-  "tags": []
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "K9QgtEMayo5vcRu1",
+      "projectId": "R4O5jmSN5K1lXeim",
+      "project": {
+        "id": "R4O5jmSN5K1lXeim",
+        "name": "Vinicio Montaño <administracion@x-finitygo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T00:23:43.097Z",
+        "updatedAt": "2026-08-19T00:33:51.960Z"
+      },
+      "createdAt": "2026-08-19T17:46:43.072Z",
+      "updatedAt": "2026-08-19T17:46:43.072Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "90038829-3fe9-4c19-882f-e60d815dbf0d",
+    "workflowId": "K9QgtEMayo5vcRu1",
+    "nodes": [
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic/continue",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "conversationId",
+                "value": "={{ $json.body.input.conversationId }}"
+              },
+              {
+                "name": "message",
+                "value": "={{ $json.body.input.message }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          -672,
+          160
+        ],
+        "id": "5de42717-4ff7-4008-a0f1-30a1660df6ed",
+        "name": "Continue diagnostic onu"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "continue-diagnostic",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -864,
+          160
+        ],
+        "id": "3ac3fbaf-682f-45ff-81ee-787230bea708",
+        "name": "Webhook",
+        "webhookId": "13d4678d-13ae-4e5b-87c6-ec69a2c03230"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $('Continue diagnostic onu').item.json }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [
+          -464,
+          160
+        ],
+        "id": "44136cf0-f0c4-41b3-be04-3cd8abeca40c",
+        "name": "Respond to Webhook"
+      }
+    ],
+    "connections": {
+      "Continue diagnostic onu": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Continue diagnostic onu",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Vinicio Montaño",
+    "name": "Version 90038829",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-08-19T20:44:36.228Z",
+    "updatedAt": "2026-08-19T20:44:41.000Z",
+    "workflowPublishHistory": [
+      {
+        "id": 10,
+        "workflowId": "K9QgtEMayo5vcRu1",
+        "versionId": "90038829-3fe9-4c19-882f-e60d815dbf0d",
+        "event": "activated",
+        "userId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T20:44:41.340Z"
+      }
+    ]
+  }
 }

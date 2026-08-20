@@ -1,5 +1,16 @@
 {
+  "id": "6LqDClHjqafOBbBI",
   "name": "find-cliend-contract",
+  "description": null,
+  "active": true,
+  "activeVersionId": "990cfc0d-d2f5-4c7b-a009-ae011830ca0c",
+  "createdAt": "2026-08-19T17:46:43.936Z",
+  "updatedAt": "2026-08-20T18:09:46.653Z",
+  "isArchived": false,
+  "versionId": "990cfc0d-d2f5-4c7b-a009-ae011830ca0c",
+  "versionCounter": 29,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
   "nodes": [
     {
       "parameters": {
@@ -19,17 +30,17 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "1ArqicfvYuOc8f7uk_kydSDwWtAuhzTGoH8Cj9CU4zpc",
+          "value": "1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE",
           "mode": "list",
           "cachedResultName": "ReporteContratos",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ArqicfvYuOc8f7uk_kydSDwWtAuhzTGoH8Cj9CU4zpc/edit?usp=drivesdk"
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit?usp=drivesdk"
         },
         "sheetName": {
           "__rl": true,
-          "value": 2005599077,
+          "value": 703697375,
           "mode": "list",
           "cachedResultName": "ReporteContratos",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ArqicfvYuOc8f7uk_kydSDwWtAuhzTGoH8Cj9CU4zpc/edit#gid=2005599077"
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit#gid=703697375"
         },
         "filtersUI": {
           "values": [
@@ -52,7 +63,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "cngOv6AjaW4TJ2lR",
+          "id": "cLWMipifJtrB1TEr",
           "name": "Google Sheets account"
         }
       }
@@ -103,16 +114,6 @@
       "name": "Respond to Webhook"
     }
   ],
-  "pinData": {
-    "When Executed by Another Workflow": [
-      {
-        "json": {
-          "id": 1724482722,
-          "name": "Jean Fuentes"
-        }
-      }
-    ]
-  },
   "connections": {
     "When Executed by Another Workflow": {
       "main": [
@@ -153,18 +154,199 @@
       ]
     }
   },
-  "active": true,
+  "nodeGroups": [],
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
   },
-  "versionId": "58a3cda4-ff16-4973-b7d4-e521c957400f",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
-  },
-  "nodeGroups": [],
-  "id": "ZK21lbOMsgK4Y4Ep",
-  "tags": []
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "6LqDClHjqafOBbBI",
+      "projectId": "R4O5jmSN5K1lXeim",
+      "project": {
+        "id": "R4O5jmSN5K1lXeim",
+        "name": "Vinicio Montaño <administracion@x-finitygo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T00:23:43.097Z",
+        "updatedAt": "2026-08-19T00:33:51.960Z"
+      },
+      "createdAt": "2026-08-19T17:46:43.937Z",
+      "updatedAt": "2026-08-19T17:46:43.937Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "990cfc0d-d2f5-4c7b-a009-ae011830ca0c",
+    "workflowId": "6LqDClHjqafOBbBI",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "jsonExample",
+          "jsonExample": "{\n  \"id\": \"1205500216\",\n  \"name\": \"Abel eliseo\"\n}"
+        },
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          -448,
+          -576
+        ],
+        "id": "f9e57f7c-8cf9-4e8b-af39-7c6978978b3d",
+        "name": "When Executed by Another Workflow"
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE",
+            "mode": "list",
+            "cachedResultName": "ReporteContratos",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": 703697375,
+            "mode": "list",
+            "cachedResultName": "ReporteContratos",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit#gid=703697375"
+          },
+          "filtersUI": {
+            "values": [
+              {
+                "lookupColumn": "ruc_clpv",
+                "lookupValue": "={{ $json.body.input.id }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          -576,
+          -160
+        ],
+        "id": "79281976-7e7a-40d4-bd71-5c1c4b1daf0a",
+        "name": "Get identity",
+        "alwaysOutputData": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "cLWMipifJtrB1TEr",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const data = $('Get identity').all();\n\n/**\n * Helpers\n */\n\nfunction clean(value = \"\") {\n\treturn value\n\t\t.replace(/<br\\s*\\/?>/gi, \"\")\n\t\t.trim();\n}\n\nfunction extractSector(nomRouter = \"\") {\n\tconst value = clean(nomRouter);\n\n\tif (!value) return \"\";\n\n\tconst parts = value\n\t\t.split(\"-\")\n\t\t.map(p => p.trim())\n\t\t.filter(Boolean);\n\n\tconst ignored = [\"MKT\", \"MTD\"];\n\n\tconst sector = parts.find(p => !ignored.includes(p.toUpperCase()));\n\n\tif (!sector) return \"\";\n\n\treturn sector\n\t\t.toLowerCase()\n\t\t.replace(/\\s+/g, \" \")\n\t\t.trim();\n}\n\nfunction extractOltName(nomOlt = \"\") {\n\n\tconst value = clean(nomOlt).toUpperCase();\n\n\tif (!value) return \"\";\n\n\t// CDATA-BELLAVISTA\n\tif (value.startsWith(\"CDATA-\")) {\n\t\treturn \"cData\";\n\t}\n\n\t// SOLES_CDATA\n\tif (value === \"SOLES_CDATA\") {\n\t\treturn \"solesCData\";\n\t}\n\n\t// SOLES_KINGTYPE\n\tif (value === \"SOLES_KINGTYPE\") {\n\t\treturn \"solesKingtype\";\n\t}\n\n\t// SANTA BARBARA\n\tif (value === \"SANTA BARBARA\") {\n\t\treturn \"santaBarbara\";\n\t}\n\n\t// CALACALI\n\tif (value === \"CALACALI\") {\n\t\treturn \"calacali\";\n\t}\n\n\t// PIFO\n\tif (value === \"PIFO\") {\n\t\treturn \"pifo\";\n\t}\n\n\t// POMASQUI\n\tif (value === \"POMASQUI\") {\n\t\treturn \"pomasqui\";\n\t}\n\n\t// BELLAVISTA\n\tif (value === \"BELLAVISTA\") {\n\t\treturn \"bellavista\";\n\t}\n\n\t// TOTORACOCHA\n\tif (value === \"TOTORACOCHA\") {\n\t\treturn \"totoracocha\";\n\t}\n\n\t// Cualquier otro caso\n\treturn value\n\t\t.toLowerCase()\n\t\t.replace(/\\s+/g, \" \")\n\t\t.trim();\n}\n\nfunction extractPon(ponOnu = \"\") {\n\tconst match = ponOnu.match(/\\/(\\d+):/);\n\treturn match ? match[1] : \"\";\n}\n\nfunction buildContract(row) {\n\n\tconst sector = extractSector(row.nom_router);\n\n\treturn {\n\t\tid: row.ruc_clpv ? row.ruc_clpv.toString() : \"\",\n\t\tname: row.nom_clpv,\n\t\taddress: row.direccion,\n\t\tstatus: row.estado,\n\n\t\trouter: {\n\t\t\tsector,\n\t\t\tolt_name: extractOltName(row.nom_olt, sector),\n\t\t\tpon: extractPon(row.pon_onu),\n\t\t\tserial: row.seriales\n\t\t}\n\t};\n}\n\n/**\n * Solo existe un contrato\n */\nif (data.length === 1) {\n\n\treturn [\n\t\t{\n\t\t\tjson: {\n\t\t\t\tsuccess: true,\n\t\t\t\tresult: {\n\t\t\t\t\tfound: true,\n\t\t\t\t\tcontractNumbers: 1,\n\t\t\t\t\tcontracts: [\n\t\t\t\t\t\tbuildContract(data[0].json)\n\t\t\t\t\t]\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t];\n}\n\n/**\n * Filtrado cuando existen varios contratos\n */\nconst workflowData = $('When Executed by Another Workflow').first().json;\n\nconst address = (workflowData.address || \"\").toLowerCase();\nconst name = (workflowData.name || \"\").toLowerCase();\nconst serial = workflowData.serial;\n\nconst filteredData = data.filter(item => {\n\n\tconst row = item.json;\n\n\tconst itemName = (row.nom_clpv || \"\").toLowerCase();\n\tconst itemAddress = (row.direccion || \"\").toLowerCase();\n\tconst itemSerial = row.seriales;\n\n\tconst matchesName = !name || itemName.includes(name);\n\tconst matchesAddress = !address || itemAddress.includes(address);\n\tconst matchesSerial = !serial || itemSerial == serial.toString();\n\n\treturn matchesName && matchesAddress && matchesSerial;\n});\n\nconst contracts = filteredData.map(item => buildContract(item.json));\n\nreturn [\n\t{\n\t\tjson: {\n\t\t\tsuccess: true,\n\t\t\tresult: {\n\t\t\t\tfound: contracts.length > 0,\n\t\t\t\tcontractNumbers: contracts.length,\n\t\t\t\tcontracts\n\t\t\t}\n\t\t}\n\t}\n];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -368,
+          -160
+        ],
+        "id": "80f88aa3-5fa1-4bec-9ced-fac4c357bfce",
+        "name": "Format data"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "find-client-contract",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -784,
+          -160
+        ],
+        "id": "415a39d9-261f-49e4-b90b-a3fe3bd78ebc",
+        "name": "Webhook",
+        "webhookId": "bd5998a1-c6c2-4d6e-ad3e-3b3b6b5c9b59"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $('Format data').item.json }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [
+          -160,
+          -160
+        ],
+        "id": "97912f96-7659-4f8a-94e4-d472b371f6f8",
+        "name": "Respond to Webhook"
+      }
+    ],
+    "connections": {
+      "When Executed by Another Workflow": {
+        "main": [
+          []
+        ]
+      },
+      "Get identity": {
+        "main": [
+          [
+            {
+              "node": "Format data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Get identity",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format data": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Vinicio Montaño",
+    "name": "Version 990cfc0d",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-08-20T18:09:46.654Z",
+    "updatedAt": "2026-08-20T18:09:54.000Z",
+    "workflowPublishHistory": [
+      {
+        "id": 26,
+        "workflowId": "6LqDClHjqafOBbBI",
+        "versionId": "990cfc0d-d2f5-4c7b-a009-ae011830ca0c",
+        "event": "activated",
+        "userId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-20T18:09:54.592Z"
+      }
+    ]
+  }
 }

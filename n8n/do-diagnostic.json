@@ -1,24 +1,21 @@
 {
+  "id": "eXrHocmPYXh9VAsn",
   "name": "do-diagnostic",
+  "description": null,
+  "active": true,
+  "activeVersionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
+  "createdAt": "2026-08-19T17:46:43.680Z",
+  "updatedAt": "2026-08-19T20:45:00.570Z",
+  "isArchived": false,
+  "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
+  "versionCounter": 11,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
   "nodes": [
     {
       "parameters": {
-        "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"input\": {\n    \"conversationId\": \"59356467474\",\n    \"sector\": \"pomasqui\",\n    \"oltName\": \"main\",\n    \"pon\": \"3\",\n    \"serial\": \"D011A66CB67C\"\n  }\n}"
-      },
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -1136,
-        -144
-      ],
-      "id": "a92fa6ff-89ff-4112-9067-a1e10eb5e268",
-      "name": "When Executed by Another Workflow"
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:3001/api/v1/diagnostic",
+        "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -88,25 +85,7 @@
       "name": "Respond to Webhook"
     }
   ],
-  "pinData": {
-    "When Executed by Another Workflow": [
-      {
-        "json": {
-          "conversationId": "593738398",
-          "sector": "sanAntonio",
-          "olt_name": "cDataSoles",
-          "pon": "9",
-          "serial": "4D4F4E550033AF69"
-        }
-      }
-    ]
-  },
   "connections": {
-    "When Executed by Another Workflow": {
-      "main": [
-        []
-      ]
-    },
     "Execute diagnostic onu": {
       "main": [
         [
@@ -130,18 +109,153 @@
       ]
     }
   },
-  "active": true,
+  "nodeGroups": [],
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "9f79a143-568a-4b1f-ae78-bc78e47094b7",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "fad474c5a66f0ada6f9b53c80e90556e20bbc67797e41c3cf42e630679a96f00"
-  },
-  "nodeGroups": [],
-  "id": "GbBd8Ge1TQszDZvb",
-  "tags": []
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "eXrHocmPYXh9VAsn",
+      "projectId": "R4O5jmSN5K1lXeim",
+      "project": {
+        "id": "R4O5jmSN5K1lXeim",
+        "name": "Vinicio Montaño <administracion@x-finitygo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T00:23:43.097Z",
+        "updatedAt": "2026-08-19T00:33:51.960Z"
+      },
+      "createdAt": "2026-08-19T17:46:43.682Z",
+      "updatedAt": "2026-08-19T17:46:43.682Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
+    "workflowId": "eXrHocmPYXh9VAsn",
+    "nodes": [
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "sector",
+                "value": "={{ $json.body.input.sector }}"
+              },
+              {
+                "name": "olt_name",
+                "value": "={{ $json.body.input.oltName }}"
+              },
+              {
+                "name": "pon",
+                "value": "={{ $json.body.input.pon }}"
+              },
+              {
+                "name": "serial",
+                "value": "={{ $json.body.input.serial }}"
+              },
+              {
+                "name": "conversationId",
+                "value": "={{ $json.body.input.conversationId }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          -672,
+          160
+        ],
+        "id": "1337c406-490f-4562-87e8-0652f58bdfde",
+        "name": "Execute diagnostic onu"
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "do-diagnostic",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -880,
+          160
+        ],
+        "id": "6414949e-3098-404a-9d83-67b216305a5b",
+        "name": "Webhook",
+        "webhookId": "d95288e9-36bc-4484-adc6-5512d99fab56"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $('Execute diagnostic onu').item.json }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [
+          -464,
+          160
+        ],
+        "id": "a2cb3c9c-db17-45d2-b929-ba80f3f32e4d",
+        "name": "Respond to Webhook"
+      }
+    ],
+    "connections": {
+      "Execute diagnostic onu": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Execute diagnostic onu",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Vinicio Montaño",
+    "name": "Version 8a014727",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-08-19T20:45:00.570Z",
+    "updatedAt": "2026-08-19T20:45:07.000Z",
+    "workflowPublishHistory": [
+      {
+        "id": 12,
+        "workflowId": "eXrHocmPYXh9VAsn",
+        "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
+        "event": "activated",
+        "userId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
+        "createdAt": "2026-08-19T20:45:07.723Z"
+      }
+    ]
+  }
 }
