@@ -27,13 +27,23 @@ export type SupportInternetDiagnosticTechnical = {
   onuSerial?: string;
   macAddress?: string;
   /** Potencia optica recibida (RX) en dBm. Valores muy negativos = señal debil. */
-  opticalPowerDbm?: number;
+  opticalPowerDbm?: number | null;
   /** Estado operativo reportado por el OLT (online/offline/dying-gasp, etc.). */
   runState?: string;
   adminState?: string;
   channel?: string;
-};
 
+  // Campos adicionales para no ocultar información técnica de la ONU/OLT
+  onuIndex?: string;
+  onuId?: number;
+  onuProfile?: string;
+  onuMode?: string;
+  stateOnuIndex?: string;
+  omccState?: string;
+  phaseState?: string;
+  onuNumber?: string;
+};
+// ... (rest of file)
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
   contract?: {
@@ -70,21 +80,56 @@ export function normalizeTechnicalData(raw: unknown): SupportInternetDiagnosticT
   if (!raw || typeof raw !== "object") return undefined;
   const t = raw as {
     brand?: unknown;
-    onu?: { model?: unknown; serial?: unknown } | null;
-    state?: { runState?: unknown; adminState?: unknown; channel?: unknown } | null;
+    onu?: {
+      onuindex?: unknown;
+      id?: unknown;
+      model?: unknown;
+      profile?: unknown;
+      mode?: unknown;
+      serial?: unknown;
+      authinfo?: unknown;
+    } | null;
+    state?: {
+      onuIndex?: unknown;
+      adminState?: unknown;
+      omccState?: unknown;
+      phaseState?: unknown;
+      channel?: unknown;
+      onuNumber?: unknown;
+      runState?: unknown;
+    } | null;
     power?: unknown;
-    mac?: { mac?: unknown } | null;
+    mac?: { mac?: unknown } | string | null;
   };
 
   const result: SupportInternetDiagnosticTechnical = {
     ...(typeof t.brand === "string" ? { brand: t.brand } : {}),
     ...(typeof t.onu?.model === "string" ? { onuModel: t.onu.model } : {}),
-    ...(typeof t.onu?.serial === "string" ? { onuSerial: t.onu.serial } : {}),
-    ...(typeof t.mac?.mac === "string" ? { macAddress: t.mac.mac } : {}),
+    ...(typeof t.onu?.serial === "string"
+      ? { onuSerial: t.onu.serial }
+      : typeof t.onu?.authinfo === "string"
+        ? { onuSerial: t.onu.authinfo }
+        : {}),
+    ...(typeof t.mac === "string"
+      ? { macAddress: t.mac }
+      : typeof t.mac?.mac === "string"
+        ? { macAddress: t.mac.mac }
+        : {}),
     ...(typeof t.power === "number" ? { opticalPowerDbm: t.power } : {}),
     ...(typeof t.state?.runState === "string" ? { runState: t.state.runState } : {}),
     ...(typeof t.state?.adminState === "string" ? { adminState: t.state.adminState } : {}),
     ...(typeof t.state?.channel === "string" ? { channel: t.state.channel } : {}),
+
+    // Mapeo de nuevos campos técnicos solicitados
+    ...(typeof t.onu?.onuindex === "string" ? { onuIndex: t.onu.onuindex } : {}),
+    ...(typeof t.onu?.id === "number" ? { onuId: t.onu.id } : {}),
+    ...(typeof t.onu?.profile === "string" ? { onuProfile: t.onu.profile } : {}),
+    ...(typeof t.onu?.mode === "string" ? { onuMode: t.onu.mode } : {}),
+    ...(typeof t.state?.onuIndex === "string" ? { stateOnuIndex: t.state.onuIndex } : {}),
+    ...(typeof t.state?.omccState === "string" ? { omccState: t.state.omccState } : {}),
+    ...(typeof t.state?.phaseState === "string" ? { phaseState: t.state.phaseState } : {}),
+    ...(typeof t.state?.onuNumber === "string" ? { onuNumber: t.state.onuNumber } : {}),
   };
+
   return Object.keys(result).length > 0 ? result : undefined;
 }

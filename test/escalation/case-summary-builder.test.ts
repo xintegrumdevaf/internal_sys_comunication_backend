@@ -68,6 +68,7 @@ describe("CaseSummaryBuilderService — telemetria ONU en el resumen de escalaci
       opticalPowerDbm: -29.4,
       runState: "down",
       adminState: "enable",
+      onuId: 1,
     });
     // El ruido interno del microservicio (_history/failedStep) nunca llega al agente.
     expect(summary.results).not.toHaveProperty("_history");

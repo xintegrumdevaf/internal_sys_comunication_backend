@@ -70,6 +70,7 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
       runState: "down",
       adminState: "enable",
       channel: "1",
+      onuId: 12,
     });
   });
 

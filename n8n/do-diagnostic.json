@@ -1,98 +1,194 @@
 {
-  "id": "eXrHocmPYXh9VAsn",
+  "updatedAt": "2026-08-09T07:01:06.878Z",
+  "createdAt": "2026-08-08T20:25:54.927Z",
+  "id": "An6TGVl4vme9wMTT",
   "name": "do-diagnostic",
   "description": null,
   "active": true,
-  "activeVersionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
-  "createdAt": "2026-08-19T17:46:43.680Z",
-  "updatedAt": "2026-08-19T20:45:00.570Z",
   "isArchived": false,
-  "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
-  "versionCounter": 11,
-  "sourceWorkflowId": null,
-  "triggerCount": 1,
   "nodes": [
     {
+      "id": "wh-dd",
+      "name": "Webhook",
       "parameters": {
-        "method": "POST",
-        "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
+        "httpMethod": "POST",
+        "options": {},
+        "path": "do-diagnostic",
+        "responseMode": "responseNode"
+      },
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "webhookId": "d9dc45e2-9a01-41f2-9a85-6ee9ca40e6c6"
+    },
+    {
+      "id": "if-auth-dd",
+      "name": "Auth Valid",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
             {
-              "name": "sector",
-              "value": "={{ $json.body.input.sector }}"
-            },
-            {
-              "name": "olt_name",
-              "value": "={{ $json.body.input.oltName }}"
-            },
-            {
-              "name": "pon",
-              "value": "={{ $json.body.input.pon }}"
-            },
-            {
-              "name": "serial",
-              "value": "={{ $json.body.input.serial }}"
-            },
-            {
-              "name": "conversationId",
-              "value": "={{ $json.body.input.conversationId }}"
+              "id": "auth-dd-1",
+              "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $env.API_INTERNAL_KEY }}"
             }
-          ]
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
         },
         "options": {}
       },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
       "position": [
-        -672,
-        160
+        220,
+        0
       ],
-      "id": "1337c406-490f-4562-87e8-0652f58bdfde",
-      "name": "Execute diagnostic onu"
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3
     },
     {
+      "id": "set-unauth-dd",
+      "name": "Unauthorized Body",
       "parameters": {
-        "httpMethod": "POST",
-        "path": "do-diagnostic",
-        "responseMode": "responseNode",
+        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+        "mode": "raw",
         "options": {}
       },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
       "position": [
-        -880,
-        160
+        440,
+        180
       ],
-      "id": "6414949e-3098-404a-9d83-67b216305a5b",
-      "name": "Webhook",
-      "webhookId": "d95288e9-36bc-4484-adc6-5512d99fab56"
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5
     },
     {
+      "id": "resp-unauth-dd",
+      "name": "Respond Unauthorized",
       "parameters": {
+        "options": {
+          "responseCode": 401
+        },
         "respondWith": "json",
-        "responseBody": "={{ $('Execute diagnostic onu').item.json }}",
-        "options": {}
+        "responseBody": "={{ $json }}"
       },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
       "position": [
-        -464,
-        160
+        660,
+        180
       ],
-      "id": "a2cb3c9c-db17-45d2-b929-ba80f3f32e4d",
-      "name": "Respond to Webhook"
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
+    },
+    {
+      "id": "http-dd",
+      "name": "Execute diagnostic onu",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "url": "http://host.docker.internal:3001/api/v1/diagnostic",
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sector\": {{ JSON.stringify($('Webhook').item.json.body.input.sector) }},\n  \"oltName\": {{ JSON.stringify($('Webhook').item.json.body.input.oltName) }},\n  \"pon\": {{ JSON.stringify($('Webhook').item.json.body.input.pon) }},\n  \"serial\": {{ JSON.stringify($('Webhook').item.json.body.input.serial) }},\n  \"conversationId\": {{ JSON.stringify($('Webhook').item.json.body.input.conversationId) }}\n}"
+      },
+      "position": [
+        440,
+        -40
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4
+    },
+    {
+      "id": "code-dd",
+      "name": "Format And Wrap",
+      "parameters": {
+        "jsCode": "/**\n * Anti-Corruption: respuesta MikroTik → contrato API\n * { success, result: { status, question?, diagnostic? }, error }\n * docs/spec/04_N8N_WORKFLOW_SPEC.md §10 / fixtures §11\n */\nfunction unwrap(raw) {\n  if (Array.isArray(raw)) return raw[0] || {};\n  if (raw && Array.isArray(raw.body)) return raw.body[0] || {};\n  if (raw && raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body)) {\n    // HTTP node a veces anida el JSON bajo body\n    if (raw.body.success !== undefined || raw.body.workflow || raw.body.instruction) return raw.body;\n  }\n  return raw || {};\n}\n\nconst incoming = $input.first()?.json || {};\nconst statusCode = Number(incoming.statusCode || incoming.error?.httpCode || 0);\nconst errMsg = String(incoming.error?.message || incoming.message || '');\nconst looksValidation = /VALIDATION_ERROR|Faltan campos|400 -/.test(errMsg);\n\nif (incoming.error || statusCode >= 400) {\n  const isTimeout = /timeout|ETIMEDOUT|ECONNABORTED/i.test(errMsg);\n  const isValidation = looksValidation || (statusCode >= 400 && statusCode < 500 && statusCode !== 408);\n  return [{\n    json: {\n      success: false,\n      result: null,\n      error: {\n        type: isTimeout ? 'TIMEOUT' : (isValidation ? 'VALIDATION_ERROR' : 'EXTERNAL_SERVICE_ERROR'),\n        message: errMsg || (isValidation ? 'diagnostic service rejected input' : 'diagnostic service unreachable'),\n        retryable: !isValidation,\n      },\n    },\n  }];\n}\n\nconst payload = unwrap(incoming);\n\n// Ya viene en forma de contrato (status WAITING_USER/COMPLETED/ESCALATED)\nconst directStatus = typeof payload.status === 'string' ? payload.status.toUpperCase() : '';\nif (['WAITING_USER', 'COMPLETED', 'ESCALATED'].includes(directStatus) && !payload.workflow) {\n  return [{\n    json: {\n      success: true,\n      result: {\n        status: directStatus,\n        ...(payload.question !== undefined ? { question: payload.question } : {}),\n        ...(payload.diagnostic !== undefined\n          ? { diagnostic: typeof payload.diagnostic === 'string' ? payload.diagnostic : (payload.diagnostic?.findings?.[0]?.type || payload.diagnostic?.status) }\n          : {}),\n        ...(payload.technical !== undefined ? { technical: payload.technical } : {}),\n      },\n      error: null,\n    },\n  }];\n}\n\nconst workflowStatus = String(payload.workflow?.status || '').toLowerCase();\nconst instruction = typeof payload.instruction === 'string' ? payload.instruction.trim() : '';\nconst questionLegacy = typeof payload.question === 'string' ? payload.question.trim() : '';\nconst question = instruction || questionLegacy;\n\nconst findingType = payload.diagnostic?.findings?.[0]?.type;\nconst diagnosticLabel =\n  typeof payload.diagnostic === 'string'\n    ? payload.diagnostic\n    : (findingType || payload.diagnostic?.status || payload.workflow?.currentStep || undefined);\n\nlet status;\nif (workflowStatus === 'waiting_user' || workflowStatus === 'waiting') {\n  status = 'WAITING_USER';\n} else if (['completed', 'complete', 'resolved', 'done'].includes(workflowStatus)) {\n  status = 'COMPLETED';\n} else if (['escalated', 'failed', 'error', 'unresolvable'].includes(workflowStatus)) {\n  status = 'ESCALATED';\n} else if (question) {\n  // Si el microservicio dejó instrucción al usuario, es WAITING_USER aunque falte workflow.status\n  status = 'WAITING_USER';\n} else if (payload.success === true) {\n  status = 'COMPLETED';\n} else {\n  status = 'ESCALATED';\n}\n\nconst result = {\n  status,\n  ...(status === 'WAITING_USER' && question ? { question } : {}),\n  ...(diagnosticLabel !== undefined ? { diagnostic: diagnosticLabel } : {}),\n  ...(payload.technical !== undefined ? { technical: payload.technical } : {}),\n};\n\nreturn [{ json: { success: true, result, error: null } }];"
+      },
+      "position": [
+        660,
+        -40
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "resp-ok-dd",
+      "name": "Respond to Webhook",
+      "parameters": {
+        "options": {},
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "position": [
+        880,
+        -40
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
     }
   ],
   "connections": {
+    "Auth Valid": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Execute diagnostic onu",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Unauthorized Body",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "Execute diagnostic onu": {
       "main": [
         [
           {
+            "index": 0,
+            "node": "Format And Wrap",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Format And Wrap": {
+      "main": [
+        [
+          {
+            "index": 0,
             "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Unauthorized Body": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond Unauthorized",
+            "type": "main"
           }
         ]
       ]
@@ -101,129 +197,235 @@
       "main": [
         [
           {
-            "node": "Execute diagnostic onu",
-            "type": "main",
-            "index": 0
+            "index": 0,
+            "node": "Auth Valid",
+            "type": "main"
           }
         ]
       ]
     }
   },
-  "nodeGroups": [],
   "settings": {
-    "executionOrder": "v1",
-    "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "executionOrder": "v1"
   },
   "staticData": null,
-  "pinData": {},
   "meta": null,
-  "tags": [],
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+  "activeVersionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+  "versionCounter": 4,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
   "shared": [
     {
+      "updatedAt": "2026-08-08T20:25:54.927Z",
+      "createdAt": "2026-08-08T20:25:54.927Z",
       "role": "workflow:owner",
-      "workflowId": "eXrHocmPYXh9VAsn",
-      "projectId": "R4O5jmSN5K1lXeim",
+      "workflowId": "An6TGVl4vme9wMTT",
+      "projectId": "DCKuhhHKP6F6HqNC",
       "project": {
-        "id": "R4O5jmSN5K1lXeim",
-        "name": "Vinicio Montaño <administracion@x-finitygo.com>",
+        "updatedAt": "2026-08-08T18:22:28.999Z",
+        "createdAt": "2026-08-08T17:46:55.651Z",
+        "id": "DCKuhhHKP6F6HqNC",
+        "name": "Jean Fuentes <jeanpyfuentes23@gmail.com>",
         "type": "personal",
         "icon": null,
         "description": null,
         "customTelemetryTags": [],
-        "creatorId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
-        "createdAt": "2026-08-19T00:23:43.097Z",
-        "updatedAt": "2026-08-19T00:33:51.960Z"
-      },
-      "createdAt": "2026-08-19T17:46:43.682Z",
-      "updatedAt": "2026-08-19T17:46:43.682Z"
+        "creatorId": "2bf7cb35-e44a-4bbf-991f-ada7d2d8539b"
+      }
     }
   ],
+  "tags": [],
   "activeVersion": {
-    "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
-    "workflowId": "eXrHocmPYXh9VAsn",
+    "updatedAt": "2026-08-09T07:01:06.880Z",
+    "createdAt": "2026-08-09T07:01:06.880Z",
+    "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+    "workflowId": "An6TGVl4vme9wMTT",
     "nodes": [
       {
+        "id": "wh-dd",
+        "name": "Webhook",
         "parameters": {
-          "method": "POST",
-          "url": "https://cd8dg7sinelkquisntjcgp2k.2.24.85.141.sslip.io/api/v1/diagnostic",
-          "sendBody": true,
-          "bodyParameters": {
-            "parameters": [
+          "httpMethod": "POST",
+          "options": {},
+          "path": "do-diagnostic",
+          "responseMode": "responseNode"
+        },
+        "position": [
+          0,
+          0
+        ],
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "webhookId": "d9dc45e2-9a01-41f2-9a85-6ee9ca40e6c6"
+      },
+      {
+        "id": "if-auth-dd",
+        "name": "Auth Valid",
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
               {
-                "name": "sector",
-                "value": "={{ $json.body.input.sector }}"
-              },
-              {
-                "name": "olt_name",
-                "value": "={{ $json.body.input.oltName }}"
-              },
-              {
-                "name": "pon",
-                "value": "={{ $json.body.input.pon }}"
-              },
-              {
-                "name": "serial",
-                "value": "={{ $json.body.input.serial }}"
-              },
-              {
-                "name": "conversationId",
-                "value": "={{ $json.body.input.conversationId }}"
+                "id": "auth-dd-1",
+                "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+                "operator": {
+                  "name": "filter.operator.equals",
+                  "operation": "equals",
+                  "type": "string"
+                },
+                "rightValue": "={{ $env.API_INTERNAL_KEY }}"
               }
-            ]
+            ],
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            }
           },
           "options": {}
         },
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.4,
         "position": [
-          -672,
-          160
+          220,
+          0
         ],
-        "id": "1337c406-490f-4562-87e8-0652f58bdfde",
-        "name": "Execute diagnostic onu"
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3
       },
       {
+        "id": "set-unauth-dd",
+        "name": "Unauthorized Body",
         "parameters": {
-          "httpMethod": "POST",
-          "path": "do-diagnostic",
-          "responseMode": "responseNode",
+          "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+          "mode": "raw",
           "options": {}
         },
-        "type": "n8n-nodes-base.webhook",
-        "typeVersion": 2.1,
         "position": [
-          -880,
-          160
+          440,
+          180
         ],
-        "id": "6414949e-3098-404a-9d83-67b216305a5b",
-        "name": "Webhook",
-        "webhookId": "d95288e9-36bc-4484-adc6-5512d99fab56"
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.5
       },
       {
+        "id": "resp-unauth-dd",
+        "name": "Respond Unauthorized",
         "parameters": {
+          "options": {
+            "responseCode": 401
+          },
           "respondWith": "json",
-          "responseBody": "={{ $('Execute diagnostic onu').item.json }}",
-          "options": {}
+          "responseBody": "={{ $json }}"
         },
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1.5,
         "position": [
-          -464,
-          160
+          660,
+          180
         ],
-        "id": "a2cb3c9c-db17-45d2-b929-ba80f3f32e4d",
-        "name": "Respond to Webhook"
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5
+      },
+      {
+        "id": "http-dd",
+        "name": "Execute diagnostic onu",
+        "onError": "continueRegularOutput",
+        "parameters": {
+          "method": "POST",
+          "options": {
+            "timeout": 30000
+          },
+          "sendBody": true,
+          "url": "http://host.docker.internal:3001/api/v1/diagnostic",
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"sector\": {{ JSON.stringify($('Webhook').item.json.body.input.sector) }},\n  \"oltName\": {{ JSON.stringify($('Webhook').item.json.body.input.oltName) }},\n  \"pon\": {{ JSON.stringify($('Webhook').item.json.body.input.pon) }},\n  \"serial\": {{ JSON.stringify($('Webhook').item.json.body.input.serial) }},\n  \"conversationId\": {{ JSON.stringify($('Webhook').item.json.body.input.conversationId) }}\n}"
+        },
+        "position": [
+          440,
+          -40
+        ],
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4
+      },
+      {
+        "id": "code-dd",
+        "name": "Format And Wrap",
+        "parameters": {
+          "jsCode": "/**\n * Anti-Corruption: respuesta MikroTik → contrato API\n * { success, result: { status, question?, diagnostic? }, error }\n * docs/spec/04_N8N_WORKFLOW_SPEC.md §10 / fixtures §11\n */\nfunction unwrap(raw) {\n  if (Array.isArray(raw)) return raw[0] || {};\n  if (raw && Array.isArray(raw.body)) return raw.body[0] || {};\n  if (raw && raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body)) {\n    // HTTP node a veces anida el JSON bajo body\n    if (raw.body.success !== undefined || raw.body.workflow || raw.body.instruction) return raw.body;\n  }\n  return raw || {};\n}\n\nconst incoming = $input.first()?.json || {};\nconst statusCode = Number(incoming.statusCode || incoming.error?.httpCode || 0);\nconst errMsg = String(incoming.error?.message || incoming.message || '');\nconst looksValidation = /VALIDATION_ERROR|Faltan campos|400 -/.test(errMsg);\n\nif (incoming.error || statusCode >= 400) {\n  const isTimeout = /timeout|ETIMEDOUT|ECONNABORTED/i.test(errMsg);\n  const isValidation = looksValidation || (statusCode >= 400 && statusCode < 500 && statusCode !== 408);\n  return [{\n    json: {\n      success: false,\n      result: null,\n      error: {\n        type: isTimeout ? 'TIMEOUT' : (isValidation ? 'VALIDATION_ERROR' : 'EXTERNAL_SERVICE_ERROR'),\n        message: errMsg || (isValidation ? 'diagnostic service rejected input' : 'diagnostic service unreachable'),\n        retryable: !isValidation,\n      },\n    },\n  }];\n}\n\nconst payload = unwrap(incoming);\n\n// Ya viene en forma de contrato (status WAITING_USER/COMPLETED/ESCALATED)\nconst directStatus = typeof payload.status === 'string' ? payload.status.toUpperCase() : '';\nif (['WAITING_USER', 'COMPLETED', 'ESCALATED'].includes(directStatus) && !payload.workflow) {\n  return [{\n    json: {\n      success: true,\n      result: {\n        status: directStatus,\n        ...(payload.question !== undefined ? { question: payload.question } : {}),\n        ...(payload.diagnostic !== undefined\n          ? { diagnostic: typeof payload.diagnostic === 'string' ? payload.diagnostic : (payload.diagnostic?.findings?.[0]?.type || payload.diagnostic?.status) }\n          : {}),\n        ...(payload.technical !== undefined ? { technical: payload.technical } : {}),\n      },\n      error: null,\n    },\n  }];\n}\n\nconst workflowStatus = String(payload.workflow?.status || '').toLowerCase();\nconst instruction = typeof payload.instruction === 'string' ? payload.instruction.trim() : '';\nconst questionLegacy = typeof payload.question === 'string' ? payload.question.trim() : '';\nconst question = instruction || questionLegacy;\n\nconst findingType = payload.diagnostic?.findings?.[0]?.type;\nconst diagnosticLabel =\n  typeof payload.diagnostic === 'string'\n    ? payload.diagnostic\n    : (findingType || payload.diagnostic?.status || payload.workflow?.currentStep || undefined);\n\nlet status;\nif (workflowStatus === 'waiting_user' || workflowStatus === 'waiting') {\n  status = 'WAITING_USER';\n} else if (['completed', 'complete', 'resolved', 'done'].includes(workflowStatus)) {\n  status = 'COMPLETED';\n} else if (['escalated', 'failed', 'error', 'unresolvable'].includes(workflowStatus)) {\n  status = 'ESCALATED';\n} else if (question) {\n  // Si el microservicio dejó instrucción al usuario, es WAITING_USER aunque falte workflow.status\n  status = 'WAITING_USER';\n} else if (payload.success === true) {\n  status = 'COMPLETED';\n} else {\n  status = 'ESCALATED';\n}\n\nconst result = {\n  status,\n  ...(status === 'WAITING_USER' && question ? { question } : {}),\n  ...(diagnosticLabel !== undefined ? { diagnostic: diagnosticLabel } : {}),\n  ...(payload.technical !== undefined ? { technical: payload.technical } : {}),\n};\n\nreturn [{ json: { success: true, result, error: null } }];"
+        },
+        "position": [
+          660,
+          -40
+        ],
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2
+      },
+      {
+        "id": "resp-ok-dd",
+        "name": "Respond to Webhook",
+        "parameters": {
+          "options": {},
+          "respondWith": "json",
+          "responseBody": "={{ $json }}"
+        },
+        "position": [
+          880,
+          -40
+        ],
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5
       }
     ],
     "connections": {
+      "Auth Valid": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "Execute diagnostic onu",
+              "type": "main"
+            }
+          ],
+          [
+            {
+              "index": 0,
+              "node": "Unauthorized Body",
+              "type": "main"
+            }
+          ]
+        ]
+      },
       "Execute diagnostic onu": {
         "main": [
           [
             {
+              "index": 0,
+              "node": "Format And Wrap",
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "Format And Wrap": {
+        "main": [
+          [
+            {
+              "index": 0,
               "node": "Respond to Webhook",
-              "type": "main",
-              "index": 0
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "Unauthorized Body": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "Respond Unauthorized",
+              "type": "main"
             }
           ]
         ]
@@ -232,29 +434,51 @@
         "main": [
           [
             {
-              "node": "Execute diagnostic onu",
-              "type": "main",
-              "index": 0
+              "index": 0,
+              "node": "Auth Valid",
+              "type": "main"
             }
           ]
         ]
       }
     },
     "nodeGroups": [],
-    "authors": "Vinicio Montaño",
-    "name": "Version 8a014727",
-    "description": "",
-    "autosaved": true,
-    "createdAt": "2026-08-19T20:45:00.570Z",
-    "updatedAt": "2026-08-19T20:45:07.000Z",
+    "authors": "Jean Fuentes",
+    "name": null,
+    "description": null,
+    "autosaved": false,
     "workflowPublishHistory": [
       {
-        "id": 12,
-        "workflowId": "eXrHocmPYXh9VAsn",
-        "versionId": "8a014727-60f0-4056-b4f7-b3a8b536f478",
+        "createdAt": "2026-08-09T07:01:06.933Z",
+        "id": 33,
+        "workflowId": "An6TGVl4vme9wMTT",
+        "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+        "event": "deactivated",
+        "userId": "2bf7cb35-e44a-4bbf-991f-ada7d2d8539b"
+      },
+      {
+        "createdAt": "2026-08-09T07:01:06.953Z",
+        "id": 34,
+        "workflowId": "An6TGVl4vme9wMTT",
+        "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
         "event": "activated",
-        "userId": "765ddb7e-1eab-483e-bd69-e419cad45ee0",
-        "createdAt": "2026-08-19T20:45:07.723Z"
+        "userId": "2bf7cb35-e44a-4bbf-991f-ada7d2d8539b"
+      },
+      {
+        "createdAt": "2026-08-09T07:01:07.023Z",
+        "id": 35,
+        "workflowId": "An6TGVl4vme9wMTT",
+        "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+        "event": "deactivated",
+        "userId": "2bf7cb35-e44a-4bbf-991f-ada7d2d8539b"
+      },
+      {
+        "createdAt": "2026-08-09T07:01:07.044Z",
+        "id": 36,
+        "workflowId": "An6TGVl4vme9wMTT",
+        "versionId": "61dde29a-4e8e-4d44-93e5-76e7e3d81f06",
+        "event": "activated",
+        "userId": "2bf7cb35-e44a-4bbf-991f-ada7d2d8539b"
       }
     ]
   }
