@@ -20,6 +20,7 @@ import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/what
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
 import { ListMessagesUseCase } from "../modules/conversations/application/use-cases/list-messages.use-case";
+import { MarkConversationAsReadUseCase } from "../modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
 import { ReplyAsHumanUseCase } from "../modules/conversations/application/use-cases/reply-as-human.use-case";
 import { createWhatsAppWebhookRouter } from "../modules/conversations/presentation/whatsapp-webhook.router";
 import { createConversationsRouter } from "../modules/conversations/presentation/conversations.router";
@@ -296,6 +297,7 @@ export function createContainer(): Container {
     caseRepo,
     agentRepo,
     departmentRepo,
+    conversationRepo,
     auditRepo,
     logger: escalationLogger,
   });
@@ -403,8 +405,15 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
   });
-  const listConversations = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
+  const listConversations = new ListConversationsUseCase(
+    conversationRepo,
+    messageRepo,
+    caseRepo,
+    agentRepo,
+    departmentRepo,
+  );
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
+  const markAsRead = new MarkConversationAsReadUseCase(conversationRepo);
   const replyAsHuman = new ReplyAsHumanUseCase({
     conversationRepo,
     messageRepo,
@@ -481,6 +490,7 @@ export function createContainer(): Container {
     createConversationsRouter({
       listConversations,
       listMessages,
+      markAsRead,
       replyAsHuman,
       takeControl,
       caseRepo,
@@ -556,6 +566,7 @@ export function createContainer(): Container {
   });
 
   const shutdown = async (): Promise<void> => {
+    enqueueQualityReview.stop();
     inboundBuffer.clearAllTimers();
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };

@@ -7,6 +7,7 @@ import { createConversationsRouter } from "../../src/core/modules/conversations/
 import { createCasesRouter } from "../../src/core/modules/cases/presentation/cases.router";
 import { ListConversationsUseCase } from "../../src/core/modules/conversations/application/use-cases/list-conversations.use-case";
 import { ListMessagesUseCase } from "../../src/core/modules/conversations/application/use-cases/list-messages.use-case";
+import { MarkConversationAsReadUseCase } from "../../src/core/modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
 import { ReplyAsHumanUseCase } from "../../src/core/modules/conversations/application/use-cases/reply-as-human.use-case";
 import { TakeControlUseCase } from "../../src/core/modules/conversations/application/use-cases/take-control.use-case";
 import { CompleteCaseUseCase } from "../../src/core/modules/cases/application/use-cases/complete-case.use-case";
@@ -40,11 +41,34 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     const caseRepo = new CaseRepositoryFake();
     const conv = conversationRepo.createOpen();
     messageRepo.seedText(conv.id, "hola cliente");
+
+    const { case: created, workflowInstance } = await caseRepo.create({
+      conversationId: conv.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: "dep1",
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: created.id,
+      expectedCaseVersion: created.version,
+      expectedWorkflowVersion: workflowInstance.version,
+      status: "WAITING_USER",
+      context: created.context,
+      currentState: "WAITING_USER_CLIENT",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conv.id, created.id);
+
     const list = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
     const data = await list.execute({});
     expect(data).toHaveLength(1);
     expect(data[0]!.lastMessagePreview?.body).toBe("hola cliente");
     expect(data[0]!.lastMessagePreview?.author).toBe("customer");
+    expect(data[0]!.activeCase).toBeDefined();
+    expect(data[0]!.activeCase?.id).toBe(created.id);
+    expect(data[0]!.activeCase?.automationEnabled).toBe(true);
   });
 
   it("SSE publica MESSAGE_SENT y CASE_CLAIMED a suscriptores", async () => {
@@ -183,6 +207,7 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     });
     const listConversations = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
     const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
+    const markAsRead = new MarkConversationAsReadUseCase(conversationRepo);
     const replyAsHuman = new ReplyAsHumanUseCase({
       conversationRepo,
       messageRepo,
@@ -205,6 +230,7 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
       createConversationsRouter({
         listConversations,
         listMessages,
+        markAsRead,
         replyAsHuman,
         takeControl,
         caseRepo,

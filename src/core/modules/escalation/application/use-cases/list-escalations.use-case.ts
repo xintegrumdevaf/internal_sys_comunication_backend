@@ -29,20 +29,35 @@ export class GetCaseSummaryUseCase {
     }
 
     const escalation = await this.deps.escalationRepo.findByCaseId(caseId);
-    if (escalation) return escalation.summary;
-
     const executions = await this.deps.workflowExecutionRepo.listByCase(caseId);
     const events = await this.deps.caseRepo.listEvents(caseId);
     const department = aggregate.case.departmentId
       ? await this.deps.departmentRepo.findById(aggregate.case.departmentId)
       : null;
-    return this.deps.summaryBuilder.build({
+
+    const dynamicSummary = this.deps.summaryBuilder.build({
       caseEntity: aggregate.case,
-      reason: "Sin fila de escalación persistida",
+      reason: escalation?.reason ?? "Sin fila de escalación persistida",
       executions,
       events,
       departmentSlug: department?.slug ?? null,
     });
+
+    if (escalation?.summary) {
+      return {
+        ...escalation.summary,
+        ...dynamicSummary,
+        status: aggregate.case.status,
+        department: department?.slug ?? escalation.summary.department,
+        results: {
+          ...escalation.summary.results,
+          ...dynamicSummary.results,
+        },
+        timeline: dynamicSummary.timeline?.length ? dynamicSummary.timeline : escalation.summary.timeline,
+      };
+    }
+
+    return dynamicSummary;
   }
 }
 

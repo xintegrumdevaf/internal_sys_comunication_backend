@@ -247,6 +247,15 @@ type ConversationDto = {
     direction: "inbound" | "outbound";
     createdAt: string;
   } | null;
+  // Metadatos del caso activo actual (para filtros por departamento e indicadores Bot/Especialista en la UI)
+  activeCase?: {
+    id: string;
+    status: "NEW" | "ACTIVE" | "WAITING_USER" | "PAUSED" | "ESCALATED" | "HUMAN_ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+    workflowType: string;
+    departmentId: string | null;
+    assignedAgentId: string | null;
+    automationEnabled: boolean;
+  } | null;
 };
 
 type MessageDto = {

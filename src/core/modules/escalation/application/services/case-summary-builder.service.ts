@@ -28,14 +28,38 @@ export class CaseSummaryBuilderService {
       .map((e) => e.action);
 
     const results: Record<string, unknown> = {};
+
     for (const execution of executions) {
       if (execution.status === "COMPLETED" && execution.output) {
         Object.assign(results, execution.output);
       }
     }
-    // `technical` llega crudo desde el microservicio de diagnostico (mikrotik_api) —
-    // se aplana a nombres entendibles para el agente, o se descarta si no trajo nada util.
-    if ("technical" in results) {
+
+    if (caseEntity.context && typeof caseEntity.context === "object") {
+      const ctx = ((caseEntity.context as Record<string, unknown>).data ?? caseEntity.context) as Record<string, unknown>;
+      if (ctx.client) results.client = ctx.client;
+      if (ctx.contract) results.contract = ctx.contract;
+      if (ctx.balance) {
+        results.balance = ctx.balance;
+        const bal = ctx.balance as { hasDebt?: boolean; amount?: number; debt?: number; status?: string };
+        const hasDebt = Boolean(bal?.hasDebt || (bal?.amount ?? 0) > 0 || (bal?.debt ?? 0) > 0 || bal?.status === "DEBT");
+        results.hasDebt = hasDebt;
+        if (hasDebt) {
+          results.debt = bal.amount ?? bal.debt;
+        }
+      }
+      if (ctx.diagnostic && typeof ctx.diagnostic === "object") {
+        const diag = ctx.diagnostic as Record<string, unknown>;
+        if (diag.result || diag.status) {
+          results.diagnostic = diag.result || diag.status;
+        }
+        if (diag.technical && !results.technical) {
+          results.technical = diag.technical;
+        }
+      }
+    }
+
+    if ("technical" in results && results.technical) {
       const technical = normalizeTechnicalData(results.technical);
       if (technical) {
         results.technical = technical;
@@ -62,7 +86,7 @@ export class CaseSummaryBuilderService {
     const problem =
       typeof results.problem === "string"
         ? results.problem
-        : describeProblem(caseEntity.workflowType);
+        : describeProblem(caseEntity.workflowType, reason, results);
 
     return {
       problem,
@@ -78,7 +102,17 @@ export class CaseSummaryBuilderService {
   }
 }
 
-function describeProblem(workflowType: string): string {
+function describeProblem(workflowType: string, reason?: string, results?: Record<string, unknown>): string {
+  const reasonLower = (reason ?? "").toLowerCase();
+  if (
+    reasonLower.includes("comprobante") ||
+    reasonLower.includes("recibo") ||
+    reasonLower.includes("pago") ||
+    results?.receiptAttached
+  ) {
+    return "Validación de comprobante de pago de saldo pendiente";
+  }
+
   switch (workflowType) {
     case "SUPPORT_INTERNET":
       return "Cliente reporta problema de internet";

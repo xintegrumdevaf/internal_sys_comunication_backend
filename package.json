@@ -12,6 +12,7 @@
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
     "seed:quality": "tsx scripts/seed-quality-samples.ts",
+    "clean:conversations": "node scratch/run-wipe.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

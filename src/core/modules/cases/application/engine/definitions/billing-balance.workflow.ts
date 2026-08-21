@@ -331,7 +331,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     COMPLETED:
       "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
     ESCALATED:
-      "Escalamos tu caso de facturación a un asesor. En breve te contactarán por este chat.",
+      "Escalamos tu caso de facturación a un especialista. En breve te contactarán por este chat.",
     ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
   },
   states: {

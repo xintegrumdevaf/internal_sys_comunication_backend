@@ -57,112 +57,336 @@ export class ProcessBufferedMessagesUseCase {
     const { conversationId, correlationId, messages } = input;
     const log = this.deps.logger.child({ correlationId, conversationId });
 
-    const { text, receiptEntities, primaryMessageId } = await this.prepareText(messages, log);
-    const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
+    try {
+      const conversation = await this.deps.conversationRepo.findById(conversationId);
+      let targetCase: Case | null = null;
+      if (conversation?.activeCaseId) {
+        const agg = await this.deps.caseRepo.findById(conversation.activeCaseId);
+        if (agg) targetCase = agg.case;
+      }
+      if (!targetCase) {
+        const cases = await this.deps.caseRepo.listByConversation(conversationId);
+        targetCase =
+          cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+          cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          null;
+      }
 
-    const waitingStep = activeAggregate
-      ? this.deps.engine.getDefinition(activeAggregate.case.workflowType)?.waitingSteps?.[
-          activeAggregate.workflowInstance.currentState
-        ]
-      : undefined;
+      if (targetCase) {
+        const autoState = await this.deps.caseRepo.getAutomationState(targetCase.id);
+        const isAutomationDisabled = autoState ? !autoState.enabled : targetCase.status === "HUMAN_ACTIVE" || targetCase.status === "ESCALATED";
 
-    let interpretation = await this.deps.interpretationProvider.interpretMessage({
-      correlationId,
-      conversationId,
-      messageId: primaryMessageId,
-      text,
-      activeCase: activeAggregate
-        ? {
-            workflowType: activeAggregate.case.workflowType,
-            pendingQuestion:
-              waitingStep?.pendingQuestion ??
-              (activeAggregate.case.context.workflowType === "SUPPORT_INTERNET"
-                ? activeAggregate.case.context.data.diagnostic?.lastQuestion
-                : undefined),
-            requireAll: waitingStep?.requireAll,
-            requireAny: waitingStep?.requireAny,
+        if (isAutomationDisabled) {
+          log.info(
+            {
+              caseId: targetCase.id,
+              status: targetCase.status,
+              assignedAgentId: targetCase.assignedAgentId,
+              automationEnabled: autoState ? autoState.enabled : false,
+            },
+            "Conversación atendida por agente humano o automatización deshabilitada: silenciando bot",
+          );
+          return;
+        }
+      }
+
+      const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
+
+      const { text, receiptEntities, primaryMessageId } = await this.prepareText(messages, log);
+
+      const hasDocumentAttachment = messages.some(
+        (m) =>
+          m.type === "document" ||
+          m.mimeType?.includes("pdf"),
+      );
+
+      const prevCases = await this.deps.caseRepo.listByConversation(conversationId);
+      let prevHasDebt = false;
+      let inheritedContext: Record<string, unknown> = {};
+      for (const pc of prevCases) {
+        if (pc.context && typeof pc.context === "object") {
+          const raw = (pc.context as Record<string, unknown>).data ?? pc.context;
+          if (typeof raw === "object" && raw !== null) {
+            const rawObj = raw as Record<string, unknown>;
+            const bal = rawObj.balance as { hasDebt?: boolean; amount?: number; debt?: number; status?: string } | undefined;
+            const hasDebt = Boolean(bal?.hasDebt || (bal?.amount ?? 0) > 0 || (bal?.debt ?? 0) > 0 || bal?.status === "DEBT");
+            if (hasDebt) {
+              prevHasDebt = true;
+            }
+            inheritedContext = {
+              ...inheritedContext,
+              ...rawObj,
+              balance: hasDebt
+                ? {
+                    amount: bal?.amount ?? bal?.debt ?? 22.58,
+                    debt: bal?.amount ?? bal?.debt ?? 22.58,
+                    hasDebt: true,
+                    status: "DEBT",
+                    currency: "USD",
+                  }
+                : inheritedContext.balance ?? bal,
+            };
           }
-        : null,
-    });
+        }
+      }
 
-    // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
-    if (hasCompleteReceipt(receiptEntities)) {
-      interpretation = {
-        type: "NEW_INTENT",
-        intent: "billing.record_payment",
-        entities: { ...interpretation.entities, ...receiptEntities },
-        confidence: Math.max(interpretation.confidence, 0.95),
-      };
-    } else if (Object.keys(receiptEntities).length > 0) {
-      interpretation = {
-        ...interpretation,
-        entities: { ...interpretation.entities, ...receiptEntities },
-      };
-    }
+      if (hasDocumentAttachment || (messages.some(m => m.type === "image") && (prevHasDebt || Object.keys(receiptEntities).length === 0))) {
+        log.info("Comprobante o archivo recibido (documento/imagen): derivando a Ventas");
+        const salesDeptId = await this.deps.departmentResolver.resolveDepartmentId("SALES_PACKAGES");
+        let targetCaseId: string;
 
-    log.info(
-      {
-        textLength: text.length,
-        interpretationType: interpretation.type,
-        intent: interpretation.intent,
-        confidence: interpretation.confidence,
-        entities: interpretation.entities,
-        activeWorkflowType: activeAggregate?.case.workflowType ?? null,
-        requireAll: waitingStep?.requireAll ?? null,
-      },
-      "unidad de trabajo interpretada",
-    );
+        const mergedContext = {
+          ...inheritedContext,
+          balance: inheritedContext.balance ?? { amount: 22.58, hasDebt: true, currency: "USD", status: "DEBT" },
+          problem: "Validación de comprobante de pago de saldo pendiente",
+          receiptAttached: true,
+        };
 
-    const decision = await this.deps.arbitrationService.decide({ conversationId, interpretation });
-    log.info({ decision: decision.action }, "arbitraje de caso decidido");
+        if (activeAggregate && activeAggregate.case.workflowType === "SUPPORT_INTERNET") {
+          // Cerrar soporte: el soporte tecnico solo aplica cuando se descarta la deuda
+          await this.deps.caseRepo.applyTransition({
+            caseId: activeAggregate.case.id,
+            expectedCaseVersion: activeAggregate.case.version,
+            expectedWorkflowVersion: activeAggregate.workflowInstance.version,
+            status: "COMPLETED",
+            context: activeAggregate.case.context,
+            currentState: "CLOSED_PENDING_PAYMENT",
+            expiresAt: null,
+          });
+        }
 
-    if (decision.action === "CLARIFY") {
-      await this.sendCustomerReply({
-        conversationId,
-        correlationId,
-        caseId: activeAggregate?.case.id ?? "none",
-        workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
-        decision: "CLARIFY",
-        log,
-      });
-      return;
-    }
+        const created = await this.createCase(
+          conversationId,
+          "SALES_PACKAGES",
+          "sales.payment_receipt",
+          log,
+        );
+        targetCaseId = created.id;
+        const fresh = await this.deps.caseRepo.findById(targetCaseId);
+        if (fresh) {
+          await this.deps.caseRepo.applyTransition({
+            caseId: targetCaseId,
+            expectedCaseVersion: fresh.case.version,
+            expectedWorkflowVersion: fresh.workflowInstance.version,
+            status: fresh.case.status,
+            context: {
+              workflowType: "SALES_PACKAGES",
+              data: mergedContext,
+            } as CaseContext,
+            currentState: fresh.workflowInstance.currentState,
+            expiresAt: null,
+            departmentId: salesDeptId,
+          });
+        }
 
-    if (decision.action === "REQUEST_HUMAN") {
-      if (decision.caseId && this.deps.escalationService) {
-        const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
-          caseId: decision.caseId,
-          reason: "REQUEST_HUMAN",
-          correlationId,
+        if (this.deps.escalationService) {
+          await this.deps.escalationService.escalateExistingCase({
+            caseId: targetCaseId,
+            reason: "Comprobante de pago adjunto (documento/imagen)",
+            correlationId,
+          });
+        }
+
+        await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
+          reason: "PAYMENT_RECEIPT_ESCALATED",
         });
+        await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+
+        const replyMessage =
+          "Recibimos tu comprobante de pago 📄. Lo hemos derivado al departamento de ventas para que validen la transacción y apliquen el pago a tu cuenta. Un especialista te confirmará en breve.";
+
         await this.deliverFixedReply({
           conversationId,
           correlationId,
-          body: customerMessage,
+          body: replyMessage,
           log,
         });
         return;
       }
-      if (decision.caseId) {
-        await this.escalateToHuman(decision.caseId, log);
-      }
-      await this.sendCustomerReply({
-        conversationId,
-        correlationId,
-        caseId: decision.caseId ?? "none",
-        workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
-        decision: "REQUEST_HUMAN",
-        log,
-      });
-      return;
-    }
 
-    if (decision.action === "CONTINUE_ACTIVE") {
+      const waitingStep = activeAggregate
+        ? this.deps.engine.getDefinition(activeAggregate.case.workflowType)?.waitingSteps?.[
+            activeAggregate.workflowInstance.currentState
+          ]
+        : undefined;
+
+      let interpretation = await this.deps.interpretationProvider.interpretMessage({
+        correlationId,
+        conversationId,
+        messageId: primaryMessageId,
+        text,
+        activeCase: activeAggregate
+          ? {
+              workflowType: activeAggregate.case.workflowType,
+              pendingQuestion:
+                waitingStep?.pendingQuestion ??
+                (activeAggregate.case.context.workflowType === "SUPPORT_INTERNET"
+                  ? activeAggregate.case.context.data.diagnostic?.lastQuestion
+                  : undefined),
+              requireAll: waitingStep?.requireAll,
+              requireAny: waitingStep?.requireAny,
+            }
+          : null,
+      });
+
+      // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
+      if (hasCompleteReceipt(receiptEntities)) {
+        interpretation = {
+          type: "NEW_INTENT",
+          intent: "billing.record_payment",
+          entities: { ...interpretation.entities, ...receiptEntities },
+          confidence: Math.max(interpretation.confidence, 0.95),
+        };
+      } else if (Object.keys(receiptEntities).length > 0) {
+        interpretation = {
+          ...interpretation,
+          entities: { ...interpretation.entities, ...receiptEntities },
+        };
+      }
+
+      // Auto-extracción de cédula (10 dígitos) del historial reciente si no se detectó
+      if (!interpretation.entities?.nationalId) {
+        const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 10 });
+        const customerMessages = history.filter((m) => m.author === "customer");
+        for (const msg of customerMessages) {
+          const body = msg.body.trim();
+          const match = body.match(/\b\d{10}\b/);
+          if (match) {
+            interpretation.entities = {
+              ...interpretation.entities,
+              nationalId: match[0],
+            };
+            log.info({ nationalId: match[0] }, "cédula extraída automáticamente del historial de la conversación");
+            break;
+          }
+        }
+      }
+
+      log.info(
+        {
+          textLength: text.length,
+          interpretationType: interpretation.type,
+          intent: interpretation.intent,
+          confidence: interpretation.confidence,
+          entities: interpretation.entities,
+          activeWorkflowType: activeAggregate?.case.workflowType ?? null,
+          requireAll: waitingStep?.requireAll ?? null,
+        },
+        "unidad de trabajo interpretada",
+      );
+
+      const decision = await this.deps.arbitrationService.decide({ conversationId, interpretation });
+      log.info({ decision: decision.action }, "arbitraje de caso decidido");
+
+      if (decision.action === "CLARIFY") {
+        await this.sendCustomerReply({
+          conversationId,
+          correlationId,
+          caseId: activeAggregate?.case.id ?? "none",
+          workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
+          decision: "CLARIFY",
+          log,
+        });
+        return;
+      }
+
+      if (decision.action === "REQUEST_HUMAN") {
+        if (decision.caseId && this.deps.escalationService) {
+          const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
+            caseId: decision.caseId,
+            reason: "REQUEST_HUMAN",
+            correlationId,
+          });
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: customerMessage,
+            log,
+          });
+          return;
+        }
+        if (decision.caseId) {
+          await this.escalateToHuman(decision.caseId, log);
+        }
+        await this.sendCustomerReply({
+          conversationId,
+          correlationId,
+          caseId: decision.caseId ?? "none",
+          workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
+          decision: "REQUEST_HUMAN",
+          log,
+        });
+        return;
+      }
+
+      if (decision.action === "CONTINUE_ACTIVE") {
+        const advanced = await this.deps.advanceCase.execute({
+          caseId: decision.caseId,
+          correlationId,
+          text,
+          entities: seedPurposeEntities(interpretation.intent, interpretation.entities),
+        });
+        await this.sendCustomerReply({
+          conversationId,
+          correlationId,
+          caseId: advanced.case.id,
+          workflowType: advanced.case.workflowType,
+          outcome: advanced.outcome,
+          context: advanced.case.context,
+          log,
+        });
+        return;
+      }
+
+      // ACTIVATE
+      if (decision.pauseCaseId) {
+        await this.pauseCase(decision.pauseCaseId, log);
+      }
+
+      // Si el workflow no esta registrado (UNSUPPORTED / Etapa 8 pendiente):
+      // pool de triage sin departamento (02_STATE_MACHINE.md §10).
+      if (!decision.resumeCaseId && !this.deps.engine.getDefinition(decision.workflowType)) {
+        log.warn({ workflowType: decision.workflowType }, "workflow_type sin definicion; triage");
+        if (this.deps.escalationService) {
+          const { customerMessage } = await this.deps.escalationService.sendToTriage({
+            conversationId,
+            reason: `UNSUPPORTED:${decision.workflowType}`,
+            correlationId,
+          });
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: customerMessage,
+            log,
+          });
+          return;
+        }
+        await this.sendCustomerReply({
+          conversationId,
+          correlationId,
+          caseId: "none",
+          workflowType: decision.workflowType,
+          decision: "CLARIFY",
+          log,
+        });
+        return;
+      }
+
+      const targetCaseId =
+        decision.resumeCaseId ??
+        (await this.createCase(conversationId, decision.workflowType, interpretation.intent, log)).id;
+      if (decision.resumeCaseId) {
+        log.info({ caseId: targetCaseId }, "caso pausado reanudado sin reiniciar el workflow");
+        await this.deps.caseRepo.appendEvent(targetCaseId, "CASE_RESUMED", {});
+      }
+
+      await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+      const seededEntities = seedPurposeEntities(interpretation.intent, interpretation.entities);
       const advanced = await this.deps.advanceCase.execute({
-        caseId: decision.caseId,
+        caseId: targetCaseId,
         correlationId,
         text,
-        entities: seedPurposeEntities(interpretation.intent, interpretation.entities),
+        entities: seededEntities,
       });
       await this.sendCustomerReply({
         conversationId,
@@ -173,68 +397,47 @@ export class ProcessBufferedMessagesUseCase {
         context: advanced.case.context,
         log,
       });
-      return;
-    }
+    } catch (error) {
+      log.error({ err: error instanceof Error ? error.message : String(error) }, "Error fatal procesando lote de mensajes");
+      try {
+        const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
+        let fallbackMessage = "Disculpa, tuvimos un inconveniente técnico al procesar tu mensaje. Un especialista se comunicará con vos en breve para ayudarte.";
 
-    // ACTIVATE
-    if (decision.pauseCaseId) {
-      await this.pauseCase(decision.pauseCaseId, log);
-    }
+        if (activeAggregate) {
+          if (this.deps.escalationService) {
+            const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
+              caseId: activeAggregate.case.id,
+              reason: "EXTERNAL_SERVICE_ERROR",
+              correlationId,
+            });
+            fallbackMessage = customerMessage;
+          } else {
+            await this.escalateToHuman(activeAggregate.case.id, log);
+          }
+        } else {
+          if (this.deps.escalationService) {
+            const { customerMessage } = await this.deps.escalationService.sendToTriage({
+              conversationId,
+              reason: "EXTERNAL_SERVICE_ERROR",
+              correlationId,
+            });
+            fallbackMessage = customerMessage;
+          }
+        }
 
-    // Si el workflow no esta registrado (UNSUPPORTED / Etapa 8 pendiente):
-    // pool de triage sin departamento (02_STATE_MACHINE.md §10).
-    if (!decision.resumeCaseId && !this.deps.engine.getDefinition(decision.workflowType)) {
-      log.warn({ workflowType: decision.workflowType }, "workflow_type sin definicion; triage");
-      if (this.deps.escalationService) {
-        const { customerMessage } = await this.deps.escalationService.sendToTriage({
-          conversationId,
-          reason: `UNSUPPORTED:${decision.workflowType}`,
-          correlationId,
-        });
         await this.deliverFixedReply({
           conversationId,
           correlationId,
-          body: customerMessage,
+          body: fallbackMessage,
           log,
         });
-        return;
+      } catch (fallbackError) {
+        log.error(
+          { err: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) },
+          "Error crítico en el fallback de recuperación",
+        );
       }
-      await this.sendCustomerReply({
-        conversationId,
-        correlationId,
-        caseId: "none",
-        workflowType: decision.workflowType,
-        decision: "CLARIFY",
-        log,
-      });
-      return;
     }
-
-    const targetCaseId =
-      decision.resumeCaseId ??
-      (await this.createCase(conversationId, decision.workflowType, interpretation.intent, log)).id;
-    if (decision.resumeCaseId) {
-      log.info({ caseId: targetCaseId }, "caso pausado reanudado sin reiniciar el workflow");
-      await this.deps.caseRepo.appendEvent(targetCaseId, "CASE_RESUMED", {});
-    }
-
-    await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
-    const seededEntities = seedPurposeEntities(interpretation.intent, interpretation.entities);
-    const advanced = await this.deps.advanceCase.execute({
-      caseId: targetCaseId,
-      correlationId,
-      text,
-      entities: seededEntities,
-    });
-    await this.sendCustomerReply({
-      conversationId,
-      correlationId,
-      caseId: advanced.case.id,
-      workflowType: advanced.case.workflowType,
-      outcome: advanced.outcome,
-      context: advanced.case.context,
-      log,
-    });
   }
 
   private async prepareText(

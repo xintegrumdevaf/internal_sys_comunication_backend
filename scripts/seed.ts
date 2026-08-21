@@ -33,33 +33,49 @@ async function run(): Promise<void> {
       role: "admin",
       passwordHash: devPasswordHash,
     });
+    let manager = await agentRepo.create({
+      name: "Manager General",
+      email: "manager@isp.local",
+      role: "manager",
+      passwordHash: devPasswordHash,
+    });
     let supportAgent = await agentRepo.create({
       name: "Agente de Soporte",
       email: "soporte@isp.local",
       primaryDepartmentId: support.id,
       passwordHash: devPasswordHash,
     });
+    let salesAgent = await agentRepo.create({
+      name: "Agente de Ventas",
+      email: "ventas@isp.local",
+      primaryDepartmentId: sales.id,
+      passwordHash: devPasswordHash,
+    });
 
-    // El INSERT de arriba usa ON CONFLICT DO UPDATE SET name=... (no toca
-    // password_hash) para no pisar una contrasena real en un re-seed — pero
-    // eso significa que un agente YA EXISTENTE de antes de esta migracion
-    // (creado sin password_hash) se queda sin contrasena. Aqui, y SOLO aqui
-    // (script de desarrollo), forzamos la contrasena de dev si todavia esta
-    // vacia para poder loguear de inmediato.
     if (!admin.passwordHash) {
       admin = await agentRepo.update(admin.id, { passwordHash: devPasswordHash });
     }
+    if (!manager.passwordHash) {
+      manager = await agentRepo.update(manager.id, { passwordHash: devPasswordHash });
+    }
     if (!supportAgent.passwordHash) {
       supportAgent = await agentRepo.update(supportAgent.id, { passwordHash: devPasswordHash });
+    }
+    if (!salesAgent.passwordHash) {
+      salesAgent = await agentRepo.update(salesAgent.id, { passwordHash: devPasswordHash });
     }
 
     await agentRepo.addMembership(admin.id, support.id);
     await agentRepo.addMembership(admin.id, billing.id);
     await agentRepo.addMembership(admin.id, sales.id);
+    await agentRepo.addMembership(manager.id, support.id);
+    await agentRepo.addMembership(manager.id, billing.id);
+    await agentRepo.addMembership(manager.id, sales.id);
     await agentRepo.addMembership(supportAgent.id, support.id);
+    await agentRepo.addMembership(salesAgent.id, sales.id);
 
     console.log("[seed] OK: departments + agents + memberships");
-    console.log(`[seed] Login de desarrollo: admin@isp.local / soporte@isp.local — contrasena: ${DEV_PASSWORD}`);
+    console.log(`[seed] Login de desarrollo: admin@isp.local / manager@isp.local / soporte@isp.local / ventas@isp.local — contrasena: ${DEV_PASSWORD}`);
     console.log("[seed] (si el agente ya existia de antes, su contrasena real actual no se modifico)");
   } finally {
     await pool.end();

@@ -5,12 +5,14 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { AutomationState } from "../../../cases/domain/automation-state.entity";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "./agent-case-auth";
 
 export type AutomationToggleDeps = {
   caseRepo: CaseRepositoryPort;
   agentRepo: AgentRepositoryPort;
   departmentRepo: DepartmentRepositoryPort;
+  conversationRepo?: ConversationRepositoryPort;
   auditRepo: AuditRepositoryPort;
   logger: Logger;
 };

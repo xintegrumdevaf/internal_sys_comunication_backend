@@ -276,4 +276,105 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     const outbound = await messageRepo.listByConversation(conversation.id);
     expect(outbound.some((m) => m.author === "ai")).toBe(true);
   });
+
+  it("error en el proveedor de interpretacion activa el fallback de error tecnico y no deja muerta la conversacion", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+    const interpretationProvider: InterpretationPort = {
+      interpretMessage: async () => {
+        throw new Error("Ollama connection failed");
+      },
+    };
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-err-1",
+      messages: textMessages(conversation.id, messageRepo, "quiero soporte"),
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("Disculpa, tuvimos un inconveniente técnico al procesar tu mensaje.");
+  });
+
+  it("extrae la cedula de 10 digitos del historial de mensajes si falta en la interpretacion", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+    
+    // Seed message in history with a 10-digit number (Ecuadorian cédula format)
+    messageRepo.seedText(conversation.id, "1724482722");
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "NEW_INTENT", intent: "support.internet", entities: {}, confidence: 0.9 },
+    ]);
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-hist-1",
+      messages: textMessages(conversation.id, messageRepo, "soporte"),
+    });
+
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    // Since history had 1724482722, it got auto-extracted, VALIDATE_CLIENT succeeded, and case is in WAITING_USER (diagnostic/luz roja)
+    expect(cases[0]!.status).toBe("WAITING_USER");
+    if (cases[0]!.context.workflowType === "SUPPORT_INTERNET") {
+      expect(cases[0]!.context.data.client?.nationalId).toBe("1724482722");
+    }
+  });
 });

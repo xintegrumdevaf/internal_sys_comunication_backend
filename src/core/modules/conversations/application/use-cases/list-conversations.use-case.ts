@@ -4,12 +4,26 @@ import type { ConversationRepositoryPort, ListConversationsFilter } from "../por
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
 
+import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
+
 export type ConversationDto = Conversation & {
   lastMessagePreview: {
     body: string;
     author: MessageAuthor;
     direction: "inbound" | "outbound";
     createdAt: Date;
+  } | null;
+  activeCase?: {
+    id: string;
+    status: string;
+    workflowType: string;
+    departmentId: string | null;
+    departmentName?: string | null;
+    departmentSlug?: string | null;
+    assignedAgentId: string | null;
+    assignedAgentName?: string | null;
+    automationEnabled: boolean;
   } | null;
 };
 
@@ -27,6 +41,8 @@ export class ListConversationsUseCase {
     private readonly conversationRepo: ConversationRepositoryPort,
     private readonly messageRepo: MessageRepositoryPort,
     private readonly caseRepo?: CaseRepositoryPort,
+    private readonly agentRepo?: AgentRepositoryPort,
+    private readonly departmentRepo?: DepartmentRepositoryPort,
   ) {}
 
   async execute(filter: ListConversationsQuery): Promise<ConversationDto[]> {
@@ -47,9 +63,51 @@ export class ListConversationsUseCase {
     }
 
     const lastMap = await this.messageRepo.findLastByConversationIds(conversations.map((c) => c.id));
-    return conversations.map((c) => {
+    const dtos: ConversationDto[] = [];
+    for (const c of conversations) {
       const last = lastMap.get(c.id) ?? null;
-      return {
+      let activeCaseDto: ConversationDto["activeCase"] = null;
+
+      if (this.caseRepo) {
+        const cases = await this.caseRepo.listByConversation(c.id);
+        const activeAggregate =
+          (c.activeCaseId ? cases.find((item) => item.id === c.activeCaseId) : null) ??
+          cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
+          cases.find((item) => item.status === "ACTIVE" || item.status === "WAITING_USER");
+
+        if (activeAggregate) {
+          const autoState = await this.caseRepo.getAutomationState(activeAggregate.id);
+          let assignedAgentName: string | null = null;
+          let departmentName: string | null = null;
+          let departmentSlug: string | null = null;
+
+          if (activeAggregate.assignedAgentId && this.agentRepo) {
+            const ag = await this.agentRepo.findById(activeAggregate.assignedAgentId);
+            if (ag) assignedAgentName = ag.name;
+          }
+          if (activeAggregate.departmentId && this.departmentRepo) {
+            const dept = await this.departmentRepo.findById(activeAggregate.departmentId);
+            if (dept) {
+              departmentName = dept.name;
+              departmentSlug = dept.slug;
+            }
+          }
+
+          activeCaseDto = {
+            id: activeAggregate.id,
+            status: activeAggregate.status,
+            workflowType: activeAggregate.workflowType,
+            departmentId: activeAggregate.departmentId,
+            departmentName,
+            departmentSlug,
+            assignedAgentId: activeAggregate.assignedAgentId,
+            assignedAgentName,
+            automationEnabled: autoState ? autoState.enabled : activeAggregate.status !== "HUMAN_ACTIVE" && activeAggregate.status !== "ESCALATED",
+          };
+        }
+      }
+
+      dtos.push({
         ...c,
         lastMessagePreview: last
           ? {
@@ -59,8 +117,11 @@ export class ListConversationsUseCase {
               createdAt: last.createdAt,
             }
           : null,
-      };
-    });
+        activeCase: activeCaseDto,
+      });
+    }
+
+    return dtos;
   }
 }
 

@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
+import { env } from "../../../../shared/config/env";
 import { validationError } from "../../../../shared/errors/domain-errors";
 import { requireAuth } from "../../../../shared/http/require-auth";
 import type { ListConversationsUseCase } from "../application/use-cases/list-conversations.use-case";
 import type { ListMessagesUseCase } from "../application/use-cases/list-messages.use-case";
 import type { ReplyAsHumanUseCase } from "../application/use-cases/reply-as-human.use-case";
 import type { TakeControlUseCase } from "../application/use-cases/take-control.use-case";
+import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 
@@ -14,6 +16,7 @@ export type ConversationsRouterDeps = {
   listMessages: ListMessagesUseCase;
   replyAsHuman: ReplyAsHumanUseCase;
   takeControl: TakeControlUseCase;
+  markAsRead: MarkConversationAsReadUseCase;
   caseRepo: CaseRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
 };
@@ -31,7 +34,7 @@ const replyBodySchema = z.object({
  */
 export function createConversationsRouter(deps: ConversationsRouterDeps): Router {
   const router = Router();
-  const { listConversations, listMessages, replyAsHuman, takeControl, caseRepo } = deps;
+  const { listConversations, listMessages, replyAsHuman, takeControl, markAsRead, caseRepo } = deps;
 
   router.get("/api/conversations", async (req, res, next) => {
     try {
@@ -131,6 +134,49 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         agentUserId: agent.id,
       });
       res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/conversations/:id/read", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      await markAsRead.execute(req.params.id);
+      res.json({ data: { success: true } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/media/:mediaId", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      const { mediaId } = req.params;
+      if (!env.WHATSAPP_ACCESS_TOKEN) {
+        res.status(503).json({ error: "WHATSAPP_ACCESS_TOKEN no configurado" });
+        return;
+      }
+      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+      });
+      if (!metaRes.ok) {
+        res.status(metaRes.status).json({ error: "No se pudo obtener metadata del archivo" });
+        return;
+      }
+      const metaJson = (await metaRes.json()) as { url: string; mime_type?: string };
+      const fileRes = await fetch(metaJson.url, {
+        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+      });
+      if (!fileRes.ok) {
+        res.status(fileRes.status).json({ error: "No se pudo descargar el archivo" });
+        return;
+      }
+      if (metaJson.mime_type) {
+        res.setHeader("Content-Type", metaJson.mime_type);
+      }
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      res.send(buffer);
     } catch (error) {
       next(error);
     }

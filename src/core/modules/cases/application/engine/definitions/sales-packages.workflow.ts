@@ -162,7 +162,7 @@ const waitingUpgrade: WorkflowStateHandler = async ({ context, entities, text })
 
   return {
     type: "ESCALATED",
-    reason: "Cliente quiere cambiar/mejorar su plan — requiere asesor de ventas",
+    reason: "Cliente quiere cambiar/mejorar su plan — requiere especialista de ventas",
     context,
   };
 };
@@ -179,7 +179,7 @@ export const salesPackagesWorkflow: WorkflowDefinition = {
     },
     WAITING_USER_UPGRADE: {
       pendingQuestion:
-        "¿Confirmas que quieres que un asesor de ventas gestione el cambio de plan por ti?",
+        "¿Confirmas que quieres que un especialista de ventas gestione el cambio de plan por ti?",
       requireAny: ["confirm", "answer"],
       maxAttempts: 2,
     },
@@ -187,10 +187,10 @@ export const salesPackagesWorkflow: WorkflowDefinition = {
   replyTemplates: {
     WAITING_USER_SPEED: "¿Qué velocidad o plan te interesa? (por ejemplo 100, 300 o 500 Mbps)",
     WAITING_USER_UPGRADE:
-      "¿Confirmas que quieres que un asesor de ventas gestione el cambio de plan por ti?",
+      "¿Confirmas que quieres que un especialista de ventas gestione el cambio de plan por ti?",
     RESPOND_OFFER: "{{offerAnswer}}",
     COMPLETED: "{{offerAnswer}} Si quieres contratar o cambiar de plan, escríbenos y te ayudamos.",
-    ESCALATED: "Te conectamos con un asesor de ventas para ayudarte con tu plan. En breve te contactan.",
+    ESCALATED: "Te conectamos con un especialista de ventas para ayudarte con tu plan. En breve te contactan.",
     ACTIVE: "Estamos buscando los planes disponibles. Un momento por favor.",
   },
   states: {

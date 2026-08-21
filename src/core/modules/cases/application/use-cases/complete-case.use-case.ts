@@ -69,6 +69,7 @@ export class CompleteCaseUseCase {
       agentUserId: input.agentUserId,
     });
     await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
+    await this.deps.conversationRepo.setStatus(aggregate.case.conversationId, "resolved");
     await this.deps.auditRepo.record({
       action: "CASE_COMPLETED",
       resourceType: "case",

@@ -80,7 +80,18 @@ export class EnqueueQualityReviewService {
     this.wakeDrain();
   }
 
+  private stopped = false;
+
+  stop(): void {
+    this.stopped = true;
+    if (this.wake) {
+      this.wake();
+      this.wake = null;
+    }
+  }
+
   private wakeDrain(): void {
+    if (this.stopped) return;
     if (this.wake) {
       this.wake();
       this.wake = null;
@@ -89,17 +100,21 @@ export class EnqueueQualityReviewService {
   }
 
   private async drain(): Promise<void> {
-    if (this.draining) return;
+    if (this.draining || this.stopped) return;
     this.draining = true;
     try {
       for (;;) {
+        if (this.stopped) break;
         await this.failStaleClaims();
+        if (this.stopped) break;
 
         const claimed = await this.deps.qualityRepo.claimNextPending();
+        if (this.stopped) break;
         if (!claimed) {
           await this.waitForWake(2_000);
+          if (this.stopped) break;
           const again = await this.deps.qualityRepo.claimNextPending();
-          if (!again) break;
+          if (!again || this.stopped) break;
           await this.runClaimed(again);
           continue;
         }

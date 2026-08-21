@@ -33,7 +33,7 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
 - CONFIRM: confirma/dice que sí a algo que se le preguntó.
 - DENY: niega/dice que no a algo que se le preguntó.
 - CANCEL: pide cancelar o detener el proceso actual.
-- REQUEST_HUMAN: pide explícitamente hablar con una persona/asesor.
+- REQUEST_HUMAN: pide explícitamente hablar con una persona/especialista.
 - UNCLEAR: no puedes determinar con confianza razonable ninguno de los anteriores.
 
 ## Significado de "intent"

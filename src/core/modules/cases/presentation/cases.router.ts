@@ -289,11 +289,23 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
   router.post("/api/cases/:id/reactivate-automation", async (req, res, next) => {
     try {
       const agent = requireAuth(req);
+      const aggregate = await deps.caseRepo.findById(req.params.id);
       const result = await deps.reactivateAutomation.execute({
         caseId: req.params.id,
         agentUserId: agent.id,
       });
-      deps.broadcaster?.publish({ type: "AUTOMATION_ENABLED", caseId: req.params.id });
+      deps.broadcaster?.publish({
+        type: "AUTOMATION_ENABLED",
+        caseId: req.params.id,
+        conversationId: aggregate?.case.conversationId,
+      });
+      if (aggregate) {
+        deps.broadcaster?.publish({
+          type: "HUMAN_UNASSIGNED",
+          caseId: req.params.id,
+          conversationId: aggregate.case.conversationId,
+        });
+      }
       res.json({ data: result });
     } catch (error) {
       next(error);

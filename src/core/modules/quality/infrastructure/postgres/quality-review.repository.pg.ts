@@ -536,7 +536,7 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
       avg_first_reply_ms: string | null;
     }>(
       `WITH completed_cases AS (
-         SELECT c.id, c.assigned_agent_id, c.department_id, c.updated_at
+         SELECT c.id, c.conversation_id, c.assigned_agent_id, c.department_id, c.updated_at
          FROM "case" c
          WHERE c.status = 'COMPLETED'
            AND c.assigned_agent_id IS NOT NULL
@@ -551,7 +551,9 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
            AND c.updated_at >= $1 AND c.updated_at <= $2
            ${deptCaseFilter}
            AND EXISTS (
-             SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent'
+             SELECT 1 FROM message m
+             WHERE (m.case_id = c.id OR (m.conversation_id = c.conversation_id AND m.agent_id = c.assigned_agent_id))
+               AND m.author = 'agent'
            )
          GROUP BY c.assigned_agent_id
        ),
@@ -574,7 +576,8 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
                 cc.assigned_agent_id,
                 EXTRACT(EPOCH FROM (
                   (SELECT MIN(m.created_at) FROM message m
-                   WHERE m.case_id = cc.id AND m.author = 'agent')
+                   WHERE (m.case_id = cc.id OR (m.conversation_id = cc.conversation_id AND m.agent_id = cc.assigned_agent_id))
+                     AND m.author = 'agent')
                   -
                   COALESCE(
                     (SELECT MIN(we.occurred_at) FROM workflow_event we
@@ -600,7 +603,7 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
        LEFT JOIN closed_with_agent cwa ON cwa.agent_id = a.id
        LEFT JOIN review_status rs ON rs.agent_id = a.id
        LEFT JOIN first_reply fr ON fr.assigned_agent_id = a.id
-       WHERE cc.id IS NOT NULL OR rs.agent_id IS NOT NULL OR cwa.agent_id IS NOT NULL
+       WHERE a.active = true
        GROUP BY a.id, a.name, cwa.n, rs.analyzed_count, rs.pending_count, rs.failed_count,
                 rs.avg_score, rs.critical_count
        ORDER BY a.name ASC`,
@@ -617,7 +620,6 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
         analyzedCount,
         pendingCount: Number(r.pending_count),
         failedCount: Number(r.failed_count),
-        // Sin reviews listas → sin score (no inventar / no arrastrar fallidos).
         avgCordialityScore:
           analyzedCount === 0 || r.avg_cordiality === null ? null : Number(r.avg_cordiality),
         criticalReviewCount: Number(r.critical_count),
@@ -656,7 +658,8 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
          AND ($4::uuid[] IS NULL OR c.department_id = ANY($4::uuid[]))
          AND EXISTS (
            SELECT 1 FROM message m
-           WHERE m.case_id = c.id AND m.author = 'agent'
+           WHERE (m.case_id = c.id OR (m.conversation_id = c.conversation_id AND m.agent_id = c.assigned_agent_id))
+             AND m.author = 'agent'
          )
          AND NOT EXISTS (
            SELECT 1 FROM quality_review qr

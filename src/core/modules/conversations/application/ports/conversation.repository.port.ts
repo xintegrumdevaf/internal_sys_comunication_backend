@@ -10,6 +10,8 @@ export interface ConversationRepositoryPort {
   /** Atomico solo si el llamador ya sostiene el lock de docs/spec 00 §3 (ver withConversationLock). */
   findOrCreateByWaPhone(waPhone: string): Promise<Conversation>;
   touchLastActivity(id: string): Promise<void>;
+  incrementUnreadCount(id: string): Promise<void>;
+  resetUnreadCount(id: string): Promise<void>;
   list(filter: ListConversationsFilter): Promise<Conversation[]>;
   /**
    * docs/spec/01_DATA_MODEL.md §3: `active_case_id` solo puede apuntar a un
@@ -29,4 +31,5 @@ export interface ConversationRepositoryPort {
    * sin `contacts` no debe pisar el último nombre conocido).
    */
   setWaProfileName(id: string, name: string): Promise<void>;
+  setStatus(id: string, status: ConversationStatus): Promise<void>;
 }

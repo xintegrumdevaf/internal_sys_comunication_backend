@@ -91,17 +91,58 @@ export class ReceiveInboundMessageUseCase {
     );
 
     if (!isDuplicate) {
+      if (conversation.status === "resolved" || conversation.status === "closed") {
+        if (!isPoliteClosingMessage(input.body, input.type)) {
+          log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
+          await conversationRepo.setStatus(conversation.id, "open");
+          conversation = { ...conversation, status: "open" };
+        }
+      }
+
+      await conversationRepo.incrementUnreadCount(conversation.id);
       await conversationRepo.touchLastActivity(conversation.id);
       await inboundBuffer?.push(conversation.id, message.id);
       this.deps.broadcaster?.publish({
         type: "MESSAGE_RECEIVED",
         conversationId: conversation.id,
         messageId: message.id,
-        bodyPreview: input.body.substring(0, 100) || (input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
+        bodyPreview: input.body.substring(0, 100) || (input.type === "document" ? "📄 Documento" : input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
         authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
       });
     }
 
     return { conversation, message, isDuplicate };
   }
+}
+
+function isPoliteClosingMessage(text: string, type: string): boolean {
+  if (type === "document" || type === "image" || type === "audio" || type === "voice") {
+    return false;
+  }
+  const clean = text.toLowerCase().trim().replace(/[.,!¡?¿\-_]/g, "");
+  if (!clean) return false;
+  const politeKeywords = [
+    "gracias",
+    "muchas gracias",
+    "ok gracias",
+    "listo gracias",
+    "muchisimas gracias",
+    "vale gracias",
+    "gracias a ti",
+    "muchas gracias por tu ayuda",
+    "muchas gracias por la ayuda",
+    "ok",
+    "listo",
+    "perfecto",
+    "entendido",
+    "chao",
+    "hasta luego",
+    "adios",
+    "que tenga buen dia",
+    "buen dia",
+    "buenas noches",
+    "buena tarde",
+    "excelente",
+  ];
+  return politeKeywords.some((kw) => clean === kw) || /^[\p{Emoji}\s]+$/u.test(clean);
 }

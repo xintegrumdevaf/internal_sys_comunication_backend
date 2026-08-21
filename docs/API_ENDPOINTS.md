@@ -61,10 +61,11 @@ No está bajo `/api`.
 
 | Método | Ruta | Query / Body | Descripción |
 |---|---|---|---|
-| `GET` | `/api/conversations` | `?departmentId=&userId=&status=open\|pending\|resolved\|closed` | Bandeja. Cada ítem trae `lastMessagePreview` (no hace falta pedir mensajes por fila) |
+| `GET` | `/api/conversations` | `?departmentId=&userId=&status=open\|pending\|resolved\|closed` | Bandeja. Cada ítem trae `lastMessagePreview` (no hace falta pedir mensajes por fila) y `activeCase` (con estado, departamento, agente y estado del bot) |
 | `GET` | `/api/conversations/:id/messages` | `?limit=&cursor=` | Historial cronológico paginado |
 | `GET` | `/api/conversations/:id/cases` | — | Casos de esa conversación (histórico; pueden coexistir SUPPORT + BILLING) |
 | `GET` | `/api/conversations/:id/automation` | — | Automation del caso activo (o `null`) |
+| `POST` | `/api/conversations/:id/read` | — | Marca todos los mensajes de la conversación como leídos (pone `unreadCount` en 0) |
 | `POST` | `/api/conversations/:id/reply` | `{ "body" }` → `201` | Respuesta humana a WhatsApp (el agente es el de la sesión); desactiva automation si hacía falta |
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
 

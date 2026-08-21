@@ -372,6 +372,20 @@ const diagnostic: WorkflowStateHandler = async ({
   });
 
   if (!result.success) {
+    if (result.error.retryable !== false) {
+      const nextData: SupportInternetContext = {
+        ...data,
+        diagnostic: {
+          status: "PENDING",
+          lastQuestion: "Estamos analizando tu equipo. ¿Puedes confirmarnos si las luces del router están encendidas y de qué color están?",
+        },
+      };
+      const waiting = resetWaitingAttempts(
+        withContext(nextData, context),
+        "WAITING_USER_DIAGNOSTIC",
+      );
+      return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: waiting };
+    }
     return { type: "ESCALATED", reason: result.error.message, context };
   }
 
@@ -379,12 +393,36 @@ const diagnostic: WorkflowStateHandler = async ({
     (result.result ?? {}) as Record<string, unknown>,
   );
 
+  const isEscalation =
+    output.status === "ESCALATED" ||
+    /revisi[oó]n t[eé]cnica|visita t[eé]cnica|especialista|t[eé]cnico|falla f[ií]sica|escal/i.test(
+      output.question ?? output.diagnostic ?? "",
+    );
+
+  if (isEscalation) {
+    const nextData: SupportInternetContext = {
+      ...data,
+      diagnostic: {
+        status: "UNRESOLVABLE",
+        result: output.diagnostic || output.question || "Falla física del equipo",
+        lastQuestion: output.question,
+        ...(output.technical ? { technical: output.technical } : {}),
+      },
+    };
+    return {
+      type: "ESCALATED",
+      reason: output.question || output.diagnostic || "Diagnostico no resoluble automaticamente",
+      context: withContext(nextData, context),
+    };
+  }
+
   if (output.status === "WAITING_USER") {
     const nextData: SupportInternetContext = {
       ...data,
       diagnostic: {
         status: "PENDING",
         lastQuestion: output.question,
+        result: output.diagnostic,
         ...(output.technical ? { technical: output.technical } : {}),
       },
     };
@@ -443,6 +481,11 @@ export const supportInternetWorkflow: WorkflowDefinition = {
       requireAll: ["answer"],
       maxAttempts: 2,
     },
+    WAITING_USER_PAYMENT: {
+      pendingQuestion: "Detectamos un saldo pendiente en tu cuenta. Por favor envíanos el comprobante de pago para validar.",
+      requireAny: ["receipt", "answer", "action"],
+      maxAttempts: 5,
+    },
   },
   replyTemplates: {
     WAITING_USER_CLIENT:
@@ -450,6 +493,8 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     WAITING_USER_DISAMBIGUATE:
       "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
     WAITING_USER_DIAGNOSTIC: "{{question}}",
+    WAITING_USER_PAYMENT:
+      "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
     RESPOND_DEBT:
       "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
     COMPLETED:
@@ -464,6 +509,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     WAITING_USER_DISAMBIGUATE: disambiguateContract,
     CHECK_BALANCE: checkBalance,
     RESPOND_DEBT: respondDebt,
+    WAITING_USER_PAYMENT: respondDebt,
     DIAGNOSTIC: diagnostic,
     WAITING_USER_DIAGNOSTIC: diagnostic,
   },

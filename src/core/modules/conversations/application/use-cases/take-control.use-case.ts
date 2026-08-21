@@ -20,7 +20,15 @@ export class TakeControlUseCase {
     },
   ) {}
 
-  async execute(input: { conversationId: string; agentUserId: string }): Promise<{ caseId: string }> {
+  async execute(input: {
+    conversationId: string;
+    agentUserId: string;
+  }): Promise<{
+    caseId: string;
+    status: string;
+    automationEnabled: boolean;
+    assignedAgentId: string;
+  }> {
     const conversation = await this.deps.conversationRepo.findById(input.conversationId);
     if (!conversation) throw notFound(`Conversacion ${input.conversationId} no encontrada`);
 
@@ -45,22 +53,45 @@ export class TakeControlUseCase {
       throw businessError("La conversación ya está bajo control de otro agente");
     }
 
+    const currentFresh = await this.deps.caseRepo.findById(caseId);
+    if (currentFresh && currentFresh.case.status !== "HUMAN_ACTIVE" && currentFresh.case.status !== "COMPLETED" && currentFresh.case.status !== "CANCELLED") {
+      await this.deps.caseRepo.applyTransition({
+        caseId,
+        expectedCaseVersion: currentFresh.case.version,
+        expectedWorkflowVersion: currentFresh.workflowInstance.version,
+        status: "HUMAN_ACTIVE",
+        context: currentFresh.case.context,
+        currentState: currentFresh.workflowInstance.currentState,
+        expiresAt: null,
+      });
+    }
+
     await this.deps.caseRepo.setAutomationEnabled(caseId, false, {
       reason: "TAKE_CONTROL",
       changedBy: input.agentUserId,
     });
     await this.deps.caseRepo.appendEvent(caseId, "AUTOMATION_DISABLED", { reason: "TAKE_CONTROL" });
+    await this.deps.conversationRepo.setActiveCaseId(conversation.id, caseId);
 
     this.deps.broadcaster?.publish({
       type: "CASE_CLAIMED",
       caseId,
       agentUserId: input.agentUserId,
     });
+    this.deps.broadcaster?.publish({
+      type: "AUTOMATION_DISABLED",
+      caseId,
+    });
 
     this.deps.logger.info(
       { conversationId: conversation.id, caseId, agentUserId: input.agentUserId },
       "agente tomo control de la conversacion",
     );
-    return { caseId };
+    return {
+      caseId,
+      status: "HUMAN_ACTIVE",
+      automationEnabled: false,
+      assignedAgentId: input.agentUserId,
+    };
   }
 }

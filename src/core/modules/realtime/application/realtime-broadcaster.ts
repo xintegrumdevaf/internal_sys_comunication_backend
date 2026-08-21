@@ -32,10 +32,22 @@ export type RealtimeEvent =
       type: "HUMAN_ASSIGNED";
       caseId: string;
       agentUserId: string;
+      conversationId?: string;
+    }
+  | {
+      type: "HUMAN_UNASSIGNED";
+      caseId: string;
+      conversationId?: string;
     }
   | {
       type: "AUTOMATION_ENABLED";
       caseId: string;
+      conversationId?: string;
+    }
+  | {
+      type: "AUTOMATION_DISABLED";
+      caseId: string;
+      conversationId?: string;
     };
 
 export type RealtimeSubscriber = {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Conversation } from "../../src/core/modules/conversations/domain/conversation.entity";
+import type { Conversation, ConversationStatus } from "../../src/core/modules/conversations/domain/conversation.entity";
 import type {
   ConversationRepositoryPort,
   ListConversationsFilter,
@@ -41,6 +41,7 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
       createdAt: now,
       updatedAt: now,
       waProfileName: null,
+      unreadCount: 0,
       ...overrides,
     };
     return this.seed(conversation);
@@ -66,6 +67,20 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     }
   }
 
+  async incrementUnreadCount(id: string): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, unreadCount: conversation.unreadCount + 1 });
+    }
+  }
+
+  async resetUnreadCount(id: string): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, unreadCount: 0 });
+    }
+  }
+
   async list(_filter: ListConversationsFilter): Promise<Conversation[]> {
     return [...this.conversations.values()];
   }
@@ -88,6 +103,13 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     const conversation = this.conversations.get(id);
     if (conversation) {
       this.conversations.set(id, { ...conversation, waProfileName: name });
+    }
+  }
+
+  async setStatus(id: string, status: ConversationStatus): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, status });
     }
   }
 }

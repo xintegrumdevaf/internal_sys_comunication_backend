@@ -13,6 +13,8 @@ import type {
   CreateCaseInput,
 } from "../../application/ports/case.repository.port";
 
+import { sanitizeForPostgresJson } from "../../../../../shared/db/sanitize-json";
+
 type CaseRow = {
   id: string;
   conversation_id: string;
@@ -231,7 +233,7 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
          RETURNING *`,
         [
           input.status,
-          input.context,
+          sanitizeForPostgresJson(input.context),
           input.expiresAt,
           input.departmentId ?? null,
           input.caseId,

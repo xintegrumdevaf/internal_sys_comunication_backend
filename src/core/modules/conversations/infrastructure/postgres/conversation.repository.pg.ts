@@ -15,6 +15,7 @@ type ConversationRow = {
   created_at: Date;
   updated_at: Date;
   wa_profile_name: string | null;
+  unread_count: number;
 };
 
 function mapRow(row: ConversationRow): Conversation {
@@ -28,6 +29,7 @@ function mapRow(row: ConversationRow): Conversation {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     waProfileName: row.wa_profile_name,
+    unreadCount: row.unread_count,
   };
 }
 
@@ -70,6 +72,20 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     );
   }
 
+  async incrementUnreadCount(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET unread_count = unread_count + 1, updated_at = now() WHERE id = $1`,
+      [id],
+    );
+  }
+
+  async resetUnreadCount(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET unread_count = 0, updated_at = now() WHERE id = $1`,
+      [id],
+    );
+  }
+
   async setActiveCaseId(id: string, caseId: string | null): Promise<void> {
     await this.pool.query(
       `UPDATE conversation SET active_case_id = $2, updated_at = now() WHERE id = $1`,
@@ -88,6 +104,13 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     await this.pool.query(
       `UPDATE conversation SET wa_profile_name = $2, updated_at = now() WHERE id = $1`,
       [id, name],
+    );
+  }
+
+  async setStatus(id: string, status: ConversationStatus): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET status = $2, updated_at = now() WHERE id = $1`,
+      [id, status],
     );
   }
 

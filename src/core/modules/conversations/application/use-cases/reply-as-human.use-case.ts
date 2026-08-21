@@ -75,25 +75,35 @@ export class ReplyAsHumanUseCase {
       throw error;
     }
 
+    let effectiveCaseId = conversation.activeCaseId;
+    if (!effectiveCaseId && caseRepo) {
+      const cases = await caseRepo.listByConversation(conversation.id);
+      const active =
+        cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+        cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+        cases[cases.length - 1];
+      if (active) effectiveCaseId = active.id;
+    }
+
     const message = await messageRepo.insertOutbound({
       conversationId: conversation.id,
       author: "agent",
       body: input.body,
       externalId,
       agentId: input.agentUserId,
-      caseId: conversation.activeCaseId,
+      caseId: effectiveCaseId,
     });
 
     await conversationRepo.touchLastActivity(conversation.id);
 
-    if (caseRepo && conversation.activeCaseId) {
-      const automation = await caseRepo.getAutomationState(conversation.activeCaseId);
+    if (caseRepo && effectiveCaseId) {
+      const automation = await caseRepo.getAutomationState(effectiveCaseId);
       if (automation?.enabled) {
-        await caseRepo.setAutomationEnabled(conversation.activeCaseId, false, {
+        await caseRepo.setAutomationEnabled(effectiveCaseId, false, {
           reason: "HUMAN_REPLY",
           changedBy: input.agentUserId,
         });
-        await caseRepo.appendEvent(conversation.activeCaseId, "AUTOMATION_DISABLED", {
+        await caseRepo.appendEvent(effectiveCaseId, "AUTOMATION_DISABLED", {
           reason: "HUMAN_REPLY",
         });
       }

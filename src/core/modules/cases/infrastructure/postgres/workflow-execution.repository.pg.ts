@@ -6,6 +6,8 @@ import type {
   WorkflowExecutionRepositoryPort,
 } from "../../application/ports/workflow-execution.repository.port";
 
+import { sanitizeForPostgresJson } from "../../../../../shared/db/sanitize-json";
+
 type WorkflowExecutionRow = {
   id: string;
   workflow_instance_id: string;
@@ -58,7 +60,7 @@ export class WorkflowExecutionRepositoryPg implements WorkflowExecutionRepositor
         input.workflowInstanceId,
         input.caseId,
         input.action,
-        input.input,
+        sanitizeForPostgresJson(input.input),
         input.idempotencyKey,
         input.correlationId,
       ],
@@ -79,7 +81,7 @@ export class WorkflowExecutionRepositoryPg implements WorkflowExecutionRepositor
        SET status = 'COMPLETED', output = $2, error = NULL, completed_at = now()
        WHERE idempotency_key = $1
        RETURNING *`,
-      [input.idempotencyKey, input.output ?? {}],
+      [input.idempotencyKey, sanitizeForPostgresJson(input.output ?? {})],
     );
     return mapRow(rows[0]!);
   }
@@ -90,7 +92,7 @@ export class WorkflowExecutionRepositoryPg implements WorkflowExecutionRepositor
        SET status = 'FAILED', error = $2, output = NULL, completed_at = now()
        WHERE idempotency_key = $1
        RETURNING *`,
-      [input.idempotencyKey, input.error ?? null],
+      [input.idempotencyKey, sanitizeForPostgresJson(input.error ?? null)],
     );
     return mapRow(rows[0]!);
   }
