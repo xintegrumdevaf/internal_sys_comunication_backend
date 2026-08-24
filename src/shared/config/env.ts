@@ -1,5 +1,20 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "node:path";
 import { z } from "zod";
+
+// Cargar .env normal (si existe)
+dotenv.config();
+
+// Si estamos en entorno de test, intentar cargar .env.test si existe,
+// y si no, inyectar valores por defecto para que pase la validación de Zod
+if (process.env.NODE_ENV === "test") {
+  dotenv.config({ path: path.resolve(process.cwd(), ".env.test") });
+
+  process.env.APP_PUBLIC_URL = process.env.APP_PUBLIC_URL || "http://localhost:3000";
+  process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://isp:isp@localhost:5432/isp_platform";
+  process.env.REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+  process.env.API_INTERNAL_KEY = process.env.API_INTERNAL_KEY || "test_internal_key";
+}
 
 /**
  * Esquema de variables de entorno (docs/spec/05_BUILD_PLAN.md - Etapa 0).
