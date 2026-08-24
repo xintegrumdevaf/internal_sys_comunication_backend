@@ -1,3 +1,4 @@
+import { createRagRouter } from "../modules/ai/presentation/rag.router";
 import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import type { Pool } from "pg";
@@ -514,6 +515,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createAuditRouter(auditRepo));
+  app.use(createRagRouter({ pgPool }));
   app.use(
     createN8nWorkflowsRouter({
       listN8nWorkflows,
