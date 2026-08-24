@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS rag_documents (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS rag_faqs (
+  id            TEXT PRIMARY KEY,
   question      TEXT NOT NULL,
   answer        TEXT NOT NULL,
   category      TEXT NOT NULL,
