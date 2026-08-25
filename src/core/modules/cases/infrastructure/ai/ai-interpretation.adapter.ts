@@ -32,6 +32,7 @@ export class AiInterpretationAdapter implements InterpretationPort {
               requireAny: input.activeCase.requireAny,
             }
           : undefined,
+        recentMessages: input.recentMessages,
       },
     });
 

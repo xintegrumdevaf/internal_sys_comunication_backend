@@ -25,18 +25,18 @@ export const INTENT_CATALOG = [
   },
   {
     intent: "sales.packages",
-    workflowType: "SALES_PACKAGES",
-    description: "pregunta por planes/paquetes/precios/velocidades",
+    workflowType: "GENERAL_INQUIRY",
+    description: "pregunta por planes/paquetes/precios/velocidades — sirve por RAG; si quiere contratar → escala a ventas",
   },
   {
     intent: "sales.upgrade",
-    workflowType: "SALES_PACKAGES",
-    description: "quiere cambiar/mejorar su plan actual",
+    workflowType: "GENERAL_INQUIRY",
+    description: "quiere cambiar/mejorar su plan — RAG informa, luego escala a ventas si confirma",
   },
   {
     intent: "general.inquiry",
     workflowType: "GENERAL_INQUIRY",
-    description: "pregunta general de la empresa que no encaja arriba",
+    description: "pregunta general de la empresa (oficinas, horarios, cuentas, cobertura, sectores)",
   },
   {
     intent: "unknown",

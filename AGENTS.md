@@ -20,6 +20,14 @@ No inventes entidades, endpoints, nombres de estado ni eventos que no estén en 
 4. No avances a la siguiente etapa si la actual deja el build roto, migraciones pendientes, o tests fallando.
 5. Un commit por etapa completada, mensaje descriptivo (`feat(etapa-2): motor de workflow declarativo + SUPPORT_INTERNET`).
 
+## PROHIBIDO — nunca hacer esto sin orden explícita del propietario
+
+- **Ejecutar seeders**: `pnpm seed`, `pnpm seed:quality`, o cualquier script en `scripts/seed*.ts`. Los seeders están bloqueados (`process.exit(1)`) y no deben desbloquearse sin instrucción explícita del propietario del proyecto.
+- **Insertar datos de prueba en la BD real**: No hacer INSERT directos en conversaciones, agentes, departamentos, ni mensajes, ni correr migraciones con datos de prueba embebidos.
+- **Crear agentes o conversaciones de demo**: La BD tiene datos reales. Cualquier dato inventado contamina el sistema real.
+
+Si necesitás datos, pedile permiso explícito al propietario. No asumas que un ejemplo o un test justifica insertar datos.
+
 ## No-negociables (repetidos de `00_OVERVIEW.md` §5 — no los rompas nunca)
 
 - Sin lógica de negocio en controllers ni en prompts de IA.

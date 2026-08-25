@@ -1,266 +1,154 @@
 import { Router } from "express";
-import type { Pool } from "pg";
+import multer from "multer";
+import type { Logger } from "../../../../shared/logging/logger";
+import type { RagService } from "../application/services/rag.service";
 
-export function createRagRouter({ pgPool }: { pgPool: Pool }): Router {
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+});
+
+export type RagRouterDeps = {
+  ragService: RagService;
+  logger?: Logger;
+};
+
+export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   const router = Router();
 
-  // GET /api/rag/documents - Listar todos los documentos de RAG desde PostgreSQL
+  // GET /api/rag/documents - Listar todos los documentos de RAG
   router.get("/api/rag/documents", async (req, res, next) => {
     try {
-      const result = await pgPool.query(
-        `SELECT 
-          id, 
-          name, 
-          category, 
-          mime_type AS "mimeType", 
-          size_bytes AS "sizeBytes", 
-          status, 
-          chunks_count AS "chunksCount", 
-          uploaded_by AS "uploadedBy", 
-          source_url AS "sourceUrl", 
-          error_message AS "errorMessage", 
-          created_at AS "createdAt", 
-          updated_at AS "updatedAt"
-        FROM rag_documents 
-        ORDER BY created_at DESC`
-      );
-      res.json({ data: result.rows });
+      const documents = await ragService.listDocuments();
+      res.json({ data: documents });
     } catch (error) {
       next(error);
     }
   });
 
-  // POST /api/rag/documents - Crear un registro de documento en PostgreSQL
-  router.post("/api/rag/documents", async (req, res, next) => {
+  // POST /api/rag/documents - Subir, extraer, chunkear e indexar documento
+  router.post("/api/rag/documents", upload.any(), async (req, res, next) => {
     try {
-      const { name, category, mimeType, sizeBytes, uploadedBy, sourceUrl } = req.body;
+      const uploadedFile = req.file || (req.files && Array.isArray(req.files) ? req.files[0] : undefined);
+      const name = uploadedFile?.originalname || req.body.name || "Documento_Sin_Nombre.pdf";
+      const category = req.body.category || "General";
+      const mimeType = uploadedFile?.mimetype || req.body.mimeType || "application/pdf";
+      const sizeBytes = uploadedFile?.size || Number(req.body.sizeBytes) || 1000000;
+      const uploadedBy = req.body.uploadedBy || "Admin Sistema";
+      const sourceUrl = req.body.sourceUrl || null;
       const id = `doc-${Date.now()}`;
-      const calculatedChunks = Math.max(8, Math.floor((sizeBytes || 100000) / 35000));
 
-      const result = await pgPool.query(
-        `INSERT INTO rag_documents 
-          (id, name, category, mime_type, size_bytes, status, chunks_count, uploaded_by, source_url)
-        VALUES 
-          ($1, $2, $3, $4, $5, 'processed', $6, $7, $8)
-        RETURNING 
-          id, 
-          name, 
-          category, 
-          mime_type AS "mimeType", 
-          size_bytes AS "sizeBytes", 
-          status, 
-          chunks_count AS "chunksCount", 
-          uploaded_by AS "uploadedBy", 
-          source_url AS "sourceUrl", 
-          created_at AS "createdAt", 
-          updated_at AS "updatedAt"`,
-        [
+      if (uploadedFile?.buffer) {
+        const doc = await ragService.processAndIndexDocument(uploadedFile.buffer, {
           id,
-          name || "Documento_Sin_Nombre.pdf",
-          category || "General",
-          mimeType || "application/pdf",
-          sizeBytes || 1000000,
-          calculatedChunks,
-          uploadedBy || "Admin Sistema",
-          sourceUrl || null,
-        ]
-      );
-      res.status(201).json({ data: result.rows[0] });
+          name,
+          category,
+          mimeType,
+          sizeBytes,
+          uploadedBy,
+          sourceUrl,
+        });
+        return res.status(201).json({ data: doc });
+      }
+
+      // Si no viene archivo binario, crear entrada directa
+      const doc = await ragService.processAndIndexDocument(Buffer.from(req.body.content || ""), {
+        id,
+        name,
+        category,
+        mimeType: "text/plain",
+        sizeBytes: (req.body.content || "").length,
+        uploadedBy,
+        sourceUrl,
+      });
+
+      res.status(201).json({ data: doc });
     } catch (error) {
+      logger?.error({ err: error }, "Error procesando POST /api/rag/documents");
       next(error);
     }
   });
 
-  // DELETE /api/rag/documents/:id - Eliminar documento de PostgreSQL
+  // DELETE /api/rag/documents/:id - Eliminar documento y sus vectores asociados
   router.delete("/api/rag/documents/:id", async (req, res, next) => {
     try {
       const { id } = req.params;
-      await pgPool.query("DELETE FROM rag_documents WHERE id = $1", [id]);
-      res.json({ success: true, id });
+      const success = await ragService.deleteDocument(id);
+      res.json({ success, id });
     } catch (error) {
       next(error);
     }
   });
 
-  // GET /api/rag/faqs - Listar FAQs desde PostgreSQL
+  // GET /api/rag/stats - Estadísticas de RAG
+  router.get("/api/rag/stats", async (req, res, next) => {
+    try {
+      const stats = await ragService.getStats();
+      res.json(stats);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // GET /api/rag/faqs - Listar FAQs
   router.get("/api/rag/faqs", async (req, res, next) => {
     try {
-      const result = await pgPool.query(
-        `SELECT 
-          id, 
-          question, 
-          answer, 
-          category, 
-          tags, 
-          variations, 
-          active, 
-          created_at AS "createdAt", 
-          updated_at AS "updatedAt"
-        FROM rag_faqs 
-        ORDER BY created_at DESC`
-      );
-      res.json({ data: result.rows });
+      const faqs = await ragService.listFaqs();
+      res.json({ data: faqs });
     } catch (error) {
       next(error);
     }
   });
 
-  // POST /api/rag/faqs - Crear o actualizar FAQ en PostgreSQL
+  // POST /api/rag/faqs - Crear FAQ
   router.post("/api/rag/faqs", async (req, res, next) => {
     try {
-      const { id, question, answer, category, tags, variations, active } = req.body;
-
-      if (id) {
-        const result = await pgPool.query(
-          `UPDATE rag_faqs 
-          SET 
-            question = $1, 
-            answer = $2, 
-            category = $3, 
-            tags = $4, 
-            variations = $5, 
-            active = $6, 
-            updated_at = now()
-          WHERE id = $7
-          RETURNING 
-            id, 
-            question, 
-            answer, 
-            category, 
-            tags, 
-            variations, 
-            active, 
-            created_at AS "createdAt", 
-            updated_at AS "updatedAt"`,
-          [
-            question,
-            answer,
-            category || "General",
-            tags || [],
-            variations || [],
-            active ?? true,
-            id,
-          ]
-        );
-        return res.json({ data: result.rows[0] });
-      } else {
-        const newId = `faq-${Date.now()}`;
-        const result = await pgPool.query(
-          `INSERT INTO rag_faqs 
-            (id, question, answer, category, tags, variations, active)
-          VALUES 
-            ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING 
-            id, 
-            question, 
-            answer, 
-            category, 
-            tags, 
-            variations, 
-            active, 
-            created_at AS "createdAt", 
-            updated_at AS "updatedAt"`,
-          [
-            newId,
-            question,
-            answer,
-            category || "General",
-            tags || [],
-            variations || [],
-            active ?? true,
-          ]
-        );
-        return res.status(201).json({ data: result.rows[0] });
-      }
+      const { category, question, answer, tags = [], variations = [], priority = 5 } = req.body;
+      const id = `faq-${Date.now()}`;
+      const faq = await ragService.createFaq({ id, category, question, answer, tags, variations, priority });
+      res.status(201).json({ data: faq });
     } catch (error) {
       next(error);
     }
   });
 
-  // DELETE /api/rag/faqs/:id - Eliminar FAQ de PostgreSQL
+  // PUT /api/rag/faqs/:id - Actualizar FAQ
+  router.put("/api/rag/faqs/:id", async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { category, question, answer, tags, variations, priority, active } = req.body;
+      const updated = await ragService.updateFaq(id, { category, question, answer, tags, variations, priority, active });
+      if (!updated) {
+        return res.status(404).json({ error: "FAQ no encontrada" });
+      }
+      res.json({ data: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // DELETE /api/rag/faqs/:id - Eliminar FAQ
   router.delete("/api/rag/faqs/:id", async (req, res, next) => {
     try {
       const { id } = req.params;
-      await pgPool.query("DELETE FROM rag_faqs WHERE id = $1", [id]);
-      res.json({ success: true, id });
+      const success = await ragService.deleteFaq(id);
+      res.json({ success, id });
     } catch (error) {
       next(error);
     }
   });
 
-  // POST /api/rag/query - Consultar RAG (Busca en PostgreSQL)
+  // POST /api/rag/query - Consultar RAG Nativo
   router.post("/api/rag/query", async (req, res, next) => {
-    const startTime = Date.now();
     try {
       const { question } = req.body;
-      const q = (question || "").toLowerCase();
-
-      // Buscar en FAQs de PostgreSQL
-      const faqsResult = await pgPool.query("SELECT * FROM rag_faqs WHERE active = true");
-      const faqs = faqsResult.rows;
-
-      const words = q.split(/\s+/).filter((w: string) => w.length > 3);
-      const matchedFaq = faqs.find((f: any) => {
-        const textToSearch = `${f.question} ${f.answer} ${(f.tags || []).join(" ")} ${(f.variations || []).join(" ")}`.toLowerCase();
-        return words.some((w: string) => textToSearch.includes(w));
-      });
-
-      if (matchedFaq) {
-        return res.json({
-          answer: matchedFaq.answer,
-          found: true,
-          confidenceScore: 0.95,
-          sources: [`Base FAQ PostgreSQL (${matchedFaq.category})`],
-          retrievedChunks: [
-            {
-              id: `chk-faq-${matchedFaq.id}`,
-              sourceName: `PostgreSQL FAQ: ${matchedFaq.category}`,
-              contentSnippet: `Pregunta: "${matchedFaq.question}" — Respuesta: "${matchedFaq.answer}"`,
-              similarityScore: 0.95,
-            },
-          ],
-          executionTimeMs: Date.now() - startTime,
-        });
+      const q = (question || "").trim();
+      if (!q) {
+        return res.status(400).json({ error: "La pregunta no puede estar vacía" });
       }
 
-      // Buscar en catálogo de documentos en PostgreSQL
-      const docsResult = await pgPool.query("SELECT * FROM rag_documents ORDER BY created_at DESC");
-      const docs = docsResult.rows;
-      const matchedDoc = docs.find((d: any) => {
-        const textToSearch = `${d.name} ${d.category}`.toLowerCase();
-        return words.some((w: string) => textToSearch.includes(w));
-      }) || docs[0];
-
-      const sourceName = matchedDoc ? matchedDoc.name : "Base_de_Conocimiento_PostgreSQL.pdf";
-      const categoryName = matchedDoc ? matchedDoc.category : "General";
-
-      let answer = `De acuerdo con la información almacenada en PostgreSQL ("${sourceName}"), se recuperó el contexto correspondiente para "${question}".`;
-      let confidenceScore = 0.88;
-
-      if (q.includes("saldo") || q.includes("pago") || q.includes("factura")) {
-        answer = "Para consultar saldos y fechas de pago, los datos en PostgreSQL indican que el usuario puede enviar la palabra SALDO o cédula/RUC. Los pagos se realizan en Banco Pichincha, Guayaquil o transferencia bancaria.";
-        confidenceScore = 0.96;
-      } else if (q.includes("pon") || q.includes("roja") || q.includes("luz") || q.includes("fibra")) {
-        answer = "La luz PON en rojo o intermitente indica atenuación o corte en la fibra óptica. Se orienta al cliente a revisar el conector amarillo y coordinar visita presencial con soporte.";
-        confidenceScore = 0.97;
-      }
-
-      return res.json({
-        answer,
-        found: true,
-        confidenceScore,
-        sources: [sourceName],
-        retrievedChunks: [
-          {
-            id: `chk-${Date.now()}`,
-            sourceName: sourceName,
-            pageNumber: 2,
-            contentSnippet: `Consulta sobre "${question}" verificada contra la base de datos PostgreSQL en la tabla rag_documents.`,
-            similarityScore: confidenceScore,
-          },
-        ],
-        executionTimeMs: Date.now() - startTime,
-      });
+      const result = await ragService.query(q, 4);
+      res.json(result);
     } catch (error) {
       next(error);
     }

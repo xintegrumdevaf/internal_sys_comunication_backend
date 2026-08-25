@@ -94,7 +94,8 @@
     {
       "parameters": {
         "mode": "load",
-        "prompt": "={{ $('Webhook').item.json.body.input.question }}",
+        "tableName": "n8n_vectors",
+        "prompt": "={{ $json.body.input.question }}",
         "options": {}
       },
       "id": "vec-qkb",
@@ -108,8 +109,8 @@
       "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "siUn62OLr3wqPBkc",
-          "name": "Postgres account"
+          "id": "Wii5eNTA7a51xCts",
+          "name": "Postgres RAG"
         }
       }
     },
@@ -134,7 +135,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst docs = items\n  .map((item) => item.json)\n  .filter((j) => j && (j.pageContent || j.document || j.text || j.content || j.metadata));\n\nif (!docs.length) {\n  return [{\n    json: {\n      success: true,\n      result: { found: false },\n      error: null,\n    },\n  }];\n}\n\nconst texts = docs.map((d) => String(d.pageContent || d.document || d.text || d.content || '').trim()).filter(Boolean);\nconst sources = [...new Set(docs.map((d) => {\n  const meta = d.metadata || {};\n  return meta.source || meta.fileName || meta.filename || null;\n}).filter(Boolean))];\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: texts.length > 0,\n      ...(texts.length ? { answer: texts.slice(0, 4).join('\\n\\n'), sources } : {}),\n    },\n    error: null,\n  },\n}];"
+        "jsCode": "const items = $input.all();\nconst docs = items.map((item) => item.json).filter(Boolean);\n\nif (!docs.length) {\n  return [{\n    json: {\n      success: true,\n      result: { found: false },\n      error: null,\n    },\n  }];\n}\n\nfunction extractText(obj) {\n  if (!obj) return '';\n  if (typeof obj === 'string') return obj;\n  if (typeof obj.pageContent === 'string') return obj.pageContent;\n  if (typeof obj.text === 'string') return obj.text;\n  if (typeof obj.content === 'string') return obj.content;\n  if (obj.document) return extractText(obj.document);\n  return '';\n}\n\nfunction extractMeta(obj) {\n  if (!obj) return {};\n  if (obj.metadata && typeof obj.metadata === 'object') return obj.metadata;\n  if (obj.document && obj.document.metadata) return obj.document.metadata;\n  return obj;\n}\n\nconst texts = docs.map(extractText).map((t) => t.trim()).filter(Boolean);\nconst sources = [...new Set(docs.map((d) => {\n  const meta = extractMeta(d);\n  return meta.source || meta.fileName || meta.filename || null;\n}).filter(Boolean))];\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: texts.length > 0,\n      ...(texts.length ? { answer: texts.slice(0, 4).join('\\n\\n'), sources } : {}),\n    },\n    error: null,\n  },\n}];"
       },
       "id": "code-qkb",
       "name": "Format And Wrap",
@@ -221,7 +222,13 @@
     },
     "Embeddings Ollama": {
       "ai_embedding": [
-        []
+        [
+          {
+            "node": "Postgres PGVector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
       ]
     },
     "Postgres PGVector Store": {
@@ -248,13 +255,7 @@
     },
     "Embeddings Google Gemini": {
       "ai_embedding": [
-        [
-          {
-            "node": "Postgres PGVector Store",
-            "type": "ai_embedding",
-            "index": 0
-          }
-        ]
+        []
       ]
     }
   },
@@ -416,7 +417,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const items = $input.all();\nconst docs = items\n  .map((item) => item.json)\n  .filter((j) => j && (j.pageContent || j.document || j.text || j.content || j.metadata));\n\nif (!docs.length) {\n  return [{\n    json: {\n      success: true,\n      result: { found: false },\n      error: null,\n    },\n  }];\n}\n\nconst texts = docs.map((d) => String(d.pageContent || d.document || d.text || d.content || '').trim()).filter(Boolean);\nconst sources = [...new Set(docs.map((d) => {\n  const meta = d.metadata || {};\n  return meta.source || meta.fileName || meta.filename || null;\n}).filter(Boolean))];\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: texts.length > 0,\n      ...(texts.length ? { answer: texts.slice(0, 4).join('\\n\\n'), sources } : {}),\n    },\n    error: null,\n  },\n}];"
+          "jsCode": "const items = $input.all();\nconst docs = items.map((item) => item.json).filter(Boolean);\n\nif (!docs.length) {\n  return [{\n    json: {\n      success: true,\n      result: { found: false },\n      error: null,\n    },\n  }];\n}\n\nfunction extractText(obj) {\n  if (!obj) return '';\n  if (typeof obj === 'string') return obj;\n  if (typeof obj.pageContent === 'string') return obj.pageContent;\n  if (typeof obj.text === 'string') return obj.text;\n  if (typeof obj.content === 'string') return obj.content;\n  if (obj.document) return extractText(obj.document);\n  return '';\n}\n\nfunction extractMeta(obj) {\n  if (!obj) return {};\n  if (obj.metadata && typeof obj.metadata === 'object') return obj.metadata;\n  if (obj.document && obj.document.metadata) return obj.document.metadata;\n  return obj;\n}\n\nconst texts = docs.map(extractText).map((t) => t.trim()).filter(Boolean);\nconst sources = [...new Set(docs.map((d) => {\n  const meta = extractMeta(d);\n  return meta.source || meta.fileName || meta.filename || null;\n}).filter(Boolean))];\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: texts.length > 0,\n      ...(texts.length ? { answer: texts.slice(0, 4).join('\\n\\n'), sources } : {}),\n    },\n    error: null,\n  },\n}];"
         },
         "id": "code-qkb",
         "name": "Format And Wrap",
@@ -503,7 +504,13 @@
       },
       "Embeddings Ollama": {
         "ai_embedding": [
-          []
+          [
+            {
+              "node": "Postgres PGVector Store",
+              "type": "ai_embedding",
+              "index": 0
+            }
+          ]
         ]
       },
       "Postgres PGVector Store": {
@@ -530,13 +537,7 @@
       },
       "Embeddings Google Gemini": {
         "ai_embedding": [
-          [
-            {
-              "node": "Postgres PGVector Store",
-              "type": "ai_embedding",
-              "index": 0
-            }
-          ]
+          []
         ]
       }
     },

@@ -183,6 +183,8 @@ function resolveCompleted(
     return debtReply(templates, contextData, balance, "COMPLETED");
   }
 
+  const answerStr = typeof contextData.answer === "string" ? contextData.answer : typeof offer.answer === "string" ? offer.answer : "";
+
   return {
     templateHint: templates.COMPLETED ?? "Tu solicitud fue atendida.",
     resultVars: {
@@ -191,7 +193,8 @@ function resolveCompleted(
         typeof (contextData.diagnostic as { result?: string } | undefined)?.result === "string"
           ? (contextData.diagnostic as { result: string }).result
           : "",
-      offerAnswer: typeof offer.answer === "string" ? offer.answer : "",
+      offerAnswer: answerStr,
+      answer: answerStr,
       paymentMessage: "",
     },
     action: "COMPLETED",

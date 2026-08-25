@@ -5,6 +5,9 @@ BEGIN;
 UPDATE conversation SET active_case_id = NULL;
 UPDATE message SET case_id = NULL WHERE case_id IS NOT NULL;
 
+DELETE FROM quality_coaching_note;
+DELETE FROM quality_finding;
+DELETE FROM quality_review;
 DELETE FROM escalation;
 DELETE FROM automation_state;
 DELETE FROM workflow_event;

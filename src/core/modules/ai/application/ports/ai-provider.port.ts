@@ -32,6 +32,7 @@ export type InterpretMessageInput = {
       requireAll?: string[];
       requireAny?: string[];
     };
+    recentMessages?: Array<{ author: string; body: string }>;
   };
 };
 

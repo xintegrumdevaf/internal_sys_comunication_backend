@@ -6,7 +6,7 @@ import { DepartmentResolverService } from "../../../src/core/modules/cases/appli
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
-import { salesPackagesWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/sales-packages.workflow";
+import { createGeneralInquiryWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/general-inquiry.workflow";
 import type {
   Interpretation,
   InterpretationPort,
@@ -72,7 +72,6 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
     const engine = new WorkflowEngine([
       supportInternetWorkflow,
       billingBalanceWorkflow,
-      salesPackagesWorkflow,
     ]);
     const advanceCase = new AdvanceCaseUseCase({
       caseRepo,
@@ -290,28 +289,29 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
     expect(lastBody.toLowerCase()).toMatch(/pago|registr/);
   });
 
-  it("sales.packages crea caso en dept sales y completa con oferta", async () => {
+  it("sales.packages crea caso GENERAL_INQUIRY y responde con info de planes via RAG", async () => {
     const caseRepo = new CaseRepositoryFake();
     const conversationRepo = new ConversationRepositoryFake();
     const messageRepo = new MessageRepositoryFake();
     const whatsappSender = new WhatsAppSenderFake();
     const departmentRepo = new DepartmentRepositoryFake();
-    departmentRepo.seed({ slug: "sales", name: "Ventas" });
+    departmentRepo.seed({ slug: "general", name: "General" });
 
-    const gateway = new N8nGatewayFake({
-      QUERY_KNOWLEDGE_BASE: () => ({
-        success: true,
-        result: {
-          found: true,
-          answer: "Plan Fibra 500 Mbps a $29.99 al mes.",
-          planId: "f500",
-          price: 29.99,
-          speed: "500 Mbps",
-        },
+    // RAG stub: devuelve info de planes directamente
+    const fakeRag = {
+      query: async (_q: string) => ({
+        found: true,
+        answer: "Plan Fibra 500 Mbps a $29.99 al mes.",
+        confidenceScore: 0.92,
+        sources: ["KB"],
+        retrievedChunks: [],
+        executionTimeMs: 10,
       }),
-    });
+      synthesizeAnswer: async () => "Plan Fibra 500 Mbps a $29.99 al mes.",
+    } as unknown as import("../../../src/core/modules/ai/application/services/rag.service").RagService;
 
-    const engine = new WorkflowEngine([salesPackagesWorkflow]);
+    const engine = new WorkflowEngine([createGeneralInquiryWorkflow(fakeRag)]);
+    const gateway = new N8nGatewayFake({});
     const advanceCase = new AdvanceCaseUseCase({
       caseRepo,
       workflowExecutionRepo: new WorkflowExecutionRepositoryFake(),
@@ -334,7 +334,7 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
         {
           type: "NEW_INTENT",
           intent: "sales.packages",
-          entities: { requestedSpeed: "500 Mbps" },
+          entities: { question: "¿Qué planes de 500 megas tienen?" },
           confidence: 0.9,
         },
       ]),
@@ -354,11 +354,9 @@ describe("Etapa 8 — BILLING_BALANCE y SALES_PACKAGES end-to-end", () => {
     });
 
     const cases = await caseRepo.listByConversation(conversation.id);
-    expect(cases[0]!.workflowType).toBe("SALES_PACKAGES");
+    // sales.packages → GENERAL_INQUIRY via RAG
+    expect(cases[0]!.workflowType).toBe("GENERAL_INQUIRY");
     expect(cases[0]!.status).toBe("COMPLETED");
-    const salesDept = await departmentRepo.findBySlug("sales");
-    expect(cases[0]!.departmentId).toBe(salesDept?.id);
-    expect(gateway.actionsCalledFor("QUERY_KNOWLEDGE_BASE")).toBe(1);
     expect(whatsappSender.sent[0]!.body).toMatch(/500/);
   });
 

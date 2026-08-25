@@ -1,4 +1,9 @@
 import { createRagRouter } from "../modules/ai/presentation/rag.router";
+import { RagDocumentRepositoryPg } from "../modules/ai/infrastructure/postgres/rag-document.repository.pg";
+import { PgVectorStoreAdapter } from "../modules/ai/infrastructure/postgres/pg-vector-store.adapter";
+import { OllamaEmbeddingAdapter } from "../modules/ai/infrastructure/ollama/ollama-embedding.adapter";
+import { GeminiEmbeddingAdapter } from "../modules/ai/infrastructure/gemini/gemini-embedding.adapter";
+import { RagService } from "../modules/ai/application/services/rag.service";
 import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import type { Pool } from "pg";
@@ -68,7 +73,7 @@ import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
-import { salesPackagesWorkflow } from "../modules/cases/application/engine/definitions/sales-packages.workflow";
+import { createGeneralInquiryWorkflow } from "../modules/cases/application/engine/definitions/general-inquiry.workflow";
 import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
 import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
 import { ExpirationService } from "../modules/cases/application/services/expiration.service";
@@ -167,16 +172,6 @@ export function createContainer(): Container {
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
   const escalationRepo = new EscalationRepositoryPg(pgPool);
 
-  // --- Motor de workflow (Etapa 2 + 8) ---
-  // Agregar una definicion nueva no toca WorkflowEngine ni AIProviderPort.
-  const workflowEngine = new WorkflowEngine([
-    supportInternetWorkflow,
-    billingBalanceWorkflow,
-    salesPackagesWorkflow,
-  ]);
-  const departmentResolver = new DepartmentResolverService(departmentRepo);
-  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
-
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
   const n8nGateway = new N8nGatewayHttp(n8nWorkflowRegistryCache, env.API_INTERNAL_KEY, casesLogger);
@@ -212,6 +207,39 @@ export function createContainer(): Container {
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
+
+  // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
+  const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
+  const vectorStore = new PgVectorStoreAdapter(pgPool);
+  const embeddingProvider =
+    env.AI_PROVIDER === "gemini" && env.GEMINI_API_KEY
+      ? new GeminiEmbeddingAdapter({ apiKey: env.GEMINI_API_KEY }, aiLogger)
+      : new OllamaEmbeddingAdapter(
+          { baseUrl: env.OLLAMA_BASE_URL, model: process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:4b" },
+          aiLogger,
+        );
+
+  const ragService = new RagService({
+    documentRepository: ragDocumentRepo,
+    vectorStore,
+    embeddingProvider,
+    chatModelUrl: env.OLLAMA_BASE_URL,
+    chatModel: env.OLLAMA_MODEL,
+    logger: aiLogger,
+  });
+
+  // --- Motor de workflow (Etapa 2 + RAG unificado) ---
+  // SALES_PACKAGES ya no existe como workflow separado: sales.packages y sales.upgrade
+  // son respondidos por GENERAL_INQUIRY via RAG. Solo si el cliente quiere contratar/mejorar
+  // tras recibir la info → GENERAL_INQUIRY escala a ventas.
+  const generalInquiryWorkflow = createGeneralInquiryWorkflow(ragService);
+  const workflowEngine = new WorkflowEngine([
+    supportInternetWorkflow,
+    billingBalanceWorkflow,
+    generalInquiryWorkflow,
+  ]);
+  const departmentResolver = new DepartmentResolverService(departmentRepo);
+  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
 
   // --- Calidad (Etapa 10) — antes de complete/expiration que encolan reviews ---
   const qualityLogger = logger.child({ module: "quality" });
@@ -515,7 +543,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createAuditRouter(auditRepo));
-  app.use(createRagRouter({ pgPool }));
+  app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     createN8nWorkflowsRouter({
       listN8nWorkflows,

@@ -30,6 +30,7 @@ export type InterpretMessageInput = {
     requireAll?: string[];
     requireAny?: string[];
   } | null;
+  recentMessages?: Array<{ author: string; body: string }>;
 };
 
 export interface InterpretationPort {

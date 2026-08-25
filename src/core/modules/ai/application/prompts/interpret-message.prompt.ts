@@ -11,6 +11,7 @@ export function buildInterpretMessagePrompt(input: InterpretMessageInput): {
 } {
   const intents = intentListForPrompt();
   const active = input.conversationSnapshot.activeCase;
+  const recentMessages = input.conversationSnapshot.recentMessages;
 
   const system = `Eres un módulo de interpretación de lenguaje para el sistema de atención automatizada de un proveedor de internet (ISP) en Ecuador. Tu ÚNICA función es analizar el mensaje del cliente y devolver una interpretación estructurada.
 
@@ -26,45 +27,62 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
 }
 
 ## Significado de "type" (elige exactamente uno)
-- NEW_INTENT: el cliente inicia un tema nuevo, sin caso activo relacionado.
-- CONTINUE: el cliente sigue con el mismo tema/caso activo, sin responder una pregunta puntual.
-- ANSWER: el cliente responde específicamente a la "pregunta pendiente" que te doy en el contexto (si existe). Prioriza ANSWER sobre NEW_INTENT si hay una pregunta pendiente y el mensaje la responde razonablemente.
+- NEW_INTENT: el cliente inicia un tema o consulta nueva.
+- CONTINUE: el cliente sigue con el mismo tema/caso activo, o da seguimiento directo al mensaje previo de la conversación.
+- ANSWER: el cliente responde específicamente a la "pregunta pendiente" o dato requerido del contexto. Prioriza ANSWER si hay una pregunta pendiente.
 - CHANGE_TOPIC: el cliente cambia de tema mientras había un caso activo de OTRO tipo.
 - CONFIRM: confirma/dice que sí a algo que se le preguntó.
 - DENY: niega/dice que no a algo que se le preguntó.
 - CANCEL: pide cancelar o detener el proceso actual.
-- REQUEST_HUMAN: pide explícitamente hablar con una persona/especialista.
-- UNCLEAR: no puedes determinar con confianza razonable ninguno de los anteriores.
+- REQUEST_HUMAN: pide explícitamente hablar con una persona/especialista o asesor humano.
+- UNCLEAR: no puedes determinar con confianza razonable ninguno de los anteriores (solo para saludos aislados o textos sin sentido).
 
-## Significado de "intent"
-Usa exactamente uno de la lista del JSON de arriba, o "unknown" si ninguno aplica. No inventes valores nuevos.
+## Catálogo de "intent" y reglas de clasificación
+- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias, RUC, cobertura por ciudades/sectores, información institucional, y también consultas sobre planes, precios, velocidades o promociones de internet que se pueden responder con información de la empresa).
+- sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
+- sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.
+- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
+- billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
+- billing.record_payment: envío o reporte de comprobante/transferencia de pago de factura.
+- unknown: no se puede determinar.
+
+Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, valida mi problema de internet" → \`support.internet\`, no \`billing.balance\`).
+
+## Uso del "historial reciente" para mantener el hilo de la conversación:
+- Usa el "historial reciente" para entender el contexto. Si el cliente envía una frase corta o un sector (ej: "Vivo en Yanuncay", "Estoy en Conocoto", "¿Y en Quito?") como continuación de la charla, interprétalo con el intent del tema en curso (\`general.inquiry\` o \`sales.packages\`) y extrae la entidad relevante, NO como UNCLEAR.
 
 ## "entities"
-No tienes una lista fija de campos que siempre buscas — en cada mensaje te digo, en el contexto, exactamente qué necesito que extraigas para el paso actual (\`datos requeridos (todos)\` y/o \`datos requeridos (alguno)\`). Reglas:
-- Extrae SOLO esas claves, y SOLO si el cliente las mencionó explícitamente. Nunca completes campos con suposiciones, y nunca agregues claves que no te pedí.
-- Si el mensaje es un dato suelto (ej. solo un número, solo una dirección) y hay una pregunta pendiente con datos requeridos, asume que ese dato responde a lo que se pidió — usa type=ANSWER con esa clave, no UNCLEAR ni NEW_INTENT, salvo que el contenido claramente no corresponda a lo pedido.
-- Si te piden la clave \`answer\`, su valor DEBE ser el texto relevante del cliente como string (nunca un booleano ni un objeto).
-- Si el cliente da varios datos a la vez, extrae todos los que reconozcas de la lista pedida.
-- Si no puedes identificar ninguno de los datos pedidos, usa \`entities: {}\` — el sistema decide qué hacer (repreguntar o escalar).
+- Extrae claves que el cliente mencionó explícitamente (ej: \`question\`, \`location\`, \`sector\`, \`nationalId\`, \`plan\`, \`speed\`).
+- Si es una consulta de información general o RAG, incluye \`question: "<texto de la consulta>"\` o las entidades mencionadas.
 
 ## "confidence"
-Número entre 0 y 1. Usa menos de 0.6 si el mensaje es ambiguo. Ante la duda, baja la confianza.
+Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde quedan sus oficinas?", "¿Qué planes tienen?", "¿Cuánto cuesta el de 500 megas?", "Vivo en Yanuncay"), asigna confianza alta (0.85 - 0.95).
 
-## Reglas estrictas
-- Nunca agregues texto fuera del JSON.
-- Nunca inventes datos técnicos que el cliente no dijo.
-- Nunca extraigas claves que no estén en "datos requeridos" del contexto.
-- Si un mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, ayúdame con mi internet" → \`support.internet\`, no \`billing.balance\`).
-- Si no estás seguro, usa type=UNCLEAR con confidence baja.
+## Ejemplos clave:
+1. Mensaje: "¿Dónde se encuentran sus oficinas?"
+   → {"type":"NEW_INTENT","intent":"general.inquiry","entities":{"question":"¿Dónde se encuentran sus oficinas?"},"confidence":0.95}
 
-## Ejemplos clave
-Mensaje: "Ya no tengo deuda pendiente, valida mi problema de internet."
-Sin caso activo.
-→ {"type":"NEW_INTENT","intent":"support.internet","entities":{},"confidence":0.85}
-(nota: "deuda" es solo contexto; el pedido accionable es soporte de internet)`;
+2. Mensaje: "¿Qué paquetes de internet tienen?"
+   → {"type":"NEW_INTENT","intent":"sales.packages","entities":{"question":"¿Qué paquetes de internet tienen?"},"confidence":0.95}
+
+3. Mensaje: "¿Cuánto cuesta el de 500 megas?"
+   → {"type":"NEW_INTENT","intent":"sales.packages","entities":{"question":"¿Cuánto cuesta el plan de 500 Mbps?","speed":"500"},"confidence":0.95}
+
+4. Mensaje: "Quiero contratar el plan de 500 megas" (o "Quiero mejorar mi plan")
+   → {"type":"NEW_INTENT","intent":"sales.upgrade","entities":{"question":"Quiero contratar el plan de 500 Mbps","speed":"500"},"confidence":0.90}
+
+5. Mensaje: "Vivo en Yanuncay" (después de hablar de cobertura/planes)
+   → {"type":"CONTINUE","intent":"general.inquiry","entities":{"location":"Yanuncay","question":"Cobertura en Yanuncay"},"confidence":0.90}
+
+6. Mensaje: "¿Cuáles son las cuentas bancarias para pagar?"
+   → {"type":"NEW_INTENT","intent":"general.inquiry","entities":{"question":"Cuentas bancarias para depósito o transferencia"},"confidence":0.95}
+
+7. Mensaje: "Ya no tengo deuda pendiente, valida mi problema de internet."
+   → {"type":"NEW_INTENT","intent":"support.internet","entities":{},"confidence":0.85}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,
+    "historial reciente": recentMessages && recentMessages.length > 0 ? recentMessages : null,
     "caso activo": active
       ? { workflowType: active.workflowType, pendingQuestion: active.pendingQuestion ?? null }
       : null,

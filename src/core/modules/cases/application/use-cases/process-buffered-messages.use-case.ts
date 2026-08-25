@@ -210,6 +210,16 @@ export class ProcessBufferedMessagesUseCase {
           ]
         : undefined;
 
+      const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 6 });
+      const recentMessages = rawHistory
+        .reverse()
+        .filter((m) => !messages.some((bm) => bm.id === m.id))
+        .slice(-4)
+        .map((m) => ({
+          author: m.author,
+          body: m.body,
+        }));
+
       let interpretation = await this.deps.interpretationProvider.interpretMessage({
         correlationId,
         conversationId,
@@ -227,6 +237,7 @@ export class ProcessBufferedMessagesUseCase {
               requireAny: waitingStep?.requireAny,
             }
           : null,
+        recentMessages,
       });
 
       // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
@@ -244,8 +255,15 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Auto-extracción de cédula (10 dígitos) del historial reciente si no se detectó
-      if (!interpretation.entities?.nationalId) {
+      // Auto-extracción de cédula SOLO cuando el intent activo o entrante es de soporte/facturación
+      // (nunca inyectar nationalId en flujos de ventas, consultas generales, etc.)
+      const identityRelatedIntents = ["support.internet", "support.slow_internet", "billing.balance", "billing.record_payment"];
+      const identityRelatedWorkflows = ["SUPPORT_INTERNET", "BILLING_BALANCE"];
+      const isIdentityContext =
+        identityRelatedIntents.includes(interpretation.intent) ||
+        (activeAggregate && identityRelatedWorkflows.includes(activeAggregate.case.workflowType));
+
+      if (isIdentityContext && !interpretation.entities?.nationalId) {
         const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 10 });
         const customerMessages = history.filter((m) => m.author === "customer");
         for (const msg of customerMessages) {
@@ -678,12 +696,11 @@ function seedPurposeEntities(
   if (intent === "billing.balance") {
     return { ...entities, billingPurpose: "balance" };
   }
+  // sales.upgrade → GENERAL_INQUIRY con flag wantsUpgrade para ofrecer especialista post-RAG
   if (intent === "sales.upgrade") {
-    return { ...entities, salesPurpose: "upgrade" };
+    return { ...entities, wantsUpgrade: true };
   }
-  if (intent === "sales.packages") {
-    return { ...entities, salesPurpose: "packages" };
-  }
+  // sales.packages → GENERAL_INQUIRY puro — la question ya viene en entities desde el NLU
   return entities;
 }
 
@@ -695,15 +712,6 @@ function seedInitialContext(workflowType: string, intent: string): CaseContext {
       data: {
         ...base.data,
         purpose: intent === "billing.record_payment" ? "record_payment" : "balance",
-      },
-    };
-  }
-  if (base.workflowType === "SALES_PACKAGES") {
-    return {
-      ...base,
-      data: {
-        ...base.data,
-        purpose: intent === "sales.upgrade" ? "upgrade" : "packages",
       },
     };
   }

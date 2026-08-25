@@ -9,6 +9,7 @@ const WORKFLOW_TYPE_TO_DEPARTMENT_SLUG: Readonly<Record<string, string>> = {
   SUPPORT_INTERNET: "support",
   BILLING_BALANCE: "billing",
   SALES_PACKAGES: "sales",
+  GENERAL_INQUIRY: "general",
 };
 
 export class DepartmentResolverService {
