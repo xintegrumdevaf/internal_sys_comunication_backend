@@ -91,7 +91,12 @@ export class RagService {
       const trimmed = sec.trim();
       if (!trimmed || trimmed.length < 30) continue;
 
-      if (trimmed.includes("Ejemplos de consultas que este documento debe permitir responder")) {
+      if (
+        trimmed.includes("Ejemplos de consultas que este documento debe permitir responder") ||
+        trimmed.includes("Reglas de interpretación para un asistente RAG") ||
+        trimmed.includes("No inventar planes, precios, cuentas bancarias") ||
+        trimmed.includes("Priorizar la información contenida en este documento")
+      ) {
         continue;
       }
 
@@ -197,63 +202,38 @@ export class RagService {
       if (w.endsWith("es") && w.length > 4) keywordsSet.add(w.slice(0, -2));
       else if (w.endsWith("s") && w.length > 3) keywordsSet.add(w.slice(0, -1));
     }
+
+    // Expansión semántica para preguntas de cobertura, ciudades, ubicación o disponibilidad
+    const isCoverageOrLocation = /operan|operaci[oó]n|cobertura|ciudad|ciudades|sector|sectores|disponib|llegada|llegan|est[aá]n|donde|d[oó]nde|ubicaci[oó]n|oficina|oficinas|lugar/i.test(question);
+    if (isCoverageOrLocation) {
+      keywordsSet.add("cobertura");
+      keywordsSet.add("ciudades");
+      keywordsSet.add("quito");
+      keywordsSet.add("cuenca");
+      keywordsSet.add("sectores");
+    }
+
+    // 1. Si la consulta es sobre planes/paquetes/precios/información, expandir keywords y priorizar tabla de planes
+    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto|info|informaci[oó]n|interesa|interesar[ií]a|contratar|servicios|servicio|fibra|costo|costos/i.test(question);
+    if (isPlanQuery) {
+      keywordsSet.add("planes");
+      keywordsSet.add("paquetes");
+      keywordsSet.add("precios");
+      keywordsSet.add("hogar");
+      keywordsSet.add("mbps");
+    }
+
     const keywords = Array.from(keywordsSet);
 
     const candidateLimit = Math.max(limit, 10);
-    const results = await this.vectorStore.searchHybrid({ embedding, keywords, limit: candidateLimit });
+    const rawResults = await this.vectorStore.searchHybrid({ embedding, keywords, limit: candidateLimit });
 
-    // 1. Si la consulta es sobre planes/paquetes/precios y se recuperó la tabla comparativa de planes, priorizarla en #1
-    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto/i.test(question);
-    if (isPlanQuery && results.length > 1) {
-      const planTableIdx = results.findIndex((c) =>
-        c.contentSnippet.includes("Comparación rápida de planes") ||
-        c.contentSnippet.includes("Plan | Velocidad") ||
-        c.contentSnippet.includes("XGO Hogar")
-      );
-      if (planTableIdx > 0) {
-        const [planChunk] = results.splice(planTableIdx, 1);
-        results.unshift(planChunk!);
-      }
-    }
-
-    // 2. Si la consulta es sobre horarios de atención y se recuperó el chunk de horarios, priorizarlo en #1
-    const isScheduleQuery = /horario|horarios|atención|atencion|abren|cierran|hora|atender/i.test(question);
-    if (isScheduleQuery && results.length > 1) {
-      const scheduleIdx = results.findIndex((c) =>
-        c.contentSnippet.includes("### Horarios") ||
-        c.contentSnippet.includes("Atención al cliente:")
-      );
-      if (scheduleIdx > 0) {
-        const [schChunk] = results.splice(scheduleIdx, 1);
-        results.unshift(schChunk!);
-      }
-    }
-
-    // 3. Si la consulta pide específicamente la oficina de Quito
-    const isQuitoOffice = /quito/i.test(question) && /oficina|oficinas|ubicacion|ubicación|direccion|dirección|queda|quedan|donde|dónde|sucursal/i.test(question);
-    if (isQuitoOffice && results.length > 1) {
-      const quitoIdx = results.findIndex((c) =>
-        c.contentSnippet.includes("Oficina Quito") ||
-        c.contentSnippet.includes("República del Salvador")
-      );
-      if (quitoIdx > 0) {
-        const [qChunk] = results.splice(quitoIdx, 1);
-        results.unshift(qChunk!);
-      }
-    }
-
-    // 4. Si la consulta pide específicamente la oficina de Cuenca
-    const isCuencaOffice = /cuenca/i.test(question) && /oficina|oficinas|ubicacion|ubicación|direccion|dirección|queda|quedan|donde|dónde|sucursal/i.test(question);
-    if (isCuencaOffice && results.length > 1) {
-      const cuencaIdx = results.findIndex((c) =>
-        c.contentSnippet.includes("Oficina Cuenca") ||
-        c.contentSnippet.includes("Remigio Crespo")
-      );
-      if (cuencaIdx > 0) {
-        const [cChunk] = results.splice(cuencaIdx, 1);
-        results.unshift(cChunk!);
-      }
-    }
+    // Filtrar cualquier fragmento de reglas internas/meta que no deba llegar al cliente
+    const results = rawResults.filter(
+      (c) =>
+        !c.contentSnippet.includes("Reglas de interpretación para un asistente RAG") &&
+        !c.contentSnippet.includes("No inventar planes, precios, cuentas bancarias")
+    );
 
     return results.slice(0, limit);
   }
@@ -265,8 +245,11 @@ export class RagService {
 
     const context = chunks.map((c) => c.contentSnippet).join("\n---\n");
     const systemPrompt =
-      "Eres el asistente oficial de atención al cliente de XGO. Responde ÚNICAMENTE en 1 o máximo 2 oraciones breves y concisas en español. Entrega únicamente la respuesta directa a lo que el usuario preguntó (ej. si pregunta por oficinas o ubicación, indica solo la dirección y ciudad sin listas de trámites ni viñetas adicionales).";
-    const userPrompt = `Contexto de la empresa:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta directa:`;
+      "Eres el asesor de atención al cliente de la empresa. Responde de forma cordial, concisa y PUNTUAL (máximo 2 a 3 oraciones), basándote ÚNICAMENTE en el contexto documental proporcionado.\n" +
+      "- Responde EXACTAMENTE a lo que el usuario pregunta, sin omitir datos específicos pedidos (por ejemplo, lista de sectores, precios o requisitos si fueron preguntados).\n" +
+      "- NO agregues información no solicitada (no agregues correos, teléfonos, horarios de soporte ni detalles de planes a menos que el usuario los haya preguntado).\n" +
+      "- NUNCA digas que eres una IA o asistente virtual ni que careces de catálogo o información.";
+    const userPrompt = `Contexto documental:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta puntual y directa:`;
 
     // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -393,86 +376,12 @@ export class RagService {
   }
 }
 
-function extractSmartFallback(question: string, snippet: string): string {
-  const q = question.toLowerCase();
+function extractSmartFallback(_question: string, snippet: string): string {
   const rawLines = snippet
     .replace(/^#{1,3}\s+.+\n?/gm, "")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const lines = rawLines.filter(
-    (l) =>
-      !l.toLowerCase().startsWith("en las oficinas") &&
-      !l.toLowerCase().startsWith("los problemas") &&
-      !l.toLowerCase().startsWith("preguntas frecuentes")
-  );
-
-  // 1. Pregunta sobre planes / paquetes / precios
-  if (
-    q.includes("plan") ||
-    q.includes("planes") ||
-    q.includes("paquete") ||
-    q.includes("paquetes") ||
-    q.includes("precio") ||
-    q.includes("precios") ||
-    q.includes("velocidad") ||
-    q.includes("cuanto") ||
-    q.includes("cuánto")
-  ) {
-    if (
-      snippet.includes("Comparación rápida de planes") ||
-      snippet.includes("Plan | Velocidad") ||
-      snippet.includes("XGO Hogar") ||
-      snippet.includes("Mbps")
-    ) {
-      return snippet;
-    }
-  }
-
-  // 2. Pregunta sobre horario de atención
-  if (q.includes("horario") || q.includes("hora") || q.includes("atencion") || q.includes("atención")) {
-    const horarioLines = lines.filter(
-      (l) =>
-        l.toLowerCase().includes("horario") ||
-        l.toLowerCase().includes("lunes") ||
-        l.toLowerCase().includes("sábado") ||
-        l.toLowerCase().includes("domingo") ||
-        l.toLowerCase().includes("atención") ||
-        l.toLowerCase().includes("soporte")
-    );
-    if (horarioLines.length > 0) {
-      return horarioLines.join("\n");
-    }
-  }
-
-  // 2. Pregunta sobre ubicación / oficinas / dirección
-  if (
-    q.includes("oficina") ||
-    q.includes("ubicacion") ||
-    q.includes("ubicación") ||
-    q.includes("donde") ||
-    q.includes("dónde") ||
-    q.includes("direccion") ||
-    q.includes("dirección")
-  ) {
-    const direccionLines = lines.filter(
-      (l) =>
-        l.toLowerCase().includes("dirección") ||
-        l.toLowerCase().includes("oficina") ||
-        l.toLowerCase().includes("edificio") ||
-        l.toLowerCase().includes("av.") ||
-        l.toLowerCase().includes("calle")
-    );
-    if (direccionLines.length > 0) {
-      return direccionLines.join("\n");
-    }
-  }
-
-  let textOnly = lines.join("\n");
-  const cutIdx = textOnly.indexOf("En las oficinas se puede:");
-  if (cutIdx > 0) {
-    textOnly = textOnly.slice(0, cutIdx).trim();
-  }
-  return textOnly || snippet;
+  return rawLines.join("\n").trim() || snippet;
 }
