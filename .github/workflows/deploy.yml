@@ -3,12 +3,45 @@ name: CI/CD Pipeline
 on:
   push:
     branches:
+      - develop
       - test
       - main
 
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: isp
+          POSTGRES_PASSWORD: isp
+          POSTGRES_DB: isp_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      APP_PUBLIC_URL: http://localhost:3000
+      DATABASE_URL: postgres://isp:isp@localhost:5432/isp_platform
+      REDIS_URL: redis://localhost:6379
+      API_INTERNAL_KEY: test_internal_key
 
     steps:
       - name: Checkout repository
@@ -28,8 +61,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Copy .env.example to .env for test environment
-        run: cp .env.example .env
+      - name: Run migrations
+        run: pnpm run migrate
 
       - name: Run tests
         run: pnpm run test
