@@ -11,6 +11,9 @@ export interface RagServiceDeps {
   embeddingProvider: EmbeddingProviderPort;
   chatModelUrl?: string;
   chatModel?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
+  aiTimeoutMs?: number;
   logger?: Logger;
 }
 
@@ -20,14 +23,20 @@ export class RagService {
   private readonly embeddingProvider: EmbeddingProviderPort;
   private readonly chatModelUrl: string;
   private readonly chatModel: string;
+  private readonly geminiApiKey?: string;
+  private readonly geminiModel?: string;
+  private readonly aiTimeoutMs: number;
   private readonly logger?: Logger;
 
   constructor(deps: RagServiceDeps) {
     this.docRepo = deps.documentRepository;
     this.vectorStore = deps.vectorStore;
     this.embeddingProvider = deps.embeddingProvider;
-    this.chatModelUrl = deps.chatModelUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    this.chatModel = deps.chatModel || process.env.OLLAMA_MODEL || "qwen3.5:9b";
+    this.chatModelUrl = deps.chatModelUrl || "http://localhost:11434";
+    this.chatModel = deps.chatModel || "qwen3.5:4b";
+    this.geminiApiKey = deps.geminiApiKey;
+    this.geminiModel = deps.geminiModel || "gemini-2.5-flash-lite";
+    this.aiTimeoutMs = deps.aiTimeoutMs || 45000;
     this.logger = deps.logger?.child({ service: "RagService" });
   }
 
@@ -252,11 +261,10 @@ export class RagService {
     const userPrompt = `Contexto documental:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta puntual y directa:`;
 
     // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (geminiKey) {
+    if (this.geminiApiKey) {
       try {
-        const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+        const model = this.geminiModel || "gemini-2.5-flash-lite";
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -274,8 +282,8 @@ export class RagService {
       }
     }
 
-    // 2. Ollama local con /api/chat + timeout configurable desde .env (AI_CALL_TIMEOUT_MS, por defecto 35s)
-    const timeoutMs = Number(process.env.AI_CALL_TIMEOUT_MS) || 35_000;
+    // 2. Ollama local con /api/chat + timeout configurable
+    const timeoutMs = this.aiTimeoutMs;
     try {
       const controller = new AbortController();
       const ollamaTimeout = setTimeout(() => controller.abort(), timeoutMs);

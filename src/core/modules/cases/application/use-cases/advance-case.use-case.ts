@@ -103,44 +103,26 @@ export class AdvanceCaseUseCase {
 
       const missing = missingRequiredFields(waitingStep, entities);
       if (missing.length > 0) {
-        // Si se espera una cédula y el texto no contiene dígitos compatibles (ej. texto conversacional, saludos, asentimientos):
-        // NO quemar intentos ni escalar, simplemente mantener el estado de espera del número.
-        const isWaitingForIdWithoutDigits =
-          missing.includes("nationalId") &&
-          !(input.text && /\b\d{8,13}\b/.test(input.text));
+        const nextContext = bumpWaitingAttempts(context, missing);
+        const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
+        const max = maxAttemptsOf(waitingStep);
+        log.info(
+          { currentState, missing, attempts, max },
+          "WaitingStep: datos incompletos",
+        );
 
-        if (isWaitingForIdWithoutDigits) {
-          log.info(
-            { currentState, text: input.text },
-            "WaitingStep: texto conversacional sin formato de cédula, esperando número sin quemar intentos",
-          );
+        if (attempts >= max) {
+          outcome = {
+            type: "ESCALATED",
+            reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
+            context: nextContext,
+          };
+        } else {
           outcome = {
             type: "WAITING_USER",
             nextState: currentState,
-            context,
+            context: nextContext,
           };
-        } else {
-          const nextContext = bumpWaitingAttempts(context, missing);
-          const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
-          const max = maxAttemptsOf(waitingStep);
-          log.info(
-            { currentState, missing, attempts, max },
-            "WaitingStep: datos incompletos",
-          );
-
-          if (attempts >= max) {
-            outcome = {
-              type: "ESCALATED",
-              reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
-              context: nextContext,
-            };
-          } else {
-            outcome = {
-              type: "WAITING_USER",
-              nextState: currentState,
-              context: nextContext,
-            };
-          }
         }
       } else {
         context = clearWaitingMeta(context);
