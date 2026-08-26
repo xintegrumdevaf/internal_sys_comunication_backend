@@ -20,8 +20,10 @@ const DEV_PASSWORD = "ChangeMe123!";
  * NOTA: No se insertan conversaciones ni datos de prueba.
  */
 async function run(): Promise<void> {
-  console.error("[seed] BLOQUEADO: Los seeders están deshabilitados intencionalmente para no contaminar la base de datos real.");
-  process.exit(1);
+  if (process.env.ALLOW_SEED !== "true") {
+    console.error("[seed] BLOQUEADO: Los seeders están deshabilitados intencionalmente para no contaminar la base de datos real.");
+    process.exit(1);
+  }
   const pool = new Pool({ connectionString: env.DATABASE_URL });
   const departmentRepo = new DepartmentRepositoryPg(pool);
   const agentRepo = new AgentRepositoryPg(pool);
