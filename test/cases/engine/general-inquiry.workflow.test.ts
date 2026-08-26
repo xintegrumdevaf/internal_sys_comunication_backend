@@ -6,7 +6,7 @@ import type { RagService } from "../../../src/core/modules/ai/application/servic
 describe("GENERAL_INQUIRY workflow", () => {
   it("cuando la base de conocimiento responde con exito, avanza a RESPOND_ANSWER con la respuesta", async () => {
     const fakeRagService = {
-      query: async (question: string) => ({
+      query: async (_question: string) => ({
         answer: "XGO cuenta con cobertura en Conocoto, Quito.",
         found: true,
         confidenceScore: 0.95,
@@ -23,6 +23,9 @@ describe("GENERAL_INQUIRY workflow", () => {
     };
 
     const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler QUERY_KNOWLEDGE_BASE is undefined");
+
     const outcome = await handler({
       caseId: "case-1",
       conversationId: "conv-1",
@@ -63,6 +66,9 @@ describe("GENERAL_INQUIRY workflow", () => {
     };
 
     const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler QUERY_KNOWLEDGE_BASE is undefined");
+
     const outcome = await handler({
       caseId: "case-1",
       conversationId: "conv-1",
@@ -97,6 +103,9 @@ describe("GENERAL_INQUIRY workflow", () => {
     };
 
     const handler = workflow.states.RESPOND_ANSWER;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler RESPOND_ANSWER is undefined");
+
     const outcome = await handler({
       caseId: "case-1",
       conversationId: "conv-1",
@@ -107,5 +116,35 @@ describe("GENERAL_INQUIRY workflow", () => {
     });
 
     expect(outcome.type).toBe("COMPLETED");
+  });
+
+  it("responde con 'Buenos días' si el cliente dice 'Buenos dias'", async () => {
+    const fakeRagService = {} as unknown as RagService;
+    const workflow = createGeneralInquiryWorkflow(fakeRagService);
+
+    const context: CaseContext = {
+      workflowType: "GENERAL_INQUIRY",
+      data: { question: "Buenos dias" },
+    };
+
+    const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler QUERY_KNOWLEDGE_BASE is undefined");
+
+    const outcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "QUERY_KNOWLEDGE_BASE",
+      context,
+      text: "Buenos dias",
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+
+    expect(outcome.type).toBe("COMPLETED");
+    if (outcome.type === "COMPLETED" && outcome.context.workflowType === "GENERAL_INQUIRY") {
+      expect(outcome.context.data.answer).toContain("Buenos días");
+      expect(outcome.context.data.answer).not.toContain("Buenas tardes");
+    }
   });
 });

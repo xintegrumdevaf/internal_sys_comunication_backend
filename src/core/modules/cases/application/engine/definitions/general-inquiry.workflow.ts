@@ -35,6 +35,36 @@ function withContext(data: GeneralInquiryContext, base?: CaseContext): CaseConte
   };
 }
 
+function getGreetingPhrase(rawText: string): string {
+  const text = rawText.toLowerCase();
+  if (/d[ií]as/.test(text)) {
+    return "¡Hola! Buenos días.";
+  }
+  if (/noches/.test(text)) {
+    return "¡Hola! Buenas noches.";
+  }
+  if (/tardes/.test(text)) {
+    return "¡Hola! Buenas tardes.";
+  }
+
+  try {
+    const hourStr = new Intl.DateTimeFormat("es-EC", {
+      timeZone: "America/Guayaquil",
+      hour: "numeric",
+      hour12: false,
+    }).format(new Date());
+    const hour = parseInt(hourStr, 10);
+    if (hour < 12) return "¡Hola! Buenos días.";
+    if (hour < 19) return "¡Hola! Buenas tardes.";
+    return "¡Hola! Buenas noches.";
+  } catch {
+    const hour = new Date().getHours();
+    if (hour < 12) return "¡Hola! Buenos días.";
+    if (hour < 19) return "¡Hola! Buenas tardes.";
+    return "¡Hola! Buenas noches.";
+  }
+}
+
 export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDefinition {
   const queryKnowledgeBase: WorkflowStateHandler = async ({ context, entities, text }) => {
     let data = requireContext(context);
@@ -54,9 +84,10 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     const isGreeting = isRawGreetingOnly || /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(question.trim());
 
     if (isGreeting) {
+      const greetingPhrase = getGreetingPhrase(rawText || question);
       const nextData: GeneralInquiryContext = {
         ...data,
-        answer: "¡Hola! Buenas tardes. ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.",
+        answer: `${greetingPhrase} ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.`,
         found: true,
       };
       return {

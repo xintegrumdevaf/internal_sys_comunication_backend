@@ -1,6 +1,6 @@
 import { PDFParse } from "pdf-parse";
 import type { RagChunk, RagDocument, RagFaq, RagQueryResult, RagStats } from "../../domain/rag.entity";
-import type { CreateRagDocumentInput, CreateRagFaqInput, RagDocumentRepositoryPort, UpdateRagFaqInput } from "../ports/rag-document.repository.port";
+import type { CreateRagFaqInput, RagDocumentRepositoryPort, UpdateRagFaqInput } from "../ports/rag-document.repository.port";
 import type { VectorStorePort } from "../ports/vector-store.port";
 import type { EmbeddingProviderPort } from "../ports/embedding-provider.port";
 import type { Logger } from "../../../../../shared/logging/logger";
@@ -78,7 +78,7 @@ export class RagService {
     return buffer.toString("utf-8");
   }
 
-  chunkDocument(rawText: string, filename = "document"): Array<{ text: string; section?: string }> {
+  chunkDocument(rawText: string, _filename = "document"): Array<{ text: string; section?: string }> {
     const cleaned = rawText
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")

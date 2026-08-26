@@ -17,7 +17,7 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   const router = Router();
 
   // GET /api/rag/documents - Listar todos los documentos de RAG
-  router.get("/api/rag/documents", async (req, res, next) => {
+  router.get("/api/rag/documents", async (_req, res, next) => {
     try {
       const documents = await ragService.listDocuments();
       res.json({ data: documents });
@@ -48,7 +48,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
           uploadedBy,
           sourceUrl,
         });
-        return res.status(201).json({ data: doc });
+        res.status(201).json({ data: doc });
+        return;
       }
 
       // Si no viene archivo binario, crear entrada directa
@@ -63,6 +64,7 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
       });
 
       res.status(201).json({ data: doc });
+      return;
     } catch (error) {
       logger?.error({ err: error }, "Error procesando POST /api/rag/documents");
       next(error);
@@ -81,7 +83,7 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   });
 
   // GET /api/rag/stats - Estadísticas de RAG
-  router.get("/api/rag/stats", async (req, res, next) => {
+  router.get("/api/rag/stats", async (_req, res, next) => {
     try {
       const stats = await ragService.getStats();
       res.json(stats);
@@ -91,7 +93,7 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   });
 
   // GET /api/rag/faqs - Listar FAQs
-  router.get("/api/rag/faqs", async (req, res, next) => {
+  router.get("/api/rag/faqs", async (_req, res, next) => {
     try {
       const faqs = await ragService.listFaqs();
       res.json({ data: faqs });
@@ -119,7 +121,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
       const { category, question, answer, tags, variations, priority, active } = req.body;
       const updated = await ragService.updateFaq(id, { category, question, answer, tags, variations, priority, active });
       if (!updated) {
-        return res.status(404).json({ error: "FAQ no encontrada" });
+        res.status(404).json({ error: "FAQ no encontrada" });
+        return;
       }
       res.json({ data: updated });
     } catch (error) {
@@ -144,7 +147,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
       const { question } = req.body;
       const q = (question || "").trim();
       if (!q) {
-        return res.status(400).json({ error: "La pregunta no puede estar vacía" });
+        res.status(400).json({ error: "La pregunta no puede estar vacía" });
+        return;
       }
 
       const result = await ragService.query(q, 4);
