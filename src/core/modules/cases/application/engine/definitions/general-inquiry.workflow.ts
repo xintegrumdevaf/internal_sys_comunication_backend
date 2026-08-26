@@ -39,20 +39,19 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
   const queryKnowledgeBase: WorkflowStateHandler = async ({ context, entities, text }) => {
     let data = requireContext(context);
 
-    // La pregunta puede venir de entities.question, el texto directo, o el campo almacenado
-    const question =
-      typeof entities?.question === "string" && entities.question.trim() !== ""
-        ? entities.question.trim()
-        : typeof entities?.location === "string"
-          ? `¿Tienen cobertura en ${entities.location}?`
-          : text || data.question || "";
+    // Preferir el texto raw completo si contiene una pregunta acompañada de saludo (ej: "Buenos días en qué horario atienden")
+    const rawText = (typeof text === "string" ? text : "").trim();
+    const isRawGreetingOnly = /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(rawText);
 
-    // Si el mensaje es un saludo aislado (ej: "Buenas tardes", "Hola", "Buenos días", "Buenas noches"):
-    // responder con una bienvenida atenta sin consultar RAG con preguntas de chats pasados.
-    const isGreeting =
-      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(
-        question.trim()
-      );
+    let question = rawText;
+    if (!isRawGreetingOnly && typeof entities?.question === "string" && entities.question.trim().length > 10) {
+      question = entities.question.trim();
+    } else if (!question) {
+      question = typeof entities?.location === "string" ? `¿Tienen cobertura en ${entities.location}?` : data.question || "";
+    }
+
+    // Si el mensaje es un saludo aislado real (ej: "Buenas tardes", "Hola", "Buenos días"):
+    const isGreeting = isRawGreetingOnly || /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(question.trim());
 
     if (isGreeting) {
       const nextData: GeneralInquiryContext = {
@@ -95,7 +94,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
 
     const result = await ragService.query(question, 4);
 
-    if (!result.found || result.confidenceScore < 0.25) {
+    if (!result.found || result.confidenceScore < 0.15) {
       const nextData: GeneralInquiryContext = {
         ...data,
         found: false,

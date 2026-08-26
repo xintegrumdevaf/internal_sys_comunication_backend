@@ -39,7 +39,7 @@ export class PgVectorStoreAdapter implements VectorStorePort {
     if (input.keywords.length > 0) {
       const conditions = input.keywords.map((k) => {
         params.push(`%${k}%`);
-        return `CASE WHEN text ILIKE $${params.length} THEN 0.25 ELSE 0.0 END`;
+        return `CASE WHEN text ILIKE $${params.length} THEN 0.15 ELSE 0.0 END`;
       });
       keywordSql = conditions.join(" + ");
     }

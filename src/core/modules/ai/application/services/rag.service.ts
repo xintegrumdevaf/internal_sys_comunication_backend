@@ -181,16 +181,81 @@ export class RagService {
     const stopWords = new Set([
       "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
       "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
-      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una"
+      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
     ]);
-    const keywords = question
+    const rawWords = question
       .toLowerCase()
       .replace(/[¿?¡!,.]/g, "")
       .split(/\s+/)
       .map((w) => w.trim())
       .filter((w) => w.length >= 2 && !stopWords.has(w));
 
-    return this.vectorStore.searchHybrid({ embedding, keywords, limit });
+    const keywordsSet = new Set<string>();
+    for (const w of rawWords) {
+      keywordsSet.add(w);
+      if (w.endsWith("es") && w.length > 4) keywordsSet.add(w.slice(0, -2));
+      else if (w.endsWith("s") && w.length > 3) keywordsSet.add(w.slice(0, -1));
+    }
+    const keywords = Array.from(keywordsSet);
+
+    const candidateLimit = Math.max(limit, 10);
+    const results = await this.vectorStore.searchHybrid({ embedding, keywords, limit: candidateLimit });
+
+    // 1. Si la consulta es sobre planes/paquetes/precios y se recuperó la tabla comparativa de planes, priorizarla en #1
+    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto/i.test(question);
+    if (isPlanQuery && results.length > 1) {
+      const planTableIdx = results.findIndex((c) =>
+        c.contentSnippet.includes("Comparación rápida de planes") ||
+        c.contentSnippet.includes("Plan | Velocidad") ||
+        c.contentSnippet.includes("XGO Hogar")
+      );
+      if (planTableIdx > 0) {
+        const [planChunk] = results.splice(planTableIdx, 1);
+        results.unshift(planChunk!);
+      }
+    }
+
+    // 2. Si la consulta es sobre horarios de atención y se recuperó el chunk de horarios, priorizarlo en #1
+    const isScheduleQuery = /horario|horarios|atención|atencion|abren|cierran|hora|atender/i.test(question);
+    if (isScheduleQuery && results.length > 1) {
+      const scheduleIdx = results.findIndex((c) =>
+        c.contentSnippet.includes("### Horarios") ||
+        c.contentSnippet.includes("Atención al cliente:")
+      );
+      if (scheduleIdx > 0) {
+        const [schChunk] = results.splice(scheduleIdx, 1);
+        results.unshift(schChunk!);
+      }
+    }
+
+    // 3. Si la consulta pide específicamente la oficina de Quito
+    const isQuitoOffice = /quito/i.test(question) && /oficina|oficinas|ubicacion|ubicación|direccion|dirección|queda|quedan|donde|dónde|sucursal/i.test(question);
+    if (isQuitoOffice && results.length > 1) {
+      const quitoIdx = results.findIndex((c) =>
+        c.contentSnippet.includes("Oficina Quito") ||
+        c.contentSnippet.includes("República del Salvador")
+      );
+      if (quitoIdx > 0) {
+        const [qChunk] = results.splice(quitoIdx, 1);
+        results.unshift(qChunk!);
+      }
+    }
+
+    // 4. Si la consulta pide específicamente la oficina de Cuenca
+    const isCuencaOffice = /cuenca/i.test(question) && /oficina|oficinas|ubicacion|ubicación|direccion|dirección|queda|quedan|donde|dónde|sucursal/i.test(question);
+    if (isCuencaOffice && results.length > 1) {
+      const cuencaIdx = results.findIndex((c) =>
+        c.contentSnippet.includes("Oficina Cuenca") ||
+        c.contentSnippet.includes("Remigio Crespo")
+      );
+      if (cuencaIdx > 0) {
+        const [cChunk] = results.splice(cuencaIdx, 1);
+        results.unshift(cChunk!);
+      }
+    }
+
+    return results.slice(0, limit);
   }
 
   async synthesizeAnswer(question: string, chunks: RagChunk[]): Promise<string> {
@@ -261,7 +326,7 @@ export class RagService {
       this.logger?.warn({ err }, "Error o timeout sintetizando respuesta con Ollama");
     }
 
-    // 3. Fallback inteligente: extraer específicamente el dato relevante según la intención de la pregunta (dirección u horario)
+    // 3. Fallback inteligente: extraer específicamente el dato relevante según la intención de la pregunta
     return extractSmartFallback(question, chunks[0]?.contentSnippet || "");
   }
 
@@ -270,8 +335,8 @@ export class RagService {
     const chunks = await this.searchHybrid(question, limit);
     const topScore = chunks.length > 0 && chunks[0] ? chunks[0].similarityScore : 0;
 
-    // Si encontramos chunks en el vector store con score suficiente
-    if (chunks.length > 0 && topScore >= 0.25) {
+    // Si encontramos chunks en el vector store con score suficiente (threshold 0.15)
+    if (chunks.length > 0 && topScore >= 0.15) {
       const answer = await this.synthesizeAnswer(question, chunks);
       const sources = Array.from(new Set(chunks.map((c) => c.sourceName)));
 
@@ -286,12 +351,18 @@ export class RagService {
     }
 
     // Fallback: Buscar en FAQs estructuradas
+    const stopWords = new Set([
+      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
+      "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
+      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
+    ]);
     const faqs = await this.docRepo.findActiveFaqs();
-    const words = question.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-    const matchedFaq = faqs.find((f) => {
-      const textToSearch = `${f.question} ${f.answer} ${(f.tags || []).join(" ")} ${(f.variations || []).join(" ")}`.toLowerCase();
+    const words = question.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !stopWords.has(w));
+    const matchedFaq = words.length > 0 ? faqs.find((f) => {
+      const textToSearch = `${f.question} ${(f.tags || []).join(" ")} ${(f.variations || []).join(" ")}`.toLowerCase();
       return words.some((w) => textToSearch.includes(w));
-    });
+    }) : undefined;
 
     if (matchedFaq) {
       return {
@@ -337,7 +408,29 @@ function extractSmartFallback(question: string, snippet: string): string {
       !l.toLowerCase().startsWith("preguntas frecuentes")
   );
 
-  // 1. Pregunta sobre horario de atención
+  // 1. Pregunta sobre planes / paquetes / precios
+  if (
+    q.includes("plan") ||
+    q.includes("planes") ||
+    q.includes("paquete") ||
+    q.includes("paquetes") ||
+    q.includes("precio") ||
+    q.includes("precios") ||
+    q.includes("velocidad") ||
+    q.includes("cuanto") ||
+    q.includes("cuánto")
+  ) {
+    if (
+      snippet.includes("Comparación rápida de planes") ||
+      snippet.includes("Plan | Velocidad") ||
+      snippet.includes("XGO Hogar") ||
+      snippet.includes("Mbps")
+    ) {
+      return snippet;
+    }
+  }
+
+  // 2. Pregunta sobre horario de atención
   if (q.includes("horario") || q.includes("hora") || q.includes("atencion") || q.includes("atención")) {
     const horarioLines = lines.filter(
       (l) =>

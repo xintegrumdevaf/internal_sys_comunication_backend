@@ -50,7 +50,8 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
 
 ## Uso del "historial reciente" para mantener el hilo de la conversación:
 - Usa el "historial reciente" para entender el contexto de un caso activo (ej: si el cliente envía una frase corta o un sector como "Vivo en Yanuncay", "Estoy en Conocoto", "¿Y en Quito?").
-- ATENCIÓN: Si NO hay un caso activo ("caso activo": null) y el cliente envía un saludo (ej: "Buenas tardes", "Hola", "Buenos días", "Buenas noches"), NUNCA arrastres ni copies entidades, planes ni preguntas ("question") de casos pasados que ya finalizaron. Trátalo como un saludo nuevo con intent general.inquiry y entidades vacías {}.
+- ATENCIÓN: Si NO hay un caso activo ("caso activo": null) y el cliente envía un saludo aislado (ej: "Buenas tardes", "Hola", "Buenos días", "Buenas noches"), trátalo como un saludo nuevo con intent general.inquiry y entidades vacías {}.
+- ATENCIÓN COMPUESTA: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenos días en qué horario atienden", "Hola quiero información de los planes", "Buenas tardes me ayudan con mi saldo"), NUNCA lo clasifiques como saludo genérico ni descartes la pregunta. Asigna el intent de la pregunta e incluye en \`entities.question\` el texto completo de la consulta (ej. "En qué horario atienden").
 
 ## "entities"
 - Extrae claves que el cliente mencionó explícitamente (ej: \`question\`, \`location\`, \`sector\`, \`nationalId\`, \`plan\`, \`speed\`).
