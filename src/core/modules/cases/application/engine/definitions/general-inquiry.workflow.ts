@@ -74,7 +74,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     const isRawGreetingOnly = /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(rawText);
 
     let question = rawText;
-    if (!isRawGreetingOnly && typeof entities?.question === "string" && entities.question.trim().length > 10) {
+    if (!isRawGreetingOnly && typeof entities?.question === "string" && entities.question.trim().length > 3) {
       question = entities.question.trim();
     } else if (!question) {
       question = typeof entities?.location === "string" ? `¿Tienen cobertura en ${entities.location}?` : data.question || "";
@@ -208,7 +208,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
       WAITING_USER_SPECIALIST:
         "{{answer}}\n\n¿Te gustaría que un especialista de ventas te contacte para ayudarte con el proceso de contratación o cambio de plan?",
       ESCALATED:
-        "Estoy transfiriendo tu consulta a uno de nuestros asesores para brindarte la información exacta. En breve te atenderán por este chat.",
+        "Con mucho gusto, ya te comunico con un asesor de nuestro equipo para brindarte la información exacta. En breve te escriben por este chat.",
       ACTIVE: "Consultando en la base de conocimiento...",
     },
     states: {

@@ -90,28 +90,57 @@ export class AdvanceCaseUseCase {
         }
       }
 
+      // Si el paso pide "nationalId" y no vino en entities, extraerlo del texto si contiene formato numérico
+      const needsNationalId =
+        waitingStep.requireAll?.includes("nationalId") ||
+        waitingStep.requireAny?.includes("nationalId");
+      if (needsNationalId && input.text && !entities.nationalId) {
+        const idMatch = input.text.match(/\b\d{8,13}\b/);
+        if (idMatch) {
+          entities = { ...entities, nationalId: idMatch[0] };
+        }
+      }
+
       const missing = missingRequiredFields(waitingStep, entities);
       if (missing.length > 0) {
-        const nextContext = bumpWaitingAttempts(context, missing);
-        const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
-        const max = maxAttemptsOf(waitingStep);
-        log.info(
-          { currentState, missing, attempts, max },
-          "WaitingStep: datos incompletos",
-        );
+        // Si se espera una cédula y el texto no contiene dígitos compatibles (ej. texto conversacional, saludos, asentimientos):
+        // NO quemar intentos ni escalar, simplemente mantener el estado de espera del número.
+        const isWaitingForIdWithoutDigits =
+          missing.includes("nationalId") &&
+          !(input.text && /\b\d{8,13}\b/.test(input.text));
 
-        if (attempts >= max) {
-          outcome = {
-            type: "ESCALATED",
-            reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
-            context: nextContext,
-          };
-        } else {
+        if (isWaitingForIdWithoutDigits) {
+          log.info(
+            { currentState, text: input.text },
+            "WaitingStep: texto conversacional sin formato de cédula, esperando número sin quemar intentos",
+          );
           outcome = {
             type: "WAITING_USER",
             nextState: currentState,
-            context: nextContext,
+            context,
           };
+        } else {
+          const nextContext = bumpWaitingAttempts(context, missing);
+          const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
+          const max = maxAttemptsOf(waitingStep);
+          log.info(
+            { currentState, missing, attempts, max },
+            "WaitingStep: datos incompletos",
+          );
+
+          if (attempts >= max) {
+            outcome = {
+              type: "ESCALATED",
+              reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
+              context: nextContext,
+            };
+          } else {
+            outcome = {
+              type: "WAITING_USER",
+              nextState: currentState,
+              context: nextContext,
+            };
+          }
         }
       } else {
         context = clearWaitingMeta(context);

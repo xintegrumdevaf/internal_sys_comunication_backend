@@ -466,30 +466,30 @@ export const supportInternetWorkflow: WorkflowDefinition = {
   expirationHours: 24,
   waitingSteps: {
     WAITING_USER_CLIENT: {
-      pendingQuestion: "Para ayudarte con tu servicio de internet, ¿me confirmas tu número de cédula?",
+      pendingQuestion: "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
-      maxAttempts: 2,
+      maxAttempts: 5,
     },
     WAITING_USER_DISAMBIGUATE: {
       pendingQuestion:
         "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
       requireAny: ["address", "fullName"],
-      maxAttempts: 2,
+      maxAttempts: 4,
     },
     WAITING_USER_DIAGNOSTIC: {
       pendingQuestion: "{{question}}",
       requireAll: ["answer"],
-      maxAttempts: 2,
+      maxAttempts: 4,
     },
     WAITING_USER_PAYMENT: {
       pendingQuestion: "Detectamos un saldo pendiente en tu cuenta. Por favor envíanos el comprobante de pago para validar.",
       requireAny: ["receipt", "answer", "action"],
-      maxAttempts: 5,
+      maxAttempts: 6,
     },
   },
   replyTemplates: {
     WAITING_USER_CLIENT:
-      "Para ayudarte con tu servicio de internet, ¿me confirmas tu número de cédula?",
+      "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
     WAITING_USER_DISAMBIGUATE:
       "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
     WAITING_USER_DIAGNOSTIC: "{{question}}",

@@ -33,7 +33,7 @@ export class PgVectorStoreAdapter implements VectorStorePort {
 
   async searchHybrid(input: HybridSearchInput): Promise<RagChunk[]> {
     const vectorStr = `[${input.embedding.join(",")}]`;
-    const params: any[] = [vectorStr];
+    const params: string[] = [vectorStr];
 
     let keywordSql = "0.0";
     if (input.keywords.length > 0) {
@@ -60,13 +60,18 @@ export class PgVectorStoreAdapter implements VectorStorePort {
 
     const { rows } = await this.pool.query(query, params);
 
-    return rows.map((row) => ({
-      id: row.id,
-      sourceName: (row.metadata as any)?.filename || (row.metadata as any)?.source || "Base de Conocimiento",
-      contentSnippet: row.text,
-      similarityScore: Math.min(1, Math.max(0, Number(row.total_score || row.vec_score || 0.5))),
-      section: (row.metadata as any)?.section,
-    }));
+    return rows.map((row) => {
+      const meta = typeof row.metadata === "object" && row.metadata !== null ? (row.metadata as Record<string, unknown>) : {};
+      const sourceName = typeof meta.filename === "string" ? meta.filename : typeof meta.source === "string" ? meta.source : "Base de Conocimiento";
+      const section = typeof meta.section === "string" ? meta.section : undefined;
+      return {
+        id: String(row.id),
+        sourceName,
+        contentSnippet: String(row.text || ""),
+        similarityScore: Math.min(1, Math.max(0, Number(row.total_score ?? row.vec_score ?? 0.5))),
+        section,
+      };
+    });
   }
 
   async countVectors(): Promise<number> {

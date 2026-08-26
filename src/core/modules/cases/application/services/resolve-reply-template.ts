@@ -76,15 +76,15 @@ export function resolveReplyTemplate(input: {
       templates.WAITING_USER_CLIENT ??
       CLARIFY_TEMPLATE;
     const friendlyMissingFields = missingFields?.map(f => {
-      if (f === "nationalId") return "tu número de cédula";
-      if (f === "address") return "tu dirección";
+      if (f === "nationalId") return "el número de cédula del titular del servicio";
+      if (f === "address") return "la dirección del servicio";
       if (f === "fullName") return "el nombre completo del titular";
       if (f === "answer") return "una respuesta clara";
       return f;
     });
 
     if (friendlyMissingFields && friendlyMissingFields.length > 0) {
-      templateHint = `Aún me falta ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
+      templateHint = `Aún necesitamos ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
     }
     return {
       templateHint,
