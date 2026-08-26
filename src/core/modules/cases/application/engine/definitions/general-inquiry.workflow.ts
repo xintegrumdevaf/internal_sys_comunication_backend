@@ -66,10 +66,10 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
       };
     }
 
-    // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias"):
+    // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias", "listo muchas gracias mas tarde le pago"):
     // responder amablemente y completar el caso sin consultar RAG ni escalar a un asesor.
     const isThankYou =
-      /^(muchas\s+)?gracias|agradecid[oa]|excelente|entendido|de\s+nada|ok\s+gracias|listo\s+gracias|gracias\s+por\s+la\s+informaci[oó]n/i.test(
+      /gracias|agradecid[oa]|excelente|entendido|de\s+nada|mas\s+tarde\s+(le\s+)?pago|luego\s+pago|despu[eé]s\s+pago|listo\s+muchas\s+gracias/i.test(
         question.trim()
       );
 
