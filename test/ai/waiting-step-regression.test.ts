@@ -141,7 +141,7 @@ describe("06_AI_PROMPTS.md §6 — regresion WaitingStep / entities", () => {
     expect(result.entities.answer).toBe("ya reinicie el router");
   });
 
-  it("motor §13: dos intentos fallidos de nationalId escalan", async () => {
+  it("motor §13: texto conversacional sin cedula mantiene WAITING_USER sin quemar intentos", async () => {
     const caseRepo = new CaseRepositoryFake();
     const conversationRepo = new ConversationRepositoryFake();
     const conversation = conversationRepo.createOpen();
@@ -172,7 +172,7 @@ describe("06_AI_PROMPTS.md §6 — regresion WaitingStep / entities", () => {
       expect(first.outcome.nextState).toBe("WAITING_USER_CLIENT");
     }
 
-    // Respuesta basura 1
+    // Texto conversacional 1 ("hola") → WAITING_USER sin incrementar intentos
     const second = await advance.execute({
       caseId: created.id,
       correlationId: "c2",
@@ -180,17 +180,17 @@ describe("06_AI_PROMPTS.md §6 — regresion WaitingStep / entities", () => {
       entities: {},
     });
     expect(second.outcome.type).toBe("WAITING_USER");
-    expect(second.case.context._engine?.waitingAttempts).toBe(1);
+    expect(second.case.context._engine?.waitingAttempts ?? 0).toBe(0);
 
-    // Respuesta basura 2 → escala
+    // Texto conversacional 2 ("???") → se mantiene WAITING_USER sin escalar
     const third = await advance.execute({
       caseId: created.id,
       correlationId: "c3",
       text: "???",
       entities: {},
     });
-    expect(third.outcome.type).toBe("ESCALATED");
-    expect(third.case.status).toBe("ESCALATED");
+    expect(third.outcome.type).toBe("WAITING_USER");
+    expect(third.case.context._engine?.waitingAttempts ?? 0).toBe(0);
   });
 
   it("motor §13: nationalId valido avanza VALIDATE_CLIENT", async () => {
