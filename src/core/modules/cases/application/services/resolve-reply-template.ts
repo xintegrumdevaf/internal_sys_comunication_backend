@@ -5,7 +5,7 @@ const CLARIFY_TEMPLATE =
   "¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un especialista?";
 
 const REQUEST_HUMAN_TEMPLATE =
-  "Te conectamos con un especialista humano. En breve te atenderán por este mismo chat.";
+  "¡Recibido, gracias! 🙌 Estamos revisando tu solicitud y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!";
 
 /**
  * Formatea montos para plantillas/compose (ej. 45.5 → "45.50").

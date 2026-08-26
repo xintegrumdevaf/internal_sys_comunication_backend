@@ -192,8 +192,21 @@ export class ProcessBufferedMessagesUseCase {
         });
         await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
 
+        const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
+        const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
+        const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
+
+        const rawAmount = receiptEntities.amount ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount ?? (inheritedContext.balance as { debt?: number } | undefined)?.debt;
+        const amountFormatted =
+          typeof rawAmount === "number" && Number.isFinite(rawAmount)
+            ? `$${rawAmount.toFixed(2).replace('.', ',')}`
+            : typeof rawAmount === "string" && rawAmount.trim() !== "" && Number.isFinite(Number(rawAmount))
+              ? `$${Number(rawAmount).toFixed(2).replace('.', ',')}`
+              : null;
+
+        const amountStr = amountFormatted ? `de ${amountFormatted} ` : "";
         const replyMessage =
-          "Recibimos tu comprobante de pago 📄. Lo hemos derivado al departamento de ventas para que validen la transacción y apliquen el pago a tu cuenta. Un especialista te confirmará en breve.";
+          `¡Recibido, gracias! 🙌 Estamos verificando tu pago ${amountStr}y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!`.replace("  ", " ");
 
         await this.deliverFixedReply({
           conversationId,

@@ -377,4 +377,56 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       expect(cases[0]!.context.data.client?.nationalId).toBe("1724482722");
     }
   });
+
+  it("responde de forma cálida y humana con el monto dinámico al recibir un comprobante de pago", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "NEW_INTENT", intent: "billing.record_payment", entities: { amount: 20.53 }, confidence: 0.95 },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const imageMsg = messageRepo.seedText(conversation.id, "Buenos días envío el comprobante de pago de $20,53");
+    imageMsg.type = "image";
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-receipt-1",
+      messages: [imageMsg],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toBe(
+      "¡Recibido, gracias! 🙌 Estamos verificando tu pago de $20,53 y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!"
+    );
+  });
 });
