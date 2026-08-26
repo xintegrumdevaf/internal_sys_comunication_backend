@@ -178,11 +178,17 @@ export class RagService {
   // --- Consulta y Búsqueda Híbrida ---
   async searchHybrid(question: string, limit = 4): Promise<RagChunk[]> {
     const embedding = await this.embeddingProvider.generateEmbedding(question);
+    const stopWords = new Set([
+      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
+      "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
+      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una"
+    ]);
     const keywords = question
       .toLowerCase()
       .replace(/[¿?¡!,.]/g, "")
       .split(/\s+/)
-      .filter((w) => w.length >= 4 && !["este", "esta", "como", "para", "donde", "cual", "cuales"].includes(w));
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
 
     return this.vectorStore.searchHybrid({ embedding, keywords, limit });
   }
@@ -193,8 +199,9 @@ export class RagService {
     }
 
     const context = chunks.map((c) => c.contentSnippet).join("\n---\n");
-    const systemPrompt = "Eres el asistente de atención al cliente de XGO. Responde únicamente en español de forma directa, amable y concisa (1 a 3 oraciones) entregando con exactitud los datos solicitados (direcciones, planes, cobertura, cuentas) según el contexto.";
-    const userPrompt = `Contexto de la empresa:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta:`;
+    const systemPrompt =
+      "Eres el asistente oficial de atención al cliente de XGO. Responde ÚNICAMENTE en 1 o máximo 2 oraciones breves y concisas en español. Entrega únicamente la respuesta directa a lo que el usuario preguntó (ej. si pregunta por oficinas o ubicación, indica solo la dirección y ciudad sin listas de trámites ni viñetas adicionales).";
+    const userPrompt = `Contexto de la empresa:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta directa:`;
 
     // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -206,7 +213,7 @@ export class RagService {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
+            generationConfig: { temperature: 0.1, maxOutputTokens: 150 },
           }),
         });
         if (res.ok) {
@@ -219,10 +226,11 @@ export class RagService {
       }
     }
 
-    // 2. Ollama local con /api/chat + timeout de 25s
+    // 2. Ollama local con /api/chat + timeout configurable desde .env (AI_CALL_TIMEOUT_MS, por defecto 35s)
+    const timeoutMs = Number(process.env.AI_CALL_TIMEOUT_MS) || 35_000;
     try {
       const controller = new AbortController();
-      const ollamaTimeout = setTimeout(() => controller.abort(), 25_000);
+      const ollamaTimeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(`${this.chatModelUrl}/api/chat`, {
           method: "POST",
@@ -235,7 +243,7 @@ export class RagService {
               { role: "user", content: userPrompt },
             ],
             stream: false,
-            options: { temperature: 0.1, num_predict: 250 },
+            options: { temperature: 0.1, num_predict: 120 },
           }),
         });
 
@@ -253,10 +261,8 @@ export class RagService {
       this.logger?.warn({ err }, "Error o timeout sintetizando respuesta con Ollama");
     }
 
-    // 3. Fallback: entregar el contenido del mejor chunk limpiamente formateado
-    const best = chunks[0]?.contentSnippet || "";
-    // Eliminar encabezados markdown y entregar el texto directamente
-    return best.replace(/^#{1,3}\s+.+\n?/m, "").trim() || best;
+    // 3. Fallback inteligente: extraer específicamente el dato relevante según la intención de la pregunta (dirección u horario)
+    return extractSmartFallback(question, chunks[0]?.contentSnippet || "");
   }
 
   async query(question: string, limit = 4): Promise<RagQueryResult> {
@@ -265,7 +271,7 @@ export class RagService {
     const topScore = chunks.length > 0 && chunks[0] ? chunks[0].similarityScore : 0;
 
     // Si encontramos chunks en el vector store con score suficiente
-    if (chunks.length > 0 && topScore >= 0.4) {
+    if (chunks.length > 0 && topScore >= 0.25) {
       const answer = await this.synthesizeAnswer(question, chunks);
       const sources = Array.from(new Set(chunks.map((c) => c.sourceName)));
 
@@ -314,4 +320,66 @@ export class RagService {
       executionTimeMs: Date.now() - startTime,
     };
   }
+}
+
+function extractSmartFallback(question: string, snippet: string): string {
+  const q = question.toLowerCase();
+  const rawLines = snippet
+    .replace(/^#{1,3}\s+.+\n?/gm, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const lines = rawLines.filter(
+    (l) =>
+      !l.toLowerCase().startsWith("en las oficinas") &&
+      !l.toLowerCase().startsWith("los problemas") &&
+      !l.toLowerCase().startsWith("preguntas frecuentes")
+  );
+
+  // 1. Pregunta sobre horario de atención
+  if (q.includes("horario") || q.includes("hora") || q.includes("atencion") || q.includes("atención")) {
+    const horarioLines = lines.filter(
+      (l) =>
+        l.toLowerCase().includes("horario") ||
+        l.toLowerCase().includes("lunes") ||
+        l.toLowerCase().includes("sábado") ||
+        l.toLowerCase().includes("domingo") ||
+        l.toLowerCase().includes("atención") ||
+        l.toLowerCase().includes("soporte")
+    );
+    if (horarioLines.length > 0) {
+      return horarioLines.join("\n");
+    }
+  }
+
+  // 2. Pregunta sobre ubicación / oficinas / dirección
+  if (
+    q.includes("oficina") ||
+    q.includes("ubicacion") ||
+    q.includes("ubicación") ||
+    q.includes("donde") ||
+    q.includes("dónde") ||
+    q.includes("direccion") ||
+    q.includes("dirección")
+  ) {
+    const direccionLines = lines.filter(
+      (l) =>
+        l.toLowerCase().includes("dirección") ||
+        l.toLowerCase().includes("oficina") ||
+        l.toLowerCase().includes("edificio") ||
+        l.toLowerCase().includes("av.") ||
+        l.toLowerCase().includes("calle")
+    );
+    if (direccionLines.length > 0) {
+      return direccionLines.join("\n");
+    }
+  }
+
+  let textOnly = lines.join("\n");
+  const cutIdx = textOnly.indexOf("En las oficinas se puede:");
+  if (cutIdx > 0) {
+    textOnly = textOnly.slice(0, cutIdx).trim();
+  }
+  return textOnly || snippet;
 }

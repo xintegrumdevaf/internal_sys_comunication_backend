@@ -47,6 +47,44 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
           ? `¿Tienen cobertura en ${entities.location}?`
           : text || data.question || "";
 
+    // Si el mensaje es un saludo aislado (ej: "Buenas tardes", "Hola", "Buenos días", "Buenas noches"):
+    // responder con una bienvenida atenta sin consultar RAG con preguntas de chats pasados.
+    const isGreeting =
+      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(
+        question.trim()
+      );
+
+    if (isGreeting) {
+      const nextData: GeneralInquiryContext = {
+        ...data,
+        answer: "¡Hola! Buenas tardes. ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.",
+        found: true,
+      };
+      return {
+        type: "COMPLETED",
+        context: withContext(nextData, context),
+      };
+    }
+
+    // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias"):
+    // responder amablemente y completar el caso sin consultar RAG ni escalar a un asesor.
+    const isThankYou =
+      /^(muchas\s+)?gracias|agradecid[oa]|excelente|entendido|de\s+nada|ok\s+gracias|listo\s+gracias|gracias\s+por\s+la\s+informaci[oó]n/i.test(
+        question.trim()
+      );
+
+    if (isThankYou) {
+      const nextData: GeneralInquiryContext = {
+        ...data,
+        answer: "¡Con mucho gusto! Es un placer ayudarte. Si necesitas cualquier otra información en el futuro, estamos a tu disposición. ¡Que tengas un excelente día!",
+        found: true,
+      };
+      return {
+        type: "COMPLETED",
+        context: withContext(nextData, context),
+      };
+    }
+
     // Detectar si el intent original era de upgrade (cliente quiere contratar/mejorar plan)
     const wantsUpgrade =
       data.wantsUpgrade ||
@@ -57,7 +95,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
 
     const result = await ragService.query(question, 4);
 
-    if (!result.found || result.confidenceScore < 0.5) {
+    if (!result.found || result.confidenceScore < 0.25) {
       const nextData: GeneralInquiryContext = {
         ...data,
         found: false,

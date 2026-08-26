@@ -3,7 +3,7 @@ version: "3.9"
 services:
   postgres:
     # pgvector/pgvector:pg16 = postgres:16 + extension "vector" ya compilada
-    # (necesaria para el vector store de RAG de n8n, docs/spec/04_N8N_WORKFLOW_SPEC.md §6.2).
+    # (necesaria para el vector store de RAG de n8n, 54==docs/spec/04_N8N_WORKFLOW_SPEC.md §6.2).
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
@@ -12,7 +12,7 @@ services:
       POSTGRES_DB: ${DB_NAME:-isp_platform}
       POSTGRES_MULTIPLE_DATABASES: ${DB_NAME:-isp_platform},${N8N_DB_NAME:-n8n}
     ports:
-      - "5432:5432"
+      - "5432:5433"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
@@ -58,7 +58,7 @@ services:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3000
       - APP_PUBLIC_URL=${APP_PUBLIC_URL:-http://localhost:3000}
-      - DATABASE_URL=postgresql://${DB_USER:-isp}:${DB_PASSWORD:-isp}@postgres:5432/${DB_NAME:-isp_platform}
+      - DATABASE_URL=postgresql://${DB_USER:-isp}:${DB_PASSWORD:-isp}@postgres:5433/${DB_NAME:-isp_platform}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - API_INTERNAL_KEY=${API_INTERNAL_KEY:-dev-local-internal-key-change-me}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}

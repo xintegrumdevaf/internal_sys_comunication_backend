@@ -55,6 +55,18 @@ export class CaseArbitrationService {
         return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
       }
 
+      // Si el intent detectado mapea a un workflowType DISTINTO al activo y la confianza es suficiente,
+      // la intención del cliente cambió: pausar el caso activo y activar el nuevo flujo (ej. pasar de Soporte a Planes/RAG).
+      if (targetWorkflowType && targetWorkflowType !== activeCase.workflowType && meetsConfidence) {
+        const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
+        return {
+          action: "ACTIVATE",
+          workflowType: targetWorkflowType,
+          resumeCaseId,
+          pauseCaseId: activeCase.id,
+        };
+      }
+
       if (
         interpretation.type === "CONTINUE" ||
         interpretation.type === "ANSWER" ||
