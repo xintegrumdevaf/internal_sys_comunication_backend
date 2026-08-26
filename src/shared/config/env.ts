@@ -1,4 +1,5 @@
-import "dotenv/config";
+﻿import dotenv from "dotenv";
+dotenv.config({ override: true });
 import { z } from "zod";
 
 /**
@@ -23,7 +24,7 @@ const envSchema = z.object({
   // origin (falla explicito en vez de abrir CORS por accidente).
   CORS_ALLOWED_ORIGINS: z.string().default(""),
 
-  // Login real (docs/spec/06_BACKEND_GAPS.md §1.b): sesion con cookie httpOnly
+  // Login real (docs/spec/06_BACKEND_GAPS.md Â§1.b): sesion con cookie httpOnly
   // + Redis, expiracion deslizante (se renueva en cada request autenticado;
   // se cierra sola tras N segundos de inactividad). 43200s = 12h.
   SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(43200),
@@ -33,7 +34,7 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),
   WHATSAPP_ACCESS_TOKEN: z.string().default(""),
 
-  // AIProviderPort (docs/spec/03_API_CONTRACT.md §A)
+  // AIProviderPort (docs/spec/03_API_CONTRACT.md Â§A)
   AI_PROVIDER: z.enum(["ollama", "gemini"]).default("ollama"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:4b"),
@@ -46,19 +47,19 @@ const envSchema = z.object({
   AI_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   /** Timeout para analyzeAgentConversation (Ollama local puede tardar varios minutos). */
   AI_QUALITY_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
-  /** Tamaño de tramo (mensajes customer+agent) por llamada a la IA de calidad. */
+  /** TamaÃ±o de tramo (mensajes customer+agent) por llamada a la IA de calidad. */
   QUALITY_ANALYSIS_CHUNK_SIZE: z.coerce.number().int().min(10).max(80).default(40),
 
-  // Buffer/debounce de mensajes por conversacion (docs/spec/02_STATE_MACHINE.md §12).
+  // Buffer/debounce de mensajes por conversacion (docs/spec/02_STATE_MACHINE.md Â§12).
   MESSAGE_DEBOUNCE_MS: z.coerce.number().int().positive().default(4500),
 
-  // Auto-asignacion de casos escalados (docs/spec/06_BACKEND_GAPS.md §2):
+  // Auto-asignacion de casos escalados (docs/spec/06_BACKEND_GAPS.md Â§2):
   // umbral de casos HUMAN_ACTIVE por agente antes de excluirlo de la seleccion
   // automatica (sigue disponible para asignacion manual por un manager).
   AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT: z.coerce.number().int().positive().default(6),
 
   // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
-  // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,
+  // (docs/spec/01_DATA_MODEL.md Â§2, v3) â€” aqui solo quedan defaults globales,
   // el timeout/retries por accion especifica se puede sobreescribir en la fila.
   N8N_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
   N8N_CALL_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
@@ -78,3 +79,4 @@ function loadEnv(): Env {
 }
 
 export const env = loadEnv();
+
