@@ -311,13 +311,13 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     WAITING_USER_CLIENT: {
       pendingQuestion: "Para consultar el saldo, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
-      maxAttempts: 5,
+      maxAttempts: 2,
     },
     WAITING_USER_RECEIPT: {
       pendingQuestion:
         "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
       requireAll: ["amount", "reference"],
-      maxAttempts: 4,
+      maxAttempts: 2,
     },
   },
   replyTemplates: {

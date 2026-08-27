@@ -14,7 +14,7 @@ export class GeminiEmbeddingAdapter implements EmbeddingProviderPort {
 
   constructor(config: GeminiEmbeddingConfig, private readonly logger?: Logger) {
     this.apiKey = config.apiKey;
-    this.model = config.model || "text-embedding-004";
+    this.model = config.model || "gemini-embedding-2";
     this.dimension = config.dimension || 768;
   }
 

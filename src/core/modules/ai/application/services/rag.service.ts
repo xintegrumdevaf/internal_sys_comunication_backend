@@ -1,4 +1,4 @@
-import { PDFParse } from "pdf-parse";
+﻿import { PDFParse } from "pdf-parse";
 import type { RagChunk, RagDocument, RagFaq, RagQueryResult, RagStats } from "../../domain/rag.entity";
 import type { CreateRagFaqInput, RagDocumentRepositoryPort, UpdateRagFaqInput } from "../ports/rag-document.repository.port";
 import type { VectorStorePort } from "../ports/vector-store.port";
@@ -11,6 +11,9 @@ export interface RagServiceDeps {
   embeddingProvider: EmbeddingProviderPort;
   chatModelUrl?: string;
   chatModel?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
+  aiTimeoutMs?: number;
   logger?: Logger;
 }
 
@@ -20,14 +23,20 @@ export class RagService {
   private readonly embeddingProvider: EmbeddingProviderPort;
   private readonly chatModelUrl: string;
   private readonly chatModel: string;
+  private readonly geminiApiKey?: string;
+  private readonly geminiModel?: string;
+  private readonly aiTimeoutMs: number;
   private readonly logger?: Logger;
 
   constructor(deps: RagServiceDeps) {
     this.docRepo = deps.documentRepository;
     this.vectorStore = deps.vectorStore;
     this.embeddingProvider = deps.embeddingProvider;
-    this.chatModelUrl = deps.chatModelUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    this.chatModel = deps.chatModel || process.env.OLLAMA_MODEL || "qwen3.5:9b";
+    this.chatModelUrl = deps.chatModelUrl || "http://localhost:11434";
+    this.chatModel = deps.chatModel || "qwen3.5:4b";
+    this.geminiApiKey = deps.geminiApiKey;
+    this.geminiModel = deps.geminiModel || "gemini-2.5-flash-lite";
+    this.aiTimeoutMs = deps.aiTimeoutMs || 45000;
     this.logger = deps.logger?.child({ service: "RagService" });
   }
 
@@ -60,8 +69,12 @@ export class RagService {
     return this.docRepo.deleteFaq(id);
   }
 
-  async getStats(): Promise<RagStats> {
-    return this.docRepo.getStats();
+  async getStats(): Promise<RagStats & { embeddingModel: string }> {
+    const stats = await this.docRepo.getStats();
+    return {
+      ...stats,
+      embeddingModel: this.embeddingProvider.getModelName(),
+    };
   }
 
   // --- Ingesta de Documentos ---
@@ -93,9 +106,9 @@ export class RagService {
 
       if (
         trimmed.includes("Ejemplos de consultas que este documento debe permitir responder") ||
-        trimmed.includes("Reglas de interpretación para un asistente RAG") ||
+        trimmed.includes("Reglas de interpretaciÃ³n para un asistente RAG") ||
         trimmed.includes("No inventar planes, precios, cuentas bancarias") ||
-        trimmed.includes("Priorizar la información contenida en este documento")
+        trimmed.includes("Priorizar la informaciÃ³n contenida en este documento")
       ) {
         continue;
       }
@@ -180,18 +193,18 @@ export class RagService {
     });
   }
 
-  // --- Consulta y Búsqueda Híbrida ---
+  // --- Consulta y BÃºsqueda HÃ­brida ---
   async searchHybrid(question: string, limit = 4): Promise<RagChunk[]> {
     const embedding = await this.embeddingProvider.generateEmbedding(question);
     const stopWords = new Set([
-      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
+      "dame", "numero", "nÃºmero", "cuÃ¡l", "cual", "cuales", "cuÃ¡les", "donde", "dÃ³nde", "como", "cÃ³mo",
       "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
-      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
-      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
+      "que", "quÃ©", "quien", "quiÃ©n", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "informaciÃ³n", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
     ]);
     const rawWords = question
       .toLowerCase()
-      .replace(/[¿?¡!,.]/g, "")
+      .replace(/[Â¿?Â¡!,.]/g, "")
       .split(/\s+/)
       .map((w) => w.trim())
       .filter((w) => w.length >= 2 && !stopWords.has(w));
@@ -203,8 +216,8 @@ export class RagService {
       else if (w.endsWith("s") && w.length > 3) keywordsSet.add(w.slice(0, -1));
     }
 
-    // Expansión semántica para preguntas de cobertura, ciudades, ubicación o disponibilidad
-    const isCoverageOrLocation = /operan|operaci[oó]n|cobertura|ciudad|ciudades|sector|sectores|disponib|llegada|llegan|est[aá]n|donde|d[oó]nde|ubicaci[oó]n|oficina|oficinas|lugar/i.test(question);
+    // ExpansiÃ³n semÃ¡ntica para preguntas de cobertura, ciudades, ubicaciÃ³n o disponibilidad
+    const isCoverageOrLocation = /operan|operaci[oÃ³]n|cobertura|ciudad|ciudades|sector|sectores|disponib|llegada|llegan|est[aÃ¡]n|donde|d[oÃ³]nde|ubicaci[oÃ³]n|oficina|oficinas|lugar/i.test(question);
     if (isCoverageOrLocation) {
       keywordsSet.add("cobertura");
       keywordsSet.add("ciudades");
@@ -213,8 +226,8 @@ export class RagService {
       keywordsSet.add("sectores");
     }
 
-    // 1. Si la consulta es sobre planes/paquetes/precios/información, expandir keywords y priorizar tabla de planes
-    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto|info|informaci[oó]n|interesa|interesar[ií]a|contratar|servicios|servicio|fibra|costo|costos/i.test(question);
+    // 1. Si la consulta es sobre planes/paquetes/precios/informaciÃ³n, expandir keywords y priorizar tabla de planes
+    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto|info|informaci[oÃ³]n|interesa|interesar[iÃ­]a|contratar|servicios|servicio|fibra|costo|costos/i.test(question);
     if (isPlanQuery) {
       keywordsSet.add("planes");
       keywordsSet.add("paquetes");
@@ -231,7 +244,7 @@ export class RagService {
     // Filtrar cualquier fragmento de reglas internas/meta que no deba llegar al cliente
     const results = rawResults.filter(
       (c) =>
-        !c.contentSnippet.includes("Reglas de interpretación para un asistente RAG") &&
+        !c.contentSnippet.includes("Reglas de interpretaciÃ³n para un asistente RAG") &&
         !c.contentSnippet.includes("No inventar planes, precios, cuentas bancarias")
     );
 
@@ -240,23 +253,22 @@ export class RagService {
 
   async synthesizeAnswer(question: string, chunks: RagChunk[]): Promise<string> {
     if (chunks.length === 0) {
-      return "No encontré información relevante en la base de conocimiento para responder a tu consulta.";
+      return "No encontrÃ© informaciÃ³n relevante en la base de conocimiento para responder a tu consulta.";
     }
 
     const context = chunks.map((c) => c.contentSnippet).join("\n---\n");
     const systemPrompt =
-      "Eres el asesor de atención al cliente de la empresa. Responde de forma cordial, concisa y PUNTUAL (máximo 2 a 3 oraciones), basándote ÚNICAMENTE en el contexto documental proporcionado.\n" +
-      "- Responde EXACTAMENTE a lo que el usuario pregunta, sin omitir datos específicos pedidos (por ejemplo, lista de sectores, precios o requisitos si fueron preguntados).\n" +
-      "- NO agregues información no solicitada (no agregues correos, teléfonos, horarios de soporte ni detalles de planes a menos que el usuario los haya preguntado).\n" +
-      "- NUNCA digas que eres una IA o asistente virtual ni que careces de catálogo o información.";
+      "Eres el asesor de atenciÃ³n al cliente de la empresa. Responde de forma cordial, concisa y PUNTUAL (mÃ¡ximo 2 a 3 oraciones), basÃ¡ndote ÃšNICAMENTE en el contexto documental proporcionado.\n" +
+      "- Responde EXACTAMENTE a lo que el usuario pregunta, sin omitir datos especÃ­ficos pedidos (por ejemplo, lista de sectores, precios o requisitos si fueron preguntados).\n" +
+      "- NO agregues informaciÃ³n no solicitada (no agregues correos, telÃ©fonos, horarios de soporte ni detalles de planes a menos que el usuario los haya preguntado).\n" +
+      "- NUNCA digas que eres una IA o asistente virtual ni que careces de catÃ¡logo o informaciÃ³n.";
     const userPrompt = `Contexto documental:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta puntual y directa:`;
 
-    // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (geminiKey) {
+    // 1. Si Gemini API Key estÃ¡ configurada, usar Gemini para respuesta limpia e instantÃ¡nea (sub-500ms)
+    if (this.geminiApiKey) {
       try {
-        const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`, {
+        const model = this.geminiModel || "gemini-2.5-flash-lite";
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -274,8 +286,8 @@ export class RagService {
       }
     }
 
-    // 2. Ollama local con /api/chat + timeout configurable desde .env (AI_CALL_TIMEOUT_MS, por defecto 35s)
-    const timeoutMs = Number(process.env.AI_CALL_TIMEOUT_MS) || 35_000;
+    // 2. Ollama local con /api/chat + timeout configurable
+    const timeoutMs = this.aiTimeoutMs;
     try {
       const controller = new AbortController();
       const ollamaTimeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -309,7 +321,7 @@ export class RagService {
       this.logger?.warn({ err }, "Error o timeout sintetizando respuesta con Ollama");
     }
 
-    // 3. Fallback inteligente: extraer específicamente el dato relevante según la intención de la pregunta
+    // 3. Fallback inteligente: extraer especÃ­ficamente el dato relevante segÃºn la intenciÃ³n de la pregunta
     return extractSmartFallback(question, chunks[0]?.contentSnippet || "");
   }
 
@@ -335,10 +347,10 @@ export class RagService {
 
     // Fallback: Buscar en FAQs estructuradas
     const stopWords = new Set([
-      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
+      "dame", "numero", "nÃºmero", "cuÃ¡l", "cual", "cuales", "cuÃ¡les", "donde", "dÃ³nde", "como", "cÃ³mo",
       "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
-      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
-      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
+      "que", "quÃ©", "quien", "quiÃ©n", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "informaciÃ³n", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
     ]);
     const faqs = await this.docRepo.findActiveFaqs();
     const words = question.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !stopWords.has(w));
@@ -357,7 +369,7 @@ export class RagService {
           {
             id: `chk-faq-${matchedFaq.id}`,
             sourceName: `PostgreSQL FAQ: ${matchedFaq.category}`,
-            contentSnippet: `Pregunta: "${matchedFaq.question}" — Respuesta: "${matchedFaq.answer}"`,
+            contentSnippet: `Pregunta: "${matchedFaq.question}" â€” Respuesta: "${matchedFaq.answer}"`,
             similarityScore: 0.92,
           },
         ],
@@ -366,7 +378,7 @@ export class RagService {
     }
 
     return {
-      answer: "No se encontró información relevante en los documentos indexados para responder a tu consulta.",
+      answer: "No se encontrÃ³ informaciÃ³n relevante en los documentos indexados para responder a tu consulta.",
       found: false,
       confidenceScore: 0.0,
       sources: [],
@@ -385,3 +397,5 @@ function extractSmartFallback(_question: string, snippet: string): string {
 
   return rawLines.join("\n").trim() || snippet;
 }
+
+

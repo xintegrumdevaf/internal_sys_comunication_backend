@@ -213,9 +213,20 @@ export function createContainer(): Container {
   const vectorStore = new PgVectorStoreAdapter(pgPool);
   const embeddingProvider =
     env.AI_PROVIDER === "gemini" && env.GEMINI_API_KEY
-      ? new GeminiEmbeddingAdapter({ apiKey: env.GEMINI_API_KEY }, aiLogger)
+      ? new GeminiEmbeddingAdapter(
+          {
+            apiKey: env.GEMINI_API_KEY,
+            model: env.GEMINI_EMBEDDING_MODEL,
+            dimension: env.GEMINI_EMBEDDING_DIMENSION,
+          },
+          aiLogger,
+        )
       : new OllamaEmbeddingAdapter(
-          { baseUrl: env.OLLAMA_BASE_URL, model: process.env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:4b" },
+          {
+            baseUrl: env.OLLAMA_BASE_URL,
+            model: env.OLLAMA_EMBEDDING_MODEL,
+            dimension: env.OLLAMA_EMBEDDING_DIMENSION,
+          },
           aiLogger,
         );
 
@@ -225,6 +236,9 @@ export function createContainer(): Container {
     embeddingProvider,
     chatModelUrl: env.OLLAMA_BASE_URL,
     chatModel: env.OLLAMA_MODEL,
+    geminiApiKey: env.GEMINI_API_KEY || undefined,
+    geminiModel: env.GEMINI_MODEL,
+    aiTimeoutMs: env.AI_CALL_TIMEOUT_MS,
     logger: aiLogger,
   });
 
