@@ -101,13 +101,23 @@ export class AdvanceCaseUseCase {
         }
       }
 
+      const requiredKeys = [
+        ...(waitingStep.requireAll ?? []),
+        ...(waitingStep.requireAny ?? []),
+      ];
+      const hasProvidedAnyRequiredEntity = requiredKeys.some(
+        (key) => key in entities && entities[key] !== undefined && entities[key] !== null && entities[key] !== "",
+      );
+
       const missing = missingRequiredFields(waitingStep, entities);
       if (missing.length > 0) {
-        const nextContext = bumpWaitingAttempts(context, missing);
+        const nextContext = hasProvidedAnyRequiredEntity
+          ? bumpWaitingAttempts(context, missing)
+          : context;
         const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
         const max = maxAttemptsOf(waitingStep);
         log.info(
-          { currentState, missing, attempts, max },
+          { currentState, missing, attempts, max, hasProvidedAnyRequiredEntity },
           "WaitingStep: datos incompletos",
         );
 
