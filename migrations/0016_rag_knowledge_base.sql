@@ -1,4 +1,4 @@
--- Migración 0015: Tablas para la persistencia real de la Base de Conocimiento RAG (PostgreSQL)
+-- Migración 0016: Tablas para la persistencia real de la Base de Conocimiento RAG (PostgreSQL)
 
 CREATE TABLE IF NOT EXISTS rag_documents (
   id            TEXT PRIMARY KEY,

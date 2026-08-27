@@ -1,4 +1,4 @@
--- Migración 0016: Tabla n8n_vectors para el vector store nativo de RAG y columna priority en rag_faqs
+-- Migración 0017: Tabla n8n_vectors para el vector store nativo de RAG y columna priority en rag_faqs
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
