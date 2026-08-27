@@ -164,7 +164,8 @@ o en error:
 | `GET /api/cases/:id/timeline` | `workflow_execution`/`workflow_event` ordenados cronológicamente |
 | `GET /api/cases/:id/summary` | Resumen estructurado — solo si el caso fue escalado o está `HUMAN_ACTIVE` |
 | `GET /api/escalations?departmentId=&status=` | Bandeja de escalaciones. `departmentId=null` (o `?triage=true`) devuelve el pool sin clasificar (`02_STATE_MACHINE.md` §10), visible solo a `role IN (manager, admin)` |
-| `GET /api/audit?limit=` | Auditoría reciente |
+| `GET /api/audit?action=&resourceType=&resourceId=&actorId=&departmentId=&category=&from=&to=&limit=&cursor=` | Eventos de auditoría con filtros avanzados — `admin` (global) y `manager` (su departamento) |
+| `GET /api/audit/stats?from=&to=&departmentId=` | Resumen de actividad por categoría y actores clave |
 | `GET /api/dashboard?userId=` | KPIs y resumen para el agente autenticado |
 | `GET /api/admin/n8n-workflows` | Catálogo de acciones → URL (`n8n_workflow_registry`), solo `admin` |
 | `GET /api/quality/agents?from=&to=&departmentId=` | Ranking/eficiencia por agente (`07_QUALITY_SUPERVISION.md` §5.1) — solo `manager`/`admin` |
@@ -192,12 +193,19 @@ o en error:
 | `POST /api/quality/analyze-batch` `{ from?, to?, agentId?, departmentId?, limit? }` | Encola hasta `limit` (default 3, max 10) análisis de casos cerrados **sin** review útil — cola serial; solo `manager`/`admin` |
 | `POST /api/quality/reviews/:id/notes` `{ body }` | Crea `quality_coaching_note` — solo `manager`/`admin` con alcance |
 | `PATCH /api/quality/reviews/:id` `{ status: "reviewed" }` | Marca review como revisada por el supervisor — solo `manager`/`admin` |
+| `GET /api/internal/threads` | Lista hilos de chat interno del agente autenticado (con preview y unreadCount) |
+| `POST /api/internal/threads/direct` `{ peerAgentId }` | Obtiene o crea un hilo 1:1 con otro agente/supervisor |
+| `GET /api/internal/threads/:id/messages?limit=&cursor=` | Mensajes del hilo interno, orden cronológico, paginado |
+| `POST /api/internal/threads/:id/messages` `{ body, type?, contextData? }` | Envía mensaje al hilo (texto o quality_quote con contexto) |
+| `POST /api/internal/threads/:id/read` | Marca el hilo como leído para el agente autenticado |
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.
 
 **Autorización de escritura**: requiere `case.assigned_agent_id = self`, o el caso sin asignar (vía `claim`), o `role IN (manager, admin)` con pertenencia/alcance sobre el departamento del caso. Se aplica de forma consistente en `reply`, `complete`, `claim`, `disable-automation` y `reactivate-automation` cuando el caso ya está `HUMAN_ACTIVE`/`ESCALATED` (`agent-case-auth.ts`) — el resto de agentes puede **leer** la conversación/caso pero recibe `403` si intenta escribir.
 
 **Autorización de calidad** (`/api/quality/*`): solo `role IN (manager, admin)`. `admin` ve todo; `manager` solo reviews/stats cuyo `department_id` ∈ sus memberships. `agent` → `403`. Detalle en `07_QUALITY_SUPERVISION.md` §3.
+
+**Autorización de chat interno** (`/api/internal/*`): agentes autenticados. Solo pueden leer y escribir en hilos donde son participantes (`internal_thread_participant`).
 
 Toda escritura queda en `audit_event`.
 
@@ -209,7 +217,7 @@ Toda escritura queda en `audit_event`.
 
 ### C.3 Tiempo real
 
-`WebSocket`/`SSE` en `/api/realtime?userId=`, filtrado por los departamentos del agente:
+`WebSocket`/`SSE` en `/api/realtime?userId=`, filtrado por los departamentos del agente y pertenencia a hilos de chat interno:
 
 ```json
 { "type": "MESSAGE_RECEIVED", "conversationId": "conv_456", "messageId": "msg_789" }
@@ -218,13 +226,52 @@ Toda escritura queda en `audit_event`.
 { "type": "CASE_CLAIMED", "caseId": "case_123", "agentUserId": "user_1" }
 { "type": "HUMAN_ASSIGNED", "caseId": "case_123", "agentUserId": "user_1" }
 { "type": "AUTOMATION_ENABLED", "caseId": "case_123" }
+{ "type": "INTERNAL_MESSAGE_SENT", "threadId": "th_123", "messageId": "imsg_789", "senderAgentId": "ag_1", "recipientAgentIds": ["ag_2"], "messageType": "text", "preview": "Hola Juan...", "createdAt": "..." }
+{ "type": "INTERNAL_THREAD_READ", "threadId": "th_123", "agentId": "ag_2", "readAt": "..." }
 ```
 
-`MESSAGE_RECEIVED` = mensaje entrante del cliente ya persistido. `MESSAGE_SENT` = mensaje saliente ya persistido y (si aplica) ya enviado a WhatsApp — `author` distingue `"ai"` de `"agent"` para que el frontend pueda, por ejemplo, mostrar distinto quién respondió. Ambos eventos solo llevan el `messageId`; el frontend pide el contenido vía `GET /api/conversations/:id/messages` (o mantiene su propio cache local) — el evento es una notificación de "hay algo nuevo", no el mensaje completo, para no duplicar la fuente de verdad.
+`MESSAGE_RECEIVED` = mensaje entrante del cliente ya persistido. `MESSAGE_SENT` = mensaje saliente ya persistido y (si aplica) ya enviado a WhatsApp — `author` distingue `"ai"` de `"agent"` para que el frontend pueda, por ejemplo, mostrar distinto quién respondió. Ambos eventos solo llevan el `messageId`; el frontend pide el contenido vía `GET /api/conversations/:id/messages` (o mantiene su propio cache local) — el evento es una notificación de "hay algo nuevo", no el mensaje completo, para no duplicar la fuente de verdad. `INTERNAL_MESSAGE_SENT` notifica a los participantes del hilo con un preview ligero para actualizar la bandeja y el feed sin polling.
 
 ### C.4 DTOs de referencia
 
 ```ts
+type InternalParticipantDto = {
+  agentId: string;
+  agentName: string;
+  agentEmail: string;
+  agentRole: "agent" | "manager" | "admin";
+  lastReadAt: string;
+};
+
+type InternalThreadDto = {
+  id: string;
+  type: "direct" | "group" | "quality_coaching";
+  referenceId: string | null;
+  participants: InternalParticipantDto[];
+  unreadCount: number;
+  lastMessage: {
+    id: string;
+    senderAgentId: string;
+    senderAgentName: string;
+    type: "text" | "quality_quote" | "conversation_excerpt";
+    body: string;
+    createdAt: string;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type InternalMessageDto = {
+  id: string;
+  threadId: string;
+  senderAgentId: string;
+  senderAgentName: string;
+  type: "text" | "quality_quote" | "conversation_excerpt";
+  body: string;
+  contextData: Record<string, unknown>;
+  createdAt: string;
+};
+
 type ConversationDto = {
   id: string;
   waPhone: string;
