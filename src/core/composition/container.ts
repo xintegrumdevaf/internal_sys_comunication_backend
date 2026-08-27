@@ -18,6 +18,14 @@ import { createCors } from "../../shared/http/middlewares/cors.middleware";
 import { createHealthRouter } from "../../shared/http/health.router";
 
 import { AuditRepositoryPg } from "../modules/audit/infrastructure/postgres/audit.repository.pg";
+
+import { MessageTemplateRepositoryPg } from "../modules/message-templates/infrastructure/postgres/message-template.repository.pg";
+import { MetaTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/meta/meta-templates-gateway.http";
+import { CreateMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/create-message-template.use-case";
+import { ListMessageTemplatesUseCase } from "../modules/message-templates/application/use-cases/list-message-templates.use-case";
+import { DeleteMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/delete-message-template.use-case";
+import { SyncTemplateStatusUseCase } from "../modules/message-templates/application/use-cases/sync-template-status.use-case";
+import { createMessageTemplatesRouter } from "../modules/message-templates/presentation/message-templates.router";
 import { createAuditRouter } from "../modules/audit/presentation/audit.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
@@ -171,6 +179,8 @@ export function createContainer(): Container {
   const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
   const escalationRepo = new EscalationRepositoryPg(pgPool);
+  const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
+  const metaTemplatesGateway = new MetaTemplatesGatewayHttp(env, logger.child({ module: "message-templates" }));
 
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
@@ -293,6 +303,22 @@ export function createContainer(): Container {
 
   // --- Realtime (Etapa 7) — antes de use cases que emiten eventos ---
   const broadcaster = new RealtimeBroadcaster();
+
+  // --- Message Templates ---
+  const createMessageTemplate = new CreateMessageTemplateUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+  });
+  const listMessageTemplates = new ListMessageTemplatesUseCase(messageTemplateRepo);
+  const deleteMessageTemplate = new DeleteMessageTemplateUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+  });
+  const syncTemplateStatus = new SyncTemplateStatusUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+    broadcaster,
+  });
 
   // --- Escalacion / triage (Etapa 6) ---
   const summaryBuilder = new CaseSummaryBuilderService();
@@ -600,6 +626,15 @@ export function createContainer(): Container {
         );
         return qualityRepo.countByStatus("pending", { agentId, departmentIds });
       },
+    }),
+  );
+  app.use(
+    createMessageTemplatesRouter({
+      createTemplate: createMessageTemplate,
+      listTemplates: listMessageTemplates,
+      deleteTemplate: deleteMessageTemplate,
+      syncTemplateStatus,
+      templateRepo: messageTemplateRepo,
     }),
   );
 

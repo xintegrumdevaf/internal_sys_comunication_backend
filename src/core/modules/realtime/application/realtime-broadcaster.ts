@@ -48,6 +48,13 @@ export type RealtimeEvent =
       type: "AUTOMATION_DISABLED";
       caseId: string;
       conversationId?: string;
+    }
+  | {
+      type: "MESSAGE_TEMPLATE_UPDATED";
+      templateId: string;
+      metaTemplateId: string | null;
+      status: string;
+      rejectedReason?: string | null;
     };
 
 export type RealtimeSubscriber = {

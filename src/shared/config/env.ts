@@ -1,4 +1,4 @@
-﻿import dotenv from "dotenv";
+import dotenv from "dotenv";
 dotenv.config({ override: true });
 import { z } from "zod";
 
@@ -33,6 +33,8 @@ const envSchema = z.object({
   WHATSAPP_VERIFY_TOKEN: z.string().default(""),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),
   WHATSAPP_ACCESS_TOKEN: z.string().default(""),
+  META_WABA_ID: z.string().default(""),
+  META_ACCESS_TOKEN: z.string().default(""),
 
   // AIProviderPort (docs/spec/03_API_CONTRACT.md Â§A)
   AI_PROVIDER: z.enum(["ollama", "gemini"]).default("ollama"),
