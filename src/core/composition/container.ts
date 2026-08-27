@@ -18,6 +18,9 @@ import { createCors } from "../../shared/http/middlewares/cors.middleware";
 import { createHealthRouter } from "../../shared/http/health.router";
 
 import { AuditRepositoryPg } from "../modules/audit/infrastructure/postgres/audit.repository.pg";
+import { ListAuditEventsUseCase } from "../modules/audit/application/use-cases/list-audit-events.use-case";
+import { GetAuditStatsUseCase } from "../modules/audit/application/use-cases/get-audit-stats.use-case";
+import { createAuditRouter } from "../modules/audit/presentation/audit.router";
 
 import { MessageTemplateRepositoryPg } from "../modules/message-templates/infrastructure/postgres/message-template.repository.pg";
 import { MetaTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/meta/meta-templates-gateway.http";
@@ -26,7 +29,6 @@ import { ListMessageTemplatesUseCase } from "../modules/message-templates/applic
 import { DeleteMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/delete-message-template.use-case";
 import { SyncTemplateStatusUseCase } from "../modules/message-templates/application/use-cases/sync-template-status.use-case";
 import { createMessageTemplatesRouter } from "../modules/message-templates/presentation/message-templates.router";
-import { createAuditRouter } from "../modules/audit/presentation/audit.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
@@ -129,6 +131,15 @@ import { MarkReviewReviewedUseCase } from "../modules/quality/application/use-ca
 import { BatchEnqueueQualityReviewsUseCase } from "../modules/quality/application/use-cases/batch-enqueue-quality-reviews.use-case";
 import { resolveQualityDepartmentScope } from "../modules/quality/application/quality-auth";
 import { createQualityRouter } from "../modules/quality/presentation/quality.router";
+
+import { PostgresInternalThreadRepository } from "../modules/internal_chat/infrastructure/postgres/postgres-internal-thread.repository";
+import { PostgresInternalMessageRepository } from "../modules/internal_chat/infrastructure/postgres/postgres-internal-message.repository";
+import { GetOrCreateDirectThreadUseCase } from "../modules/internal_chat/application/use-cases/get-or-create-direct-thread.use-case";
+import { ListThreadsUseCase } from "../modules/internal_chat/application/use-cases/list-threads.use-case";
+import { ListMessagesUseCase as ListInternalMessagesUseCase } from "../modules/internal_chat/application/use-cases/list-messages.use-case";
+import { SendInternalMessageUseCase } from "../modules/internal_chat/application/use-cases/send-internal-message.use-case";
+import { MarkThreadAsReadUseCase } from "../modules/internal_chat/application/use-cases/mark-thread-as-read.use-case";
+import { createInternalChatRouter } from "../modules/internal_chat/presentation/internal-chat.router";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -319,6 +330,19 @@ export function createContainer(): Container {
     metaGateway: metaTemplatesGateway,
     broadcaster,
   });
+
+  // --- Chat interno staff (Etapa 11) ---
+  const internalThreadRepo = new PostgresInternalThreadRepository(pgPool);
+  const internalMessageRepo = new PostgresInternalMessageRepository(pgPool);
+  const getOrCreateDirectThread = new GetOrCreateDirectThreadUseCase(internalThreadRepo, agentRepo);
+  const listInternalThreads = new ListThreadsUseCase(internalThreadRepo);
+  const listInternalMessages = new ListInternalMessagesUseCase(internalThreadRepo, internalMessageRepo);
+  const sendInternalMessage = new SendInternalMessageUseCase(internalThreadRepo, internalMessageRepo, broadcaster);
+  const markInternalThreadAsRead = new MarkThreadAsReadUseCase(internalThreadRepo, broadcaster);
+
+  // --- Auditoría (Enterprise Audit System) ---
+  const listAuditEvents = new ListAuditEventsUseCase(auditRepo, agentRepo);
+  const getAuditStats = new GetAuditStatsUseCase(auditRepo, agentRepo);
 
   // --- Escalacion / triage (Etapa 6) ---
   const summaryBuilder = new CaseSummaryBuilderService();
@@ -553,7 +577,7 @@ export function createContainer(): Container {
   // §1.b) — health y el webhook de WhatsApp quedan afuera a proposito (no
   // tienen identidad de agente; usan su propia verificacion).
   app.use(createSessionMiddleware({ sessionStore, agentRepo, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
-  app.use(createAuthRouter({ login, logout, changePassword, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
+  app.use(createAuthRouter({ login, logout, changePassword, sessionTtlSeconds: env.SESSION_TTL_SECONDS, auditRepo }));
 
   app.use(
     createConversationsRouter({
@@ -582,7 +606,7 @@ export function createContainer(): Container {
       deactivateDepartment,
     }),
   );
-  app.use(createAuditRouter(auditRepo));
+  app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     createN8nWorkflowsRouter({
@@ -635,6 +659,15 @@ export function createContainer(): Container {
       deleteTemplate: deleteMessageTemplate,
       syncTemplateStatus,
       templateRepo: messageTemplateRepo,
+    }),
+  );
+  app.use(
+    createInternalChatRouter({
+      getOrCreateDirectThread,
+      listThreads: listInternalThreads,
+      listMessages: listInternalMessages,
+      sendInternalMessage,
+      markThreadAsRead: markInternalThreadAsRead,
     }),
   );
 

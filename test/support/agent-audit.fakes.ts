@@ -5,7 +5,13 @@ import type {
   CreateAgentInput,
   UpdateAgentPatch,
 } from "../../src/core/modules/departments/application/ports/agent.repository.port";
-import type { AuditRepositoryPort, RecordAuditEventInput } from "../../src/core/modules/audit/application/ports/audit.repository.port";
+import type {
+  AuditRepositoryPort,
+  AuditStats,
+  AuditStatsFilter,
+  ListAuditEventsFilter,
+  RecordAuditEventInput,
+} from "../../src/core/modules/audit/application/ports/audit.repository.port";
 import type { AuditEvent } from "../../src/core/modules/audit/domain/audit-event.entity";
 
 export class AgentRepositoryFake implements AgentRepositoryPort {
@@ -82,15 +88,44 @@ export class AuditRepositoryFake implements AuditRepositoryPort {
     this.events.push({
       id: randomUUID(),
       action: input.action,
+      category: input.category ?? "operational",
       resourceType: input.resourceType,
       resourceId: input.resourceId,
-      metadata: input.metadata ?? {},
+      actorType: input.actorType ?? "agent",
       actorId: input.actorId ?? null,
+      departmentId: input.departmentId ?? null,
+      metadata: input.metadata ?? {},
+      beforeState: input.beforeState ?? null,
+      afterState: input.afterState ?? null,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+      correlationId: input.correlationId ?? null,
       occurredAt: new Date(),
     });
   }
 
-  async list(limit: number): Promise<AuditEvent[]> {
-    return this.events.slice(0, limit);
+  async list(
+    filterOrLimit: number | ListAuditEventsFilter
+  ): Promise<{ events: AuditEvent[]; nextCursor: string | null }> {
+    const limit = typeof filterOrLimit === "number" ? filterOrLimit : (filterOrLimit.limit ?? 50);
+    const slice = this.events.slice(0, limit);
+    return {
+      events: slice,
+      nextCursor: null,
+    };
+  }
+
+  async getStats(_filter?: AuditStatsFilter): Promise<AuditStats> {
+    return {
+      totalEvents: this.events.length,
+      byCategory: {
+        security: this.events.filter((e) => e.category === "security").length,
+        operational: this.events.filter((e) => e.category === "operational").length,
+        data_change: this.events.filter((e) => e.category === "data_change").length,
+        system: this.events.filter((e) => e.category === "system").length,
+      },
+      topActions: [],
+      topActors: [],
+    };
   }
 }
