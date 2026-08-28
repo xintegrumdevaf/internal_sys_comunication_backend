@@ -61,10 +61,27 @@ export class MetaTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
       components.push(headerComp);
     }
 
-    components.push({
+    const varMatches = template.bodyText.match(/\{\{(\d+)\}\}/g);
+    const bodyComp: Record<string, unknown> = {
       type: "BODY",
       text: template.bodyText,
-    });
+    };
+
+    if (varMatches && varMatches.length > 0) {
+      let maxVarIndex = 0;
+      for (const m of varMatches) {
+        const num = parseInt(m.replace(/\D/g, ""), 10);
+        if (!isNaN(num) && num > maxVarIndex) maxVarIndex = num;
+      }
+      if (maxVarIndex > 0) {
+        const samples = Array.from({ length: maxVarIndex }, (_, i) => `ejemplo_${i + 1}`);
+        bodyComp.example = {
+          body_text: [samples],
+        };
+      }
+    }
+
+    components.push(bodyComp);
 
     if (template.footerText) {
       components.push({

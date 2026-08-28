@@ -3,13 +3,17 @@ import type Redis from "ioredis";
 import type { Env } from "../../../../shared/config/env";
 import { verifyWhatsAppSignature } from "../../../../shared/http/whatsapp-signature";
 import { enqueueConversationJob } from "../../../../shared/queue/redis";
-import type { ReceiveInboundMessageUseCase } from "../application/use-cases/receive-inbound-message.use-case";
-import { parseWhatsAppWebhookPayload } from "../infrastructure/whatsapp/parse-whatsapp-webhook";
+import type { SyncTemplateStatusUseCase } from "../../message-templates/application/use-cases/sync-template-status.use-case";
+import {
+  parseWhatsAppWebhookPayload,
+  parseWhatsAppTemplateStatusUpdates,
+} from "../infrastructure/whatsapp/parse-whatsapp-webhook";
 
 export type WhatsAppWebhookRouterDeps = {
   env: Env;
   receiveInboundMessage: ReceiveInboundMessageUseCase;
   redisClient: Redis;
+  syncTemplateStatus?: SyncTemplateStatusUseCase;
 };
 
 /**
@@ -19,7 +23,7 @@ export type WhatsAppWebhookRouterDeps = {
  */
 export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Router {
   const router = Router();
-  const { env, receiveInboundMessage, redisClient } = deps;
+  const { env, receiveInboundMessage, redisClient, syncTemplateStatus } = deps;
 
   router.get("/api/webhooks/whatsapp", (req, res) => {
     const mode = req.query["hub.mode"];
@@ -76,6 +80,21 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
             conversationId: conversation.id,
             messageId: message.id,
           });
+        }
+      }
+
+      const templateStatusUpdates = parseWhatsAppTemplateStatusUpdates(req.body);
+      if (templateStatusUpdates.length > 0 && syncTemplateStatus) {
+        for (const update of templateStatusUpdates) {
+          try {
+            await syncTemplateStatus.execute(update);
+            req.log?.info(
+              { metaTemplateId: update.metaTemplateId, name: update.name, status: update.status },
+              "Plantilla actualizada desde webhook de Meta",
+            );
+          } catch (error) {
+            req.log?.error({ err: error, update }, "Error al sincronizar estado de plantilla desde webhook");
+          }
         }
       }
 

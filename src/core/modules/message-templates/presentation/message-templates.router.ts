@@ -122,6 +122,34 @@ export function createMessageTemplatesRouter(deps: MessageTemplatesRouterDeps): 
     }
   });
 
+  router.post("/api/message-templates/sync-all", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      const templates = await deps.templateRepo.list({});
+      const pending = templates.items.filter((t) => t.status === "PENDING" && t.metaTemplateId);
+      const updatedList = [];
+      for (const t of pending) {
+        try {
+          const updated = await deps.syncTemplateStatus.execute({ id: t.id });
+          updatedList.push(updated);
+        } catch (_) {}
+      }
+      res.json({ data: updatedList, syncedCount: updatedList.length });
+    } catch (error) {
+      handleZodOrNext(error, next);
+    }
+  });
+
+  router.post("/api/message-templates/:id/sync", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      const updated = await deps.syncTemplateStatus.execute({ id: req.params.id! });
+      res.json({ data: updated });
+    } catch (error) {
+      handleZodOrNext(error, next);
+    }
+  });
+
   router.post("/webhooks/whatsapp/template-status", async (req, res, next) => {
     try {
       requireAuth(req);

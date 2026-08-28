@@ -571,7 +571,7 @@ export function createContainer(): Container {
   app.use(createRequestLogger(logger));
 
   app.use(createHealthRouter({ pgPool, redisClient }));
-  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient }));
+  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
   // §1.b) — health y el webhook de WhatsApp quedan afuera a proposito (no
