@@ -140,6 +140,22 @@ import { ListMessagesUseCase as ListInternalMessagesUseCase } from "../modules/i
 import { SendInternalMessageUseCase } from "../modules/internal_chat/application/use-cases/send-internal-message.use-case";
 import { MarkThreadAsReadUseCase } from "../modules/internal_chat/application/use-cases/mark-thread-as-read.use-case";
 import { createInternalChatRouter } from "../modules/internal_chat/presentation/internal-chat.router";
+import {
+  CampaignRepositoryPg,
+  CampaignRecipientRepositoryPg,
+} from "../modules/campaigns/infrastructure/postgres/campaign.repository.pg";
+import { CampaignFileParserService } from "../modules/campaigns/application/services/campaign-file-parser.service";
+import { CampaignWorkerService } from "../modules/campaigns/infrastructure/queue/campaign-worker.service";
+import { CreateCampaignUseCase } from "../modules/campaigns/application/use-cases/create-campaign.use-case";
+import { ImportCampaignRecipientsUseCase } from "../modules/campaigns/application/use-cases/import-campaign-recipients.use-case";
+import { StartCampaignUseCase } from "../modules/campaigns/application/use-cases/start-campaign.use-case";
+import { ProcessCampaignBatchUseCase } from "../modules/campaigns/application/use-cases/process-campaign-batch.use-case";
+import { SuspendCampaignUseCase } from "../modules/campaigns/application/use-cases/suspend-campaign.use-case";
+import { ResumeCampaignUseCase } from "../modules/campaigns/application/use-cases/resume-campaign.use-case";
+import { ListCampaignsUseCase } from "../modules/campaigns/application/use-cases/list-campaigns.use-case";
+import { GetCampaignUseCase } from "../modules/campaigns/application/use-cases/get-campaign.use-case";
+import { DeleteCampaignUseCase } from "../modules/campaigns/application/use-cases/delete-campaign.use-case";
+import { createCampaignsRouter } from "../modules/campaigns/presentation/campaigns.router";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -192,6 +208,11 @@ export function createContainer(): Container {
   const escalationRepo = new EscalationRepositoryPg(pgPool);
   const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
   const metaTemplatesGateway = new MetaTemplatesGatewayHttp(env, logger.child({ module: "message-templates" }));
+
+  // --- Campañas (Campaigns) ---
+  const campaignRepo = new CampaignRepositoryPg(pgPool);
+  const campaignRecipientRepo = new CampaignRecipientRepositoryPg(pgPool);
+  const campaignFileParser = new CampaignFileParserService();
 
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
@@ -558,6 +579,29 @@ export function createContainer(): Container {
     logger: casesLogger,
   });
 
+  const campaignsLogger = logger.child({ module: "campaigns" });
+  const processCampaignBatch = new ProcessCampaignBatchUseCase(
+    campaignRepo,
+    campaignRecipientRepo,
+    whatsappSender,
+    campaignsLogger,
+  );
+  const campaignWorker = new CampaignWorkerService(redisClient, processCampaignBatch, campaignsLogger);
+  campaignWorker.startWorker();
+
+  const createCampaign = new CreateCampaignUseCase(campaignRepo);
+  const importCampaignRecipients = new ImportCampaignRecipientsUseCase(
+    campaignRepo,
+    campaignRecipientRepo,
+    campaignFileParser,
+  );
+  const startCampaign = new StartCampaignUseCase(campaignRepo, campaignRecipientRepo, campaignWorker);
+  const suspendCampaign = new SuspendCampaignUseCase(campaignRepo);
+  const resumeCampaign = new ResumeCampaignUseCase(campaignRepo, campaignWorker);
+  const listCampaigns = new ListCampaignsUseCase(campaignRepo);
+  const getCampaign = new GetCampaignUseCase(campaignRepo, campaignRecipientRepo);
+  const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
+
   // --- HTTP (presentation) ---
   const app = express();
   app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
@@ -668,6 +712,15 @@ export function createContainer(): Container {
       listMessages: listInternalMessages,
       sendInternalMessage,
       markThreadAsRead: markInternalThreadAsRead,
+    createCampaignsRouter({
+      createCampaign,
+      importRecipients: importCampaignRecipients,
+      startCampaign,
+      suspendCampaign,
+      resumeCampaign,
+      listCampaigns,
+      getCampaign,
+      deleteCampaign,
     }),
   );
 
@@ -678,6 +731,7 @@ export function createContainer(): Container {
   });
 
   const shutdown = async (): Promise<void> => {
+    campaignWorker.stopWorker();
     enqueueQualityReview.stop();
     inboundBuffer.clearAllTimers();
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
