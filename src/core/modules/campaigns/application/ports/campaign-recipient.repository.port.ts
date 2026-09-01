@@ -22,6 +22,7 @@ export interface CampaignRecipientRepositoryPort {
     status: RecipientStatus,
     data?: { externalId?: string | null; errorMessage?: string | null; sentAt?: Date | null },
   ): Promise<CampaignRecipient>;
+  resetRecipientsToPending(campaignId: string, onlyFailed?: boolean): Promise<number>;
   countByCampaign(campaignId: string): Promise<RecipientCounts>;
   listByCampaignId(campaignId: string): Promise<CampaignRecipient[]>;
 }

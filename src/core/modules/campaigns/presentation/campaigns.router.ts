@@ -49,6 +49,8 @@ const createCampaignBodySchema = z.object({
       forceUpdateContactData: z.boolean().optional(),
     })
     .optional(),
+  templateName: z.string().nullable().optional(),
+  templateLanguage: z.string().nullable().optional(),
 });
 
 const listFilterSchema = z.object({
@@ -123,7 +125,7 @@ export function createCampaignsRouter(deps: CampaignsRouterDeps): Router {
         }
 
         const result = await deps.importRecipients.execute(
-          req.params.id!,
+          req.params.id as string,
           file.buffer,
         );
         res.json(result);

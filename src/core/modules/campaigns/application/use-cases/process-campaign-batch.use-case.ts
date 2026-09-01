@@ -1,9 +1,4 @@
-import type { WhatsAppSenderPort } from "../../conversations/application/ports/whatsapp-sender.port";
-import type { Logger } from "../../../../../shared/logging/logger";
-import type { CampaignRepositoryPort } from "../ports/campaign.repository.port";
-import type { CampaignRecipientRepositoryPort } from "../ports/campaign-recipient.repository.port";
-import type { CampaignRecipient } from "../../domain/campaign-recipient.entity";
-import type { Campaign } from "../../domain/campaign.entity";
+import type { MessageTemplateRepositoryPort } from "../../message-templates/application/ports/message-template.repository.port";
 
 export type ProcessBatchResult = {
   finished: boolean;
@@ -17,6 +12,7 @@ export class ProcessCampaignBatchUseCase {
     private readonly recipientRepo: CampaignRecipientRepositoryPort,
     private readonly whatsAppSender: WhatsAppSenderPort,
     private readonly logger: Logger,
+    private readonly messageTemplateRepo?: MessageTemplateRepositoryPort,
   ) {}
 
   async execute(campaignId: string, batchSize = 10): Promise<ProcessBatchResult> {
@@ -64,10 +60,41 @@ export class ProcessCampaignBatchUseCase {
         };
       }
 
-      const finalBody = this.interpolateMessage(campaign, recipient);
-
       try {
-        const result = await this.whatsAppSender.sendText(recipient.phone, finalBody);
+        let result: { externalId: string };
+        if (campaign.templateName) {
+          let params = recipient.name ? [recipient.name] : [];
+
+          if (this.messageTemplateRepo) {
+            const tpl = await this.messageTemplateRepo.findByName(campaign.templateName);
+            if (tpl) {
+              const matches = (tpl.bodyText || "").match(/\{\{\s*\d+\s*\}\}/g);
+              const expectedCount = matches ? new Set(matches).size : 0;
+              if (expectedCount === 0) {
+                params = [];
+              } else if (expectedCount === 1) {
+                params = [recipient.name ?? ""];
+              } else if (expectedCount > 1) {
+                params = [recipient.name ?? "", recipient.phone];
+                while (params.length < expectedCount) {
+                  params.push("");
+                }
+                params = params.slice(0, expectedCount);
+              }
+            }
+          }
+
+          result = await this.whatsAppSender.sendTemplate(
+            recipient.phone,
+            campaign.templateName,
+            campaign.templateLanguage || "es",
+            params,
+          );
+        } else {
+          const finalBody = this.interpolateMessage(campaign, recipient);
+          result = await this.whatsAppSender.sendText(recipient.phone, finalBody);
+        }
+
         await this.recipientRepo.updateStatus(recipient.id, "SENT", {
           externalId: result.externalId,
           sentAt: new Date(),

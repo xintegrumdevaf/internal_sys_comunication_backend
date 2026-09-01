@@ -1,4 +1,4 @@
--- Migration 0019: Tablas para el modulo de campañas masivas (campaigns)
+-- Migration 0021: Tablas para el modulo de campañas masivas (campaigns)
 
 CREATE TABLE IF NOT EXISTS campaign (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

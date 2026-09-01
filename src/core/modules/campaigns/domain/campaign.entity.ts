@@ -27,6 +27,8 @@ export interface Campaign {
   totalRecipients: number;
   sentCount: number;
   failedCount: number;
+  templateName?: string | null;
+  templateLanguage?: string | null;
   createdAt: Date;
   startedAt: Date | null;
   completedAt: Date | null;

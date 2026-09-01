@@ -585,11 +585,12 @@ export function createContainer(): Container {
     campaignRecipientRepo,
     whatsappSender,
     campaignsLogger,
+    messageTemplateRepo,
   );
   const campaignWorker = new CampaignWorkerService(redisClient, processCampaignBatch, campaignsLogger);
   campaignWorker.startWorker();
 
-  const createCampaign = new CreateCampaignUseCase(campaignRepo);
+  const createCampaign = new CreateCampaignUseCase(campaignRepo, messageTemplateRepo);
   const importCampaignRecipients = new ImportCampaignRecipientsUseCase(
     campaignRepo,
     campaignRecipientRepo,
@@ -712,6 +713,9 @@ export function createContainer(): Container {
       listMessages: listInternalMessages,
       sendInternalMessage,
       markThreadAsRead: markInternalThreadAsRead,
+    }),
+  );
+  app.use(
     createCampaignsRouter({
       createCampaign,
       importRecipients: importCampaignRecipients,

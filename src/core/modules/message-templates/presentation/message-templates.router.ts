@@ -125,8 +125,8 @@ export function createMessageTemplatesRouter(deps: MessageTemplatesRouterDeps): 
   router.post("/api/message-templates/sync-all", async (req, res, next) => {
     try {
       requireAuth(req);
-      const templates = await deps.templateRepo.list({});
-      const pending = templates.items.filter((t) => t.status === "PENDING" && t.metaTemplateId);
+      const templatesResult = await deps.templateRepo.list({});
+      const pending = templatesResult.templates.filter((t) => t.status === "PENDING" && t.metaTemplateId);
       const updatedList = [];
       for (const t of pending) {
         try {

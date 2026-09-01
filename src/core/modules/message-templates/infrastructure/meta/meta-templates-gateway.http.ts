@@ -1,3 +1,4 @@
+import { externalServiceError, validationError } from "../../../../../shared/errors/domain-errors";
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { MessageTemplateStatus } from "../../domain/message-template.entity";
@@ -17,6 +18,9 @@ type MetaSubmitResponse = {
     message: string;
     type: string;
     code: number;
+    error_subcode?: number;
+    error_user_title?: string;
+    error_user_msg?: string;
   };
 };
 
@@ -26,6 +30,26 @@ type MetaFetchResponse = {
   rejected_reason?: string;
   reason?: string;
 };
+
+function extractMetaErrorMessage(status: number, errorText: string): Error {
+  let userMsg = "";
+  try {
+    const parsed = JSON.parse(errorText);
+    if (parsed?.error?.error_user_msg) {
+      userMsg = parsed.error.error_user_msg;
+    } else if (parsed?.error?.error_user_title) {
+      userMsg = `${parsed.error.error_user_title}. ${parsed.error.message || ""}`;
+    } else if (parsed?.error?.message) {
+      userMsg = parsed.error.message;
+    }
+  } catch (_) {}
+
+  const finalMsg = userMsg ? `Meta rechazó la plantilla: ${userMsg}` : `Meta Graph API error (${status}): ${errorText}`;
+  if (status === 400) {
+    return validationError(finalMsg);
+  }
+  return externalServiceError(finalMsg);
+}
 
 export class MetaTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   constructor(
@@ -40,7 +64,7 @@ export class MetaTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   private get wabaId(): string {
     const id = this.env.META_WABA_ID?.trim();
     if (!id) {
-      throw new Error(
+      throw validationError(
         "Falta configurar META_WABA_ID en las variables de entorno (.env). La API de Meta exige el WABA ID (WhatsApp Business Account ID), no el Phone Number ID, para la gestión de plantillas de mensaje.",
       );
     }
@@ -125,12 +149,12 @@ export class MetaTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error({ status: response.status, body: errorText }, "Meta API rechazo la creacion de plantilla");
-        throw new Error(`Meta Graph API error (${response.status}): ${errorText}`);
+        throw extractMetaErrorMessage(response.status, errorText);
       }
 
       const data = (await response.json()) as MetaSubmitResponse;
       if (!data.id) {
-        throw new Error("Respuesta de Meta Graph API sin ID de plantilla");
+        throw externalServiceError("Respuesta de Meta Graph API sin ID de plantilla");
       }
 
       const status: MessageTemplateStatus = (data.status as MessageTemplateStatus) || "PENDING";
@@ -157,7 +181,7 @@ export class MetaTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
     if (!response.ok) {
       const errorText = await response.text();
       this.logger.error({ status: response.status, metaTemplateId }, "Meta API rechazo la consulta de estado");
-      throw new Error(`Meta Graph API fetch error (${response.status}): ${errorText}`);
+      throw extractMetaErrorMessage(response.status, errorText);
     }
 
     const data = (await response.json()) as MetaFetchResponse;

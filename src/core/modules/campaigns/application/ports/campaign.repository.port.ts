@@ -12,6 +12,8 @@ export type CreateCampaignInput = {
   quickModeIntervalSeconds?: number;
   chatRouting?: Partial<CampaignChatRouting>;
   contactEnrichment?: Partial<CampaignContactEnrichment>;
+  templateName?: string | null;
+  templateLanguage?: string | null;
 };
 
 export type ListCampaignsFilter = {
@@ -31,6 +33,10 @@ export interface CampaignRepositoryPort {
   incrementCounters(
     id: string,
     counters: { sent?: number; failed?: number },
+  ): Promise<void>;
+  resetCounters(
+    id: string,
+    options: { resetSent?: boolean; resetFailed?: boolean },
   ): Promise<void>;
   updateTotalRecipients(id: string, total: number): Promise<void>;
   delete(id: string): Promise<boolean>;

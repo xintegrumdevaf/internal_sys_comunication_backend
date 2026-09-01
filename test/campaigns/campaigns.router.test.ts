@@ -5,19 +5,19 @@ import * as XLSX from "xlsx";
 import {
   CampaignRecipientRepositoryFake,
   CampaignRepositoryFake,
-} from "../infrastructure/postgres/campaign.repository.pg";
-import { CampaignQueueFake } from "../infrastructure/queue/campaign-worker.service";
-import { CampaignFileParserService } from "../application/services/campaign-file-parser.service";
-import { CreateCampaignUseCase } from "../application/use-cases/create-campaign.use-case";
-import { ImportCampaignRecipientsUseCase } from "../application/use-cases/import-campaign-recipients.use-case";
-import { StartCampaignUseCase } from "../application/use-cases/start-campaign.use-case";
-import { SuspendCampaignUseCase } from "../application/use-cases/suspend-campaign.use-case";
-import { ResumeCampaignUseCase } from "../application/use-cases/resume-campaign.use-case";
-import { ListCampaignsUseCase } from "../application/use-cases/list-campaigns.use-case";
-import { GetCampaignUseCase } from "../application/use-cases/get-campaign.use-case";
-import { DeleteCampaignUseCase } from "../application/use-cases/delete-campaign.use-case";
-import { createCampaignsRouter } from "./campaigns.router";
-import type { Agent } from "../../departments/domain/agent.entity";
+} from "../../src/core/modules/campaigns/infrastructure/postgres/campaign.repository.pg";
+import { CampaignQueueFake } from "../../src/core/modules/campaigns/infrastructure/queue/campaign-worker.service";
+import { CampaignFileParserService } from "../../src/core/modules/campaigns/application/services/campaign-file-parser.service";
+import { CreateCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/create-campaign.use-case";
+import { ImportCampaignRecipientsUseCase } from "../../src/core/modules/campaigns/application/use-cases/import-campaign-recipients.use-case";
+import { StartCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/start-campaign.use-case";
+import { SuspendCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/suspend-campaign.use-case";
+import { ResumeCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/resume-campaign.use-case";
+import { ListCampaignsUseCase } from "../../src/core/modules/campaigns/application/use-cases/list-campaigns.use-case";
+import { GetCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/get-campaign.use-case";
+import { DeleteCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/delete-campaign.use-case";
+import { createCampaignsRouter } from "../../src/core/modules/campaigns/presentation/campaigns.router";
+import type { Agent } from "../../src/core/modules/departments/domain/agent.entity";
 
 describe("Campaigns Router (Integration)", () => {
   function setupApp() {

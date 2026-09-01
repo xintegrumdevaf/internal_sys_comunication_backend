@@ -4,4 +4,10 @@
  */
 export interface WhatsAppSenderPort {
   sendText(waPhone: string, body: string): Promise<{ externalId: string }>;
+  sendTemplate(
+    waPhone: string,
+    templateName: string,
+    languageCode?: string,
+    parameters?: string[],
+  ): Promise<{ externalId: string }>;
 }

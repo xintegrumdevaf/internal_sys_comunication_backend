@@ -40,3 +40,8 @@ export function businessError(message: string): DomainError {
 export function authorizationError(message: string): DomainError {
   return new DomainError("AUTHORIZATION_ERROR", message);
 }
+
+export function externalServiceError(message: string, options: { retryable?: boolean } = {}): DomainError {
+  return new DomainError("EXTERNAL_SERVICE_ERROR", message, options);
+}
+

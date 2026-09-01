@@ -8,6 +8,7 @@ import {
   parseWhatsAppWebhookPayload,
   parseWhatsAppTemplateStatusUpdates,
 } from "../infrastructure/whatsapp/parse-whatsapp-webhook";
+import type { ReceiveInboundMessageUseCase } from "../application/use-cases/receive-inbound-message.use-case";
 
 export type WhatsAppWebhookRouterDeps = {
   env: Env;

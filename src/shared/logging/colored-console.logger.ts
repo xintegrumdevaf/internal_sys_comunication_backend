@@ -127,6 +127,9 @@ export class ColoredConsoleLogger implements Logger {
       if (key === "conversationId" || key === "messageId" || key === "caseId") {
         value = shortId(value) ?? value;
       }
+      if (key === "err" && value instanceof Error) {
+        value = { message: value.message, name: value.name };
+      }
       if (key === "body" && typeof value === "string" && value.length > 100) {
         value = `${value.slice(0, 97)}...`;
       }
