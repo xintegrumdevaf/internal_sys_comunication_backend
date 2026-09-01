@@ -47,6 +47,8 @@ export type SupportInternetDiagnosticTechnical = {
 // ... (rest of file)
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
+  lastSearchedNationalId?: string;
+  clientNotFound?: boolean;
   contract?: {
     id: string;
     sector: string;

@@ -16,6 +16,7 @@ import type { WorkflowStepOutcome } from "../engine/workflow-definition";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
 import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
+import { normalizeNationalId } from "../../../customers/domain/national-id";
 
 const MAX_STEPS_PER_RUN = 10;
 
@@ -95,10 +96,13 @@ export class AdvanceCaseUseCase {
         waitingStep.requireAll?.includes("nationalId") ||
         waitingStep.requireAny?.includes("nationalId");
       if (needsNationalId && input.text && !entities.nationalId) {
-        const idMatch = input.text.match(/\b\d{8,13}\b/);
+        const idMatch = input.text.match(/\b\d{9,13}\b/);
         if (idMatch) {
-          entities = { ...entities, nationalId: idMatch[0] };
+          entities = { ...entities, nationalId: normalizeNationalId(idMatch[0]) };
         }
+      }
+      if (entities.nationalId) {
+        entities = { ...entities, nationalId: normalizeNationalId(entities.nationalId) };
       }
 
       const requiredKeys = [

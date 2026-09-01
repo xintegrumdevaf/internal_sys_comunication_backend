@@ -4,7 +4,8 @@ import {
   type SupportInternetContext,
   type SupportInternetDiagnosticTechnical,
 } from "../../../domain/contexts/support-internet.context";
-import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
 /**
@@ -153,8 +154,9 @@ const validateClient: WorkflowStateHandler = async ({
   }
 
   // Fusionar entities del WaitingStep (nationalId) antes de llamar a n8n.
-  const nationalIdFromEntities =
+  const rawNationalId =
     typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
+  const nationalIdFromEntities = normalizeNationalId(rawNationalId);
   if (nationalIdFromEntities) {
     data = {
       ...data,
@@ -163,9 +165,18 @@ const validateClient: WorkflowStateHandler = async ({
         fullName: data.client?.fullName ?? "",
       },
     };
+  } else if (data.client?.nationalId) {
+    data = {
+      ...data,
+      client: {
+        ...data.client,
+        nationalId: normalizeNationalId(data.client.nationalId),
+      },
+    };
   }
 
-  if (!data.client?.nationalId) {
+  const client = data.client;
+  if (!client?.nationalId) {
     const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
@@ -175,8 +186,25 @@ const validateClient: WorkflowStateHandler = async ({
     caseId,
     conversationId,
     correlationId,
-    input: { id: data.client.nationalId },
+    input: { id: client.nationalId },
   });
+
+  const isN8nNotFound =
+    !result.success &&
+    (result.error.type === "NOT_FOUND" ||
+      result.error.message?.toLowerCase().includes("not found") ||
+      result.error.message?.toLowerCase().includes("no se encontr"));
+
+  if (isN8nNotFound) {
+    const nextData: SupportInternetContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
 
   if (!result.success) {
     return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
@@ -185,9 +213,22 @@ const validateClient: WorkflowStateHandler = async ({
   const output = result.result as ValidateClientOutput;
 
   if (!output.found || output.contracts.length === 0) {
-    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    const nextData: SupportInternetContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
+
+  // Si encontró, limpiamos flags de no encontrado
+  data = {
+    ...data,
+    clientNotFound: false,
+    lastSearchedNationalId: undefined,
+  };
 
   if (output.contracts.length > 1) {
     const pendingContracts = output.contracts.map((c) => ({
@@ -208,7 +249,7 @@ const validateClient: WorkflowStateHandler = async ({
   }
 
   const found = output.contracts[0]!;
-  const nationalId = data.client.nationalId;
+  const nationalId = client.nationalId;
   const nextData: SupportInternetContext = {
     ...data,
     pendingContracts: undefined,
@@ -534,7 +575,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     WAITING_USER_CLIENT: {
       pendingQuestion: "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
-      maxAttempts: 2,
+      maxAttempts: 3,
     },
     WAITING_USER_DISAMBIGUATE: {
       pendingQuestion:

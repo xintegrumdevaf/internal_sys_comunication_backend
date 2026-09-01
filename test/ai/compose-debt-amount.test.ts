@@ -69,4 +69,24 @@ describe("composeReply — monto de deuda (06_AI_PROMPTS.md §4)", () => {
     expect(body).toContain("45.50");
     expect(body).toContain("Revisé tu cuenta");
   });
+
+  it("resolveReplyTemplate en WAITING_USER_CLIENT con clientNotFound informa que no se encontró información", () => {
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        clientNotFound: true,
+        lastSearchedNationalId: "0942783440",
+      },
+    };
+    const resolved = resolveReplyTemplate({
+      definition: supportInternetWorkflow,
+      outcome: { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context },
+      context,
+    });
+
+    expect(resolved.status).toBe("WAITING_USER");
+    expect(resolved.templateHint).toContain("0942783440");
+    expect(resolved.templateHint).toContain("No encontré información");
+    expect(resolved.resultVars.notFoundNationalId).toBe("0942783440");
+  });
 });

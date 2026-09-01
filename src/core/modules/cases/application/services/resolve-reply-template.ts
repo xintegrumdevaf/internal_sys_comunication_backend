@@ -83,12 +83,18 @@ export function resolveReplyTemplate(input: {
       return f;
     });
 
-    if (friendlyMissingFields && friendlyMissingFields.length > 0) {
+    if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
+      templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
+    } else if (friendlyMissingFields && friendlyMissingFields.length > 0) {
       templateHint = `Aún necesitamos ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
     }
     return {
       templateHint,
-      resultVars: { ...flattenContext(contextData), question },
+      resultVars: {
+        ...flattenContext(contextData),
+        question,
+        notFoundNationalId: contextData.lastSearchedNationalId ?? "",
+      },
       action: outcome.nextState,
       status: "WAITING_USER",
       missingFields,

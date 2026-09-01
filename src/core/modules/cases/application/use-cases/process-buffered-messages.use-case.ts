@@ -19,6 +19,7 @@ import { DepartmentResolverService } from "../services/department-resolver.servi
 import { resolveReplyTemplate } from "../services/resolve-reply-template";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { AdvanceCaseUseCase } from "./advance-case.use-case";
+import { normalizeNationalId } from "../../../customers/domain/national-id";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -281,16 +282,20 @@ export class ProcessBufferedMessagesUseCase {
         const customerMessages = history.filter((m) => m.author === "customer");
         for (const msg of customerMessages) {
           const body = msg.body.trim();
-          const match = body.match(/\b\d{10}\b/);
+          const match = body.match(/\b\d{9,13}\b/);
           if (match) {
+            const normalized = normalizeNationalId(match[0]);
             interpretation.entities = {
               ...interpretation.entities,
-              nationalId: match[0],
+              nationalId: normalized,
             };
-            log.info({ nationalId: match[0] }, "cédula extraída automáticamente del historial de la conversación");
+            log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
             break;
           }
         }
+      }
+      if (interpretation.entities?.nationalId) {
+        interpretation.entities.nationalId = normalizeNationalId(interpretation.entities.nationalId);
       }
 
       log.info(

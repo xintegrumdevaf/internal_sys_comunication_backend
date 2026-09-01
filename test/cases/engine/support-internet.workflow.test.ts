@@ -395,4 +395,64 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     }
     expect(outcome.context.data.contract?.oltName).toBe("olt1");
   });
+
+  it("VALIDATE_CLIENT autocompleta con 0 si la cédula viene con 9 dígitos", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    let calledId = "";
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: (params) => {
+        calledId = String(params.input.id);
+        return {
+          success: true,
+          result: {
+            found: true,
+            contracts: [
+              {
+                id: "1",
+                name: "Juan",
+                router: { sector: "bellavista", olt_name: "cData", pon: "1", serial: "S1" },
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("VALIDATE_CLIENT", emptyContext, gateway),
+      entities: { nationalId: "942783440" },
+    });
+
+    expect(calledId).toBe("0942783440");
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+  });
+
+  it("VALIDATE_CLIENT no escala a humano si no encuentra al cliente; queda en WAITING_USER_CLIENT", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: false,
+          contractNumbers: 0,
+          contracts: [],
+        },
+      }),
+    });
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("VALIDATE_CLIENT", emptyContext, gateway),
+      entities: { nationalId: "0999999999" },
+    });
+
+    expect(outcome).toMatchObject({
+      type: "WAITING_USER",
+      nextState: "WAITING_USER_CLIENT",
+    });
+    if (outcome.type !== "WAITING_USER" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.clientNotFound).toBe(true);
+    expect(outcome.context.data.lastSearchedNationalId).toBe("0999999999");
+  });
 });
