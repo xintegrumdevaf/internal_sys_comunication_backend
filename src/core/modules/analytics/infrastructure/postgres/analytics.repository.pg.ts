@@ -52,7 +52,9 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       )
       SELECT
         COUNT(*)::int AS total_cases,
-        COUNT(*) FILTER (WHERE status IN ('NEW', 'ACTIVE', 'WAITING_USER', 'PAUSED', 'ESCALATED', 'HUMAN_ACTIVE'))::int AS active_cases,
+        (SELECT COUNT(*)::int FROM "case" c_live
+         WHERE c_live.status IN ('NEW', 'ACTIVE', 'WAITING_USER', 'PAUSED', 'ESCALATED', 'HUMAN_ACTIVE')
+           AND ($3::uuid[] IS NULL OR c_live.department_id = ANY($3::uuid[]))) AS active_cases,
         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_cases,
         COUNT(*) FILTER (WHERE status = 'COMPLETED' AND NOT was_escalated AND NOT had_human_agent)::int AS bot_completed_cases,
         COUNT(*) FILTER (WHERE was_escalated)::int AS escalated_cases,

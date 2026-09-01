@@ -126,15 +126,20 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     const result = await ragService.query(question, 4);
 
     if (!result.found || result.confidenceScore < 0.15) {
+      const isSalesQuery =
+        wantsUpgrade ||
+        /plan|precio|costo|contrat|velocidad|mega|promo|oferta|paquete|instalac|cobertura|vendedor|asesor/i.test(question);
+
       const nextData: GeneralInquiryContext = {
         ...data,
         found: false,
-        escalationReason: "UNANSWERED_INQUIRY",
+        escalationReason: isSalesQuery ? "SALES_UNANSWERED" : "UNANSWERED_INQUIRY",
       };
       return {
         type: "ESCALATED",
-        reason:
-          "No se encontró información suficiente en la base de conocimiento para responder la consulta.",
+        reason: isSalesQuery
+          ? "Consulta comercial o de planes no resuelta por la base de conocimiento — derivar a Ventas"
+          : "No se encontró información suficiente en la base de conocimiento para responder la consulta.",
         context: withContext(nextData, context),
       };
     }

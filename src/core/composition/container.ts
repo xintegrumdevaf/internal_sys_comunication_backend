@@ -439,6 +439,7 @@ export function createContainer(): Container {
     logger: casesLogger,
     identity: conversationIdentity,
     escalationService,
+    departmentResolver,
   });
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({
     caseRepo,
