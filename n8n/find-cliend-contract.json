@@ -14,119 +14,207 @@
   "nodes": [
     {
       "parameters": {
-        "inputSource": "jsonExample",
-        "jsonExample": "{\n  \"id\": \"1205500216\",\n  \"name\": \"Abel eliseo\"\n}"
-      },
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        -448,
-        -576
-      ],
-      "id": "f9e57f7c-8cf9-4e8b-af39-7c6978978b3d",
-      "name": "When Executed by Another Workflow"
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "value": "1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE",
-          "mode": "list",
-          "cachedResultName": "ReporteContratos",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": 703697375,
-          "mode": "list",
-          "cachedResultName": "ReporteContratos",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UaE52zFUBGPG8OvztteEoMeOip2mkLYFktqsCXtmUrE/edit#gid=703697375"
-        },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "ruc_clpv",
-              "lookupValue": "={{ $json.body.input.id }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        -576,
-        -160
-      ],
-      "id": "79281976-7e7a-40d4-bd71-5c1c4b1daf0a",
-      "name": "Get identity",
-      "alwaysOutputData": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "cLWMipifJtrB1TEr",
-          "name": "Google Sheets account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $('Get identity').all();\n\n/**\n * Helpers\n */\n\nfunction clean(value = \"\") {\n\treturn value\n\t\t.replace(/<br\\s*\\/?>/gi, \"\")\n\t\t.trim();\n}\n\nfunction extractSector(nomRouter = \"\") {\n\tconst value = clean(nomRouter);\n\n\tif (!value) return \"\";\n\n\tconst parts = value\n\t\t.split(\"-\")\n\t\t.map(p => p.trim())\n\t\t.filter(Boolean);\n\n\tconst ignored = [\"MKT\", \"MTD\"];\n\n\tconst sector = parts.find(p => !ignored.includes(p.toUpperCase()));\n\n\tif (!sector) return \"\";\n\n\treturn sector\n\t\t.toLowerCase()\n\t\t.replace(/\\s+/g, \" \")\n\t\t.trim();\n}\n\nfunction extractOltName(nomOlt = \"\") {\n\n\tconst value = clean(nomOlt).toUpperCase();\n\n\tif (!value) return \"\";\n\n\t// CDATA-BELLAVISTA\n\tif (value.startsWith(\"CDATA-\")) {\n\t\treturn \"cData\";\n\t}\n\n\t// SOLES_CDATA\n\tif (value === \"SOLES_CDATA\") {\n\t\treturn \"solesCData\";\n\t}\n\n\t// SOLES_KINGTYPE\n\tif (value === \"SOLES_KINGTYPE\") {\n\t\treturn \"solesKingtype\";\n\t}\n\n\t// SANTA BARBARA\n\tif (value === \"SANTA BARBARA\") {\n\t\treturn \"santaBarbara\";\n\t}\n\n\t// CALACALI\n\tif (value === \"CALACALI\") {\n\t\treturn \"calacali\";\n\t}\n\n\t// PIFO\n\tif (value === \"PIFO\") {\n\t\treturn \"pifo\";\n\t}\n\n\t// POMASQUI\n\tif (value === \"POMASQUI\") {\n\t\treturn \"pomasqui\";\n\t}\n\n\t// BELLAVISTA\n\tif (value === \"BELLAVISTA\") {\n\t\treturn \"bellavista\";\n\t}\n\n\t// TOTORACOCHA\n\tif (value === \"TOTORACOCHA\") {\n\t\treturn \"totoracocha\";\n\t}\n\n\t// Cualquier otro caso\n\treturn value\n\t\t.toLowerCase()\n\t\t.replace(/\\s+/g, \" \")\n\t\t.trim();\n}\n\nfunction extractPon(ponOnu = \"\") {\n\tconst match = ponOnu.match(/\\/(\\d+):/);\n\treturn match ? match[1] : \"\";\n}\n\nfunction buildContract(row) {\n\n\tconst sector = extractSector(row.nom_router);\n\n\treturn {\n\t\tid: row.ruc_clpv ? row.ruc_clpv.toString() : \"\",\n\t\tname: row.nom_clpv,\n\t\taddress: row.direccion,\n\t\tstatus: row.estado,\n\n\t\trouter: {\n\t\t\tsector,\n\t\t\tolt_name: extractOltName(row.nom_olt, sector),\n\t\t\tpon: extractPon(row.pon_onu),\n\t\t\tserial: row.seriales\n\t\t}\n\t};\n}\n\n/**\n * Solo existe un contrato\n */\nif (data.length === 1) {\n\n\treturn [\n\t\t{\n\t\t\tjson: {\n\t\t\t\tsuccess: true,\n\t\t\t\tresult: {\n\t\t\t\t\tfound: true,\n\t\t\t\t\tcontractNumbers: 1,\n\t\t\t\t\tcontracts: [\n\t\t\t\t\t\tbuildContract(data[0].json)\n\t\t\t\t\t]\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t];\n}\n\n/**\n * Filtrado cuando existen varios contratos\n */\nconst workflowData = $('When Executed by Another Workflow').first().json;\n\nconst address = (workflowData.address || \"\").toLowerCase();\nconst name = (workflowData.name || \"\").toLowerCase();\nconst serial = workflowData.serial;\n\nconst filteredData = data.filter(item => {\n\n\tconst row = item.json;\n\n\tconst itemName = (row.nom_clpv || \"\").toLowerCase();\n\tconst itemAddress = (row.direccion || \"\").toLowerCase();\n\tconst itemSerial = row.seriales;\n\n\tconst matchesName = !name || itemName.includes(name);\n\tconst matchesAddress = !address || itemAddress.includes(address);\n\tconst matchesSerial = !serial || itemSerial == serial.toString();\n\n\treturn matchesName && matchesAddress && matchesSerial;\n});\n\nconst contracts = filteredData.map(item => buildContract(item.json));\n\nreturn [\n\t{\n\t\tjson: {\n\t\t\tsuccess: true,\n\t\t\tresult: {\n\t\t\t\tfound: contracts.length > 0,\n\t\t\t\tcontractNumbers: contracts.length,\n\t\t\t\tcontracts\n\t\t\t}\n\t\t}\n\t}\n];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -368,
-        -160
-      ],
-      "id": "80f88aa3-5fa1-4bec-9ced-fac4c357bfce",
-      "name": "Format data"
-    },
-    {
-      "parameters": {
         "httpMethod": "POST",
         "path": "find-client-contract",
         "responseMode": "responseNode",
         "options": {}
       },
+      "id": "wh-fc",
+      "name": "Webhook",
+      "position": [
+        0,
+        0
+      ],
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
+      "webhookId": "8932aef1-3bc3-496d-a612-3e8c0cfdc9e7"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "auth-fc-1",
+              "leftValue": "={{ $json.headers['x-internal-api-key'] }}",
+              "operator": {
+                "name": "filter.operator.equals",
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "={{ $env.API_INTERNAL_KEY }}"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-auth-fc",
+      "name": "Auth Valid",
       "position": [
-        -784,
-        -160
+        224,
+        0
       ],
-      "id": "415a39d9-261f-49e4-b90b-a3fe3bd78ebc",
-      "name": "Webhook",
-      "webhookId": "bd5998a1-c6c2-4d6e-ad3e-3b3b6b5c9b59"
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"success\": false,\n  \"result\": null,\n  \"error\": {\n    \"type\": \"VALIDATION_ERROR\",\n    \"message\": \"Unauthorized\",\n    \"retryable\": false\n  }\n}",
+        "options": {}
+      },
+      "id": "set-unauth-fc",
+      "name": "Unauthorized Body",
+      "position": [
+        448,
+        192
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $('Format data').item.json }}",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "resp-unauth-fc",
+      "name": "Respond Unauthorized",
+      "position": [
+        672,
+        192
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1wFaJYgCPCLmN3nPEah_NFNaS3l4XQccJJ8i9D48bsMo",
+          "mode": "list",
+          "cachedResultName": "CONTRATOS",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1wFaJYgCPCLmN3nPEah_NFNaS3l4XQccJJ8i9D48bsMo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1889751577,
+          "mode": "list",
+          "cachedResultName": "ReporteContratos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1wFaJYgCPCLmN3nPEah_NFNaS3l4XQccJJ8i9D48bsMo/edit#gid=1889751577"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ruc_clpv",
+              "lookupValue": "={{ $('Webhook').item.json.body.input.id }}"
+            }
+          ]
+        },
         "options": {}
       },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
+      "alwaysOutputData": true,
+      "id": "sheets-fc",
+      "name": "Get identity",
       "position": [
-        -160,
-        -160
+        448,
+        -48
       ],
-      "id": "97912f96-7659-4f8a-94e4-d472b371f6f8",
-      "name": "Respond to Webhook"
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XuIQR46gmyrhWYxR",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const first = $input.first()?.json || {};\nif (first.error) {\n  const msg = typeof first.error === 'string'\n    ? first.error\n    : (first.error.message || first.message || 'Google Sheets error');\n  return [{\n    json: {\n      success: false,\n      result: null,\n      error: {\n        type: 'EXTERNAL_SERVICE_ERROR',\n        message: msg,\n        retryable: true,\n      },\n    },\n  }];\n}\n\nconst data = $input.all().filter((item) => item.json && item.json.ruc_clpv);\n\nfunction clean(value = '') {\n  return String(value).replace(/<br\\s*\\/?>/gi, '').trim();\n}\n\nfunction extractSector(nomRouter = '') {\n  const value = clean(nomRouter);\n  if (!value) return '';\n  const parts = value.split('-').map((p) => p.trim()).filter(Boolean);\n  const ignored = ['MKT', 'MTD'];\n  const sector = parts.find((p) => !ignored.includes(p.toUpperCase()));\n  if (!sector) return '';\n  return sector.toLowerCase().replace(/\\s+/g, ' ').trim();\n}\n\nfunction extractOltName(nomOlt = '') {\n  const value = clean(nomOlt).toUpperCase();\n  if (!value) return '';\n  if (value.startsWith('CDATA-')) return 'cData';\n  if (value === 'SOLES_CDATA') return 'solesCData';\n  if (value === 'SOLES_KINGTYPE') return 'solesKingtype';\n  if (value === 'SANTA BARBARA') return 'santaBarbara';\n  if (value === 'CALACALI') return 'calacali';\n  if (value === 'PIFO') return 'pifo';\n  if (value === 'POMASQUI') return 'pomasqui';\n  if (value === 'BELLAVISTA') return 'bellavista';\n  if (value === 'TOTORACOCHA') return 'totoracocha';\n  return value.toLowerCase().replace(/\\s+/g, ' ').trim();\n}\n\nfunction extractPon(ponOnu = '') {\n  const match = String(ponOnu).match(/\\/(\\d+):/);\n  return match ? match[1] : '';\n}\n\nfunction extractIp(ips = '') {\n  const value = clean(ips);\n  const match = value.match(/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/);\n  return match ? match[0] : '';\n}\n\nfunction buildContract(row) {\n  const sector = extractSector(row.nom_router);\n  const ip = extractIp(row.ips);\n  return {\n    id: row.ruc_clpv,\n    name: row.nom_clpv,\n    address: row.direccion,\n    status: row.estado,\n    ip,\n    router: {\n      sector,\n      olt_name: extractOltName(row.nom_olt),\n      pon: extractPon(row.pon_onu),\n      serial: clean(row.seriales),\n      ip,\n    },\n  };\n}\n\nlet contracts;\nif (data.length <= 1) {\n  contracts = data.map((item) => buildContract(item.json));\n} else {\n  const input = $('Webhook').first().json.body?.input || {};\n  const address = String(input.address || '').toLowerCase();\n  const name = String(input.name || '').toLowerCase();\n  const serial = input.serial;\n  const filteredData = data.filter((item) => {\n    const row = item.json;\n    const itemName = String(row.nom_clpv || '').toLowerCase();\n    const itemAddress = String(row.direccion || '').toLowerCase();\n    const itemSerial = clean(row.seriales);\n    const matchesName = !name || itemName.includes(name);\n    const matchesAddress = !address || itemAddress.includes(address);\n    const matchesSerial = !serial || String(itemSerial) === String(serial);\n    return matchesName && matchesAddress && matchesSerial;\n  });\n  contracts = filteredData.map((item) => buildContract(item.json));\n}\n\nreturn [{\n  json: {\n    success: true,\n    result: {\n      found: contracts.length > 0,\n      contractNumbers: contracts.length,\n      contracts,\n    },\n    error: null,\n  },\n}];"
+      },
+      "id": "code-fc",
+      "name": "Format And Wrap",
+      "position": [
+        672,
+        -48
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "resp-ok-fc",
+      "name": "Respond to Webhook",
+      "position": [
+        880,
+        -48
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5
     }
   ],
   "connections": {
-    "When Executed by Another Workflow": {
+    "Auth Valid": {
       "main": [
-        []
+        [
+          {
+            "index": 0,
+            "node": "Get identity",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "Unauthorized Body",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Format And Wrap": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond to Webhook",
+            "type": "main"
+          }
+        ]
       ]
     },
     "Get identity": {
       "main": [
         [
           {
-            "node": "Format data",
-            "type": "main",
-            "index": 0
+            "index": 0,
+            "node": "Format And Wrap",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Unauthorized Body": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond Unauthorized",
+            "type": "main"
           }
         ]
       ]
@@ -135,20 +223,9 @@
       "main": [
         [
           {
-            "node": "Get identity",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Format data": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
+            "index": 0,
+            "node": "Auth Valid",
+            "type": "main"
           }
         ]
       ]

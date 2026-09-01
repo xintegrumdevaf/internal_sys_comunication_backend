@@ -73,6 +73,8 @@ export type QualityAnalysisFinding = {
   category: "aggression" | "disrespect" | "neglect" | "misinformation" | "inefficiency" | "other";
   excerpt: string;
   rationale: string;
+  /** Recomendación constructiva de cómo debió haberse abordado o respondido. */
+  recommendation?: string;
 };
 
 export type QualityAnalysis = {

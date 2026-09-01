@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+﻿import dotenv from "dotenv";
 dotenv.config({ override: true });
 import { z } from "zod";
 
@@ -61,10 +61,14 @@ const envSchema = z.object({
   AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT: z.coerce.number().int().positive().default(6),
 
   // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
-  // (docs/spec/01_DATA_MODEL.md Â§2, v3) â€” aqui solo quedan defaults globales,
+  // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,
   // el timeout/retries por accion especifica se puede sobreescribir en la fila.
   N8N_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
   N8N_CALL_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
+
+  // Microservicio de diagnostico MikroTik/OLT directo (sin pasar por n8n)
+  MIKROTIK_SERVICE_URL: z.string().default("http://localhost:3001/api"),
+  MIKROTIK_DIAGNOSTIC_TIMEOUT_MS: z.coerce.number().int().positive().default(35000),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -33,10 +33,6 @@ export class InstrumentedN8nGateway implements N8nGatewayPort {
       log.info({ idempotencyKey }, "accion de n8n ya ejecutada, reutilizando resultado (idempotencia)");
       return { success: true, result: existing.output ?? {} };
     }
-    if (existing && existing.status === "FAILED" && existing.error) {
-      log.info({ idempotencyKey }, "accion de n8n ya fallo antes, reutilizando error (idempotencia)");
-      return { success: false, error: existing.error };
-    }
 
     const execution = await this.executionRepo.start({
       workflowInstanceId: this.workflowInstanceId,

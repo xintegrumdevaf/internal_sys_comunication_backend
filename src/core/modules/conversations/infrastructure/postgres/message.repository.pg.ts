@@ -156,4 +156,13 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     );
     return rows.map(mapRow);
   }
+
+  async listDistinctAgentIdsByCase(caseId: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ agent_id: string }>(
+      `SELECT DISTINCT agent_id FROM message
+       WHERE case_id = $1 AND author = 'agent' AND agent_id IS NOT NULL`,
+      [caseId],
+    );
+    return rows.map((r) => r.agent_id);
+  }
 }

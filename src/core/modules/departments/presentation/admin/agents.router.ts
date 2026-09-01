@@ -22,6 +22,7 @@ const createBodySchema = z.object({
   email: z.string().trim().email(),
   role: roleSchema.optional(),
   primaryDepartmentId: z.string().uuid().nullable().optional(),
+  departmentIds: z.array(z.string().uuid()).optional(),
   autoAssignEnabled: z.boolean().optional(),
 });
 
@@ -30,6 +31,7 @@ const updateBodySchema = z.object({
   email: z.string().trim().email().optional(),
   role: roleSchema.optional(),
   primaryDepartmentId: z.string().uuid().nullable().optional(),
+  departmentIds: z.array(z.string().uuid()).optional(),
   active: z.boolean().optional(),
   autoAssignEnabled: z.boolean().optional(),
 });
@@ -41,6 +43,13 @@ const updateBodySchema = z.object({
  * session.middleware.ts), no de un header declarado por el cliente.
  * `GET /api/agents` (lectura) sigue viviendo en `departments.router.ts`.
  */
+const resetPasswordBodySchema = z
+  .object({
+    password: z.string().min(8).optional(),
+    mustChangePassword: z.boolean().optional(),
+  })
+  .optional();
+
 export function createAgentsAdminRouter(deps: AgentsAdminRouterDeps): Router {
   const router = Router();
 
@@ -92,9 +101,15 @@ export function createAgentsAdminRouter(deps: AgentsAdminRouterDeps): Router {
   router.post("/api/agents/:id/reset-password", async (req, res, next) => {
     try {
       const admin = requireRole(req, ["admin"]);
+      const parsed = resetPasswordBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw validationError(parsed.error.issues.map((issue) => issue.message).join(", "));
+      }
       const { agent, temporaryPassword } = await deps.resetAgentPassword.execute({
         agentId: req.params.id!,
         actorId: admin.id,
+        password: parsed.data?.password,
+        mustChangePassword: parsed.data?.mustChangePassword,
       });
       res.json({ data: { agent: toPublicAgentDto(agent), temporaryPassword } });
     } catch (error) {

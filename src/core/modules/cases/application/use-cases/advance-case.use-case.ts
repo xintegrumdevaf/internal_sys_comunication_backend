@@ -16,6 +16,8 @@ import type { WorkflowStepOutcome } from "../engine/workflow-definition";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
 import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
+import { normalizeNationalId } from "../../../customers/domain/national-id";
+import type { DepartmentResolverService } from "../services/department-resolver.service";
 
 const MAX_STEPS_PER_RUN = 10;
 
@@ -29,6 +31,7 @@ export type AdvanceCaseDeps = {
   /** docs/spec/02_STATE_MACHINE.md §14 — reutilización de identidad por conversación. */
   identity?: ConversationIdentityPort;
   escalationService?: EscalationService;
+  departmentResolver?: DepartmentResolverService;
 };
 
 export type AdvanceCaseInput = {
@@ -95,10 +98,13 @@ export class AdvanceCaseUseCase {
         waitingStep.requireAll?.includes("nationalId") ||
         waitingStep.requireAny?.includes("nationalId");
       if (needsNationalId && input.text && !entities.nationalId) {
-        const idMatch = input.text.match(/\b\d{8,13}\b/);
+        const idMatch = input.text.match(/\b\d{9,13}\b/);
         if (idMatch) {
-          entities = { ...entities, nationalId: idMatch[0] };
+          entities = { ...entities, nationalId: normalizeNationalId(idMatch[0]) };
         }
+      }
+      if (entities.nationalId) {
+        entities = { ...entities, nationalId: normalizeNationalId(entities.nationalId) };
       }
 
       const requiredKeys = [
@@ -214,6 +220,19 @@ export class AdvanceCaseUseCase {
     }
 
     if (outcome.type === "ESCALATED") {
+      let targetDepartmentId = aggregate.case.departmentId;
+      if (
+        this.deps.departmentResolver &&
+        (outcome.reason.toLowerCase().includes("ventas") ||
+          (outcome.context.workflowType === "GENERAL_INQUIRY" &&
+            (outcome.context.data as Record<string, unknown>)?.escalationReason === "SALES_UNANSWERED"))
+      ) {
+        const salesDeptId = await this.deps.departmentResolver.resolveDepartmentId("sales");
+        if (salesDeptId) {
+          targetDepartmentId = salesDeptId;
+        }
+      }
+
       const result = await caseRepo.applyTransition({
         caseId: aggregate.case.id,
         expectedCaseVersion: aggregate.case.version,
@@ -222,6 +241,7 @@ export class AdvanceCaseUseCase {
         context: outcome.context,
         currentState,
         expiresAt: null,
+        departmentId: targetDepartmentId,
       });
       await caseRepo.setAutomationEnabled(aggregate.case.id, false, { reason: outcome.reason });
       await caseRepo.appendEvent(aggregate.case.id, "CASE_ESCALATED", { reason: outcome.reason });

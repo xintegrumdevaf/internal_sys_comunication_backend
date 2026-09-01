@@ -4,7 +4,8 @@ import {
   type SupportInternetContext,
   type SupportInternetDiagnosticTechnical,
 } from "../../../domain/contexts/support-internet.context";
-import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
 /**
@@ -16,7 +17,8 @@ type ValidateClientContractResult = {
   name: string;
   address?: string;
   status?: string;
-  router: { sector: string; olt_name: string; pon: string; serial: string };
+  ip?: string;
+  router: { sector: string; olt_name: string; pon: string; serial: string; ip?: string };
 };
 
 type ValidateClientOutput = {
@@ -147,13 +149,14 @@ const validateClient: WorkflowStateHandler = async ({
           ...(reused.contract.router ? { router: reused.contract.router } : {}),
         },
       };
-      return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+      return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
     }
   }
 
   // Fusionar entities del WaitingStep (nationalId) antes de llamar a n8n.
-  const nationalIdFromEntities =
+  const rawNationalId =
     typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
+  const nationalIdFromEntities = normalizeNationalId(rawNationalId);
   if (nationalIdFromEntities) {
     data = {
       ...data,
@@ -162,9 +165,18 @@ const validateClient: WorkflowStateHandler = async ({
         fullName: data.client?.fullName ?? "",
       },
     };
+  } else if (data.client?.nationalId) {
+    data = {
+      ...data,
+      client: {
+        ...data.client,
+        nationalId: normalizeNationalId(data.client.nationalId),
+      },
+    };
   }
 
-  if (!data.client?.nationalId) {
+  const client = data.client;
+  if (!client?.nationalId) {
     const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
@@ -174,8 +186,25 @@ const validateClient: WorkflowStateHandler = async ({
     caseId,
     conversationId,
     correlationId,
-    input: { id: data.client.nationalId },
+    input: { id: client.nationalId },
   });
+
+  const isN8nNotFound =
+    !result.success &&
+    (result.error.type === "NOT_FOUND" ||
+      result.error.message?.toLowerCase().includes("not found") ||
+      result.error.message?.toLowerCase().includes("no se encontr"));
+
+  if (isN8nNotFound) {
+    const nextData: SupportInternetContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
 
   if (!result.success) {
     return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
@@ -184,9 +213,22 @@ const validateClient: WorkflowStateHandler = async ({
   const output = result.result as ValidateClientOutput;
 
   if (!output.found || output.contracts.length === 0) {
-    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    const nextData: SupportInternetContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
+
+  // Si encontró, limpiamos flags de no encontrado
+  data = {
+    ...data,
+    clientNotFound: false,
+    lastSearchedNationalId: undefined,
+  };
 
   if (output.contracts.length > 1) {
     const pendingContracts = output.contracts.map((c) => ({
@@ -207,7 +249,7 @@ const validateClient: WorkflowStateHandler = async ({
   }
 
   const found = output.contracts[0]!;
-  const nationalId = data.client.nationalId;
+  const nationalId = client.nationalId;
   const nextData: SupportInternetContext = {
     ...data,
     pendingContracts: undefined,
@@ -218,6 +260,7 @@ const validateClient: WorkflowStateHandler = async ({
       oltName: found.router.olt_name,
       pon: found.router.pon,
       serial: found.router.serial,
+      ip: found.ip ?? found.router.ip,
     },
   };
   if (identity) {
@@ -234,7 +277,7 @@ const validateClient: WorkflowStateHandler = async ({
       },
     });
   }
-  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
 };
 
 const disambiguateContract: WorkflowStateHandler = async ({
@@ -285,6 +328,7 @@ const disambiguateContract: WorkflowStateHandler = async ({
       oltName: matched.oltName,
       pon: matched.pon,
       serial: matched.serial,
+      ip: matched.ip,
     },
   };
   if (identity && data.client?.nationalId) {
@@ -301,7 +345,70 @@ const disambiguateContract: WorkflowStateHandler = async ({
       },
     });
   }
-  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
+};
+
+const checkClientStatus: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+}) => {
+  const data = requireSupportInternetContext(context);
+  const sector = data.contract?.sector;
+  const ip = data.contract?.ip;
+
+  if (!sector || !ip) {
+    return { type: "CONTINUE", nextState: "DIAGNOSTIC", context };
+  }
+
+  const result = await gateway.executeAction({
+    action: "CHECK_CLIENT_STATUS",
+    caseId,
+    conversationId,
+    correlationId,
+    input: { sector, ip },
+  });
+
+  if (!result.success) {
+    return { type: "ESCALATED", reason: result.error.message, context };
+  }
+
+  const output = (result.result ?? {}) as {
+    status?: string;
+    list?: string;
+    clientName?: string;
+    creationTime?: string;
+    canBeReactivated?: boolean;
+    reason?: string;
+  };
+
+  const isCortado =
+    output.status?.toUpperCase() === "CORTADO" ||
+    output.list?.toUpperCase() === "CORTADO" ||
+    /cortado/i.test(output.status ?? "") ||
+    /cortado/i.test(output.list ?? "");
+
+  const nextData: SupportInternetContext = {
+    ...data,
+    clientStatus: {
+      sector,
+      ip,
+      status: output.status,
+      clientName: output.clientName,
+      list: output.list,
+      creationTime: output.creationTime,
+      canBeReactivated: output.canBeReactivated,
+      reason: output.reason,
+    },
+  };
+
+  if (isCortado) {
+    return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  }
+
+  return { type: "CONTINUE", nextState: "DIAGNOSTIC", context: withContext(nextData, context) };
 };
 
 const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
@@ -468,7 +575,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     WAITING_USER_CLIENT: {
       pendingQuestion: "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
-      maxAttempts: 2,
+      maxAttempts: 3,
     },
     WAITING_USER_DISAMBIGUATE: {
       pendingQuestion:
@@ -507,6 +614,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,
     WAITING_USER_DISAMBIGUATE: disambiguateContract,
+    CHECK_CLIENT_STATUS: checkClientStatus,
     CHECK_BALANCE: checkBalance,
     RESPOND_DEBT: respondDebt,
     WAITING_USER_PAYMENT: respondDebt,

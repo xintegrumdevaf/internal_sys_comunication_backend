@@ -36,8 +36,18 @@ export async function assertCanWriteCase(input: {
 
   if (agent.role === "admin") return;
 
-  // Pool de triage: solo manager/admin (admin ya retornó).
+  // Si el agente ya es el dueño asignado del caso, siempre puede actuar sobre él
+  if (mode === "act" && caseEntity.assignedAgentId === agent.id) {
+    return;
+  }
+
+  // Caso en pool de triage (sin departamento):
   if (caseEntity.departmentId === null) {
+    // Reclamar está permitido para cualquier agente autenticado o manager/admin
+    if (mode === "claim") {
+      return;
+    }
+    // Para actuar sobre un caso de triage que no está asignado a este agente se requiere manager o admin
     if (agent.role !== "manager") {
       throw authorizationError("El pool de triage solo es accesible para manager o admin");
     }

@@ -14,8 +14,10 @@ type AgentRow = {
   primary_department_id: string | null;
   active: boolean;
   auto_assign_enabled: boolean;
+  must_change_password: boolean;
   created_at: Date;
   password_hash: string | null;
+  department_ids?: string[];
 };
 
 function mapRow(row: AgentRow): Agent {
@@ -25,37 +27,53 @@ function mapRow(row: AgentRow): Agent {
     email: row.email,
     role: row.role,
     primaryDepartmentId: row.primary_department_id,
+    departmentIds: row.department_ids ?? [],
     active: row.active,
     autoAssignEnabled: row.auto_assign_enabled,
+    mustChangePassword: row.must_change_password,
     createdAt: row.created_at,
     passwordHash: row.password_hash,
   };
 }
 
+const AGENT_SELECT_SQL = `
+  SELECT 
+    a.*,
+    COALESCE(array_agg(am.department_id) FILTER (WHERE am.department_id IS NOT NULL), '{}') AS department_ids
+  FROM agent a
+  LEFT JOIN agent_membership am ON a.id = am.agent_id
+`;
+
 export class AgentRepositoryPg implements AgentRepositoryPort {
   constructor(private readonly pool: Pool) {}
 
   async list(): Promise<Agent[]> {
-    const { rows } = await this.pool.query<AgentRow>(`SELECT * FROM agent ORDER BY name ASC`);
+    const { rows } = await this.pool.query<AgentRow>(
+      `${AGENT_SELECT_SQL} GROUP BY a.id ORDER BY a.name ASC`,
+    );
     return rows.map(mapRow);
   }
 
   async findById(id: string): Promise<Agent | null> {
-    const { rows } = await this.pool.query<AgentRow>(`SELECT * FROM agent WHERE id = $1`, [id]);
+    const { rows } = await this.pool.query<AgentRow>(
+      `${AGENT_SELECT_SQL} WHERE a.id = $1 GROUP BY a.id`,
+      [id],
+    );
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
   async findByEmail(email: string): Promise<Agent | null> {
-    const { rows } = await this.pool.query<AgentRow>(`SELECT * FROM agent WHERE lower(email) = lower($1)`, [
-      email,
-    ]);
+    const { rows } = await this.pool.query<AgentRow>(
+      `${AGENT_SELECT_SQL} WHERE lower(a.email) = lower($1) GROUP BY a.id`,
+      [email],
+    );
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
   async create(input: CreateAgentInput): Promise<Agent> {
     const { rows } = await this.pool.query<AgentRow>(
-      `INSERT INTO agent (name, email, role, primary_department_id, auto_assign_enabled, password_hash)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO agent (name, email, role, primary_department_id, auto_assign_enabled, must_change_password, password_hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING *`,
       [
@@ -64,13 +82,26 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
         input.role ?? "agent",
         input.primaryDepartmentId ?? null,
         input.autoAssignEnabled ?? false,
+        input.mustChangePassword ?? true,
         input.passwordHash ?? null,
       ],
     );
-    return mapRow(rows[0]!);
+    const created = rows[0]!;
+    if (input.departmentIds && input.departmentIds.length > 0) {
+      await this.setMemberships(created.id, input.departmentIds);
+      return {
+        ...mapRow(created),
+        departmentIds: input.departmentIds,
+      };
+    }
+    return mapRow(created);
   }
 
   async update(id: string, patch: UpdateAgentPatch): Promise<Agent> {
+    if (patch.departmentIds !== undefined) {
+      await this.setMemberships(id, patch.departmentIds);
+    }
+
     const sets: string[] = [];
     const values: unknown[] = [];
     let i = 1;
@@ -99,6 +130,10 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
       sets.push(`auto_assign_enabled = $${i++}`);
       values.push(patch.autoAssignEnabled);
     }
+    if (patch.mustChangePassword !== undefined) {
+      sets.push(`must_change_password = $${i++}`);
+      values.push(patch.mustChangePassword);
+    }
     if (patch.passwordHash !== undefined) {
       sets.push(`password_hash = $${i++}`);
       values.push(patch.passwordHash);
@@ -111,11 +146,14 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
     }
 
     values.push(id);
-    const { rows } = await this.pool.query<AgentRow>(
-      `UPDATE agent SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+    await this.pool.query(
+      `UPDATE agent SET ${sets.join(", ")} WHERE id = $${i}`,
       values,
     );
-    return mapRow(rows[0]!);
+
+    const updated = await this.findById(id);
+    if (!updated) throw new Error(`agent ${id} not found`);
+    return updated;
   }
 
   async countActiveAdmins(excludeAgentId?: string): Promise<number> {
@@ -133,6 +171,24 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
        ON CONFLICT DO NOTHING`,
       [agentId, departmentId],
     );
+  }
+
+  async setMemberships(agentId: string, departmentIds: string[]): Promise<void> {
+    await this.pool.query(`DELETE FROM agent_membership WHERE agent_id = $1`, [agentId]);
+    if (departmentIds.length > 0) {
+      const uniqueDeptIds = [...new Set(departmentIds)];
+      const values: string[] = [];
+      const params: unknown[] = [agentId];
+      let idx = 2;
+      for (const deptId of uniqueDeptIds) {
+        values.push(`($1, $${idx++})`);
+        params.push(deptId);
+      }
+      await this.pool.query(
+        `INSERT INTO agent_membership (agent_id, department_id) VALUES ${values.join(", ")} ON CONFLICT DO NOTHING`,
+        params,
+      );
+    }
   }
 
   async belongsToDepartment(agentId: string, departmentId: string): Promise<boolean> {

@@ -331,6 +331,7 @@ describe("Etapa 6 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     expect(result.contextPreserved).toBe(true);
     expect(after?.case.context).toEqual(before?.case.context);
     expect(after?.workflowInstance.currentState).toBe("WAITING_USER_DIAGNOSTIC");
-    expect(after?.case.status).toBe("HUMAN_ACTIVE");
+    expect(after?.case.status).toBe("WAITING_USER");
+    expect(after?.case.assignedAgentId).toBeNull();
   });
 });

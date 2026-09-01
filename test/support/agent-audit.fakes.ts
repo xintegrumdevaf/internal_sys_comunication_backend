@@ -18,15 +18,22 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
   readonly agents = new Map<string, Agent>();
   readonly memberships = new Set<string>();
 
-  seed(partial: Partial<Agent> & { name: string; email: string; role?: AgentRole }): Agent {
+  seed(partial: Partial<Agent> & { name: string; email: string; role?: AgentRole; departmentIds?: string[] }): Agent {
+    const id = partial.id ?? randomUUID();
+    const departmentIds = partial.departmentIds ?? [];
+    for (const deptId of departmentIds) {
+      this.memberships.add(`${id}:${deptId}`);
+    }
     const agent: Agent = {
-      id: partial.id ?? randomUUID(),
+      id,
       name: partial.name,
       email: partial.email,
       role: partial.role ?? "agent",
       primaryDepartmentId: partial.primaryDepartmentId ?? null,
+      departmentIds,
       active: partial.active ?? true,
       autoAssignEnabled: partial.autoAssignEnabled ?? false,
+      mustChangePassword: partial.mustChangePassword ?? true,
       createdAt: partial.createdAt ?? new Date(),
       passwordHash: partial.passwordHash ?? null,
     };
@@ -54,6 +61,9 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
   async update(id: string, patch: UpdateAgentPatch): Promise<Agent> {
     const current = this.agents.get(id);
     if (!current) throw new Error(`agent ${id} not found`);
+    if (patch.departmentIds !== undefined) {
+      await this.setMemberships(id, patch.departmentIds);
+    }
     const updated: Agent = { ...current, ...patch };
     this.agents.set(id, updated);
     return updated;
@@ -67,6 +77,24 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
 
   async addMembership(agentId: string, departmentId: string): Promise<void> {
     this.memberships.add(`${agentId}:${departmentId}`);
+    const agent = this.agents.get(agentId);
+    if (agent && !agent.departmentIds?.includes(departmentId)) {
+      agent.departmentIds = [...(agent.departmentIds ?? []), departmentId];
+    }
+  }
+
+  async setMemberships(agentId: string, departmentIds: string[]): Promise<void> {
+    const prefix = `${agentId}:`;
+    for (const key of [...this.memberships]) {
+      if (key.startsWith(prefix)) this.memberships.delete(key);
+    }
+    for (const deptId of departmentIds) {
+      this.memberships.add(`${agentId}:${deptId}`);
+    }
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.departmentIds = [...departmentIds];
+    }
   }
 
   async belongsToDepartment(agentId: string, departmentId: string): Promise<boolean> {

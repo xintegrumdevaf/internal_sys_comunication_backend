@@ -110,4 +110,27 @@ describe("UpdateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 PUT /api/agents/:
 
     expect(updated.active).toBe(false);
   });
+
+  it("actualiza la lista de departamentos asignados al agente", async () => {
+    const { agentRepo, departmentRepo, useCase } = build();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const sales = departmentRepo.seed({ slug: "sales", name: "Ventas" });
+    const billing = departmentRepo.seed({ slug: "billing", name: "Facturación" });
+
+    const agent = agentRepo.seed({
+      name: "Agente Uno",
+      email: "agente1@isp.local",
+      primaryDepartmentId: support.id,
+      departmentIds: [support.id],
+    });
+
+    const updated = await useCase.execute({
+      agentId: agent.id,
+      patch: { departmentIds: [support.id, sales.id, billing.id] },
+      actorId: "admin-1",
+    });
+
+    expect(updated.departmentIds).toEqual([support.id, sales.id, billing.id]);
+    expect(await agentRepo.belongsToDepartment(agent.id, sales.id)).toBe(true);
+  });
 });
