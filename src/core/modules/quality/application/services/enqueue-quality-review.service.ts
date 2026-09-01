@@ -37,25 +37,38 @@ export class EnqueueQualityReviewService {
   }
 
   async tryAutoEnqueue(caseEntity: Case): Promise<QualityReview | null> {
-    const agentId = caseEntity.assignedAgentId;
-    if (!agentId) return null;
-
     const hasAgent = await this.hasAgentMessages(caseEntity.id);
     if (!hasAgent) return null;
 
-    const idempotencyKey = `${caseEntity.id}:${agentId}:auto`;
-    const review = await this.deps.qualityRepo.createPending({
-      conversationId: caseEntity.conversationId,
-      caseId: caseEntity.id,
-      agentId,
-      departmentId: caseEntity.departmentId,
-      triggerKind: "auto_case_closed",
-      idempotencyKey,
-      chunkSize: this.chunkSize,
-    });
+    // Detectar todos los agentes que enviaron respuestas en el caso (transferencias/delegaciones)
+    const distinctAgentIds = await this.deps.messageRepo.listDistinctAgentIdsByCase(caseEntity.id);
+    const targetAgentIds = distinctAgentIds.length > 0
+      ? distinctAgentIds
+      : (caseEntity.assignedAgentId ? [caseEntity.assignedAgentId] : []);
 
-    this.scheduleRun(review.id);
-    return review;
+    if (targetAgentIds.length === 0) return null;
+
+    let primaryReview: QualityReview | null = null;
+
+    for (const agentId of targetAgentIds) {
+      const idempotencyKey = `${caseEntity.id}:${agentId}:auto`;
+      const review = await this.deps.qualityRepo.createPending({
+        conversationId: caseEntity.conversationId,
+        caseId: caseEntity.id,
+        agentId,
+        departmentId: caseEntity.departmentId,
+        triggerKind: "auto_case_closed",
+        idempotencyKey,
+        chunkSize: this.chunkSize,
+      });
+
+      this.scheduleRun(review.id);
+      if (!primaryReview) {
+        primaryReview = review;
+      }
+    }
+
+    return primaryReview;
   }
 
   /** Tamaño de tramo configurado (env). */

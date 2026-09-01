@@ -39,7 +39,10 @@ export class ChangePasswordUseCase {
     }
 
     const passwordHash = await hashPassword(input.newPassword);
-    await this.deps.agentRepo.update(agent.id, { passwordHash });
+    await this.deps.agentRepo.update(agent.id, {
+      passwordHash,
+      mustChangePassword: false,
+    });
     this.deps.logger.info({ agentId: agent.id }, "contraseña actualizada por el propio agente");
   }
 }

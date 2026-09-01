@@ -186,6 +186,16 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
 
+  async listDistinctAgentIdsByCase(caseId: string): Promise<string[]> {
+    const agents = new Set<string>();
+    for (const m of this.messages) {
+      if (m.caseId === caseId && m.author === "agent" && m.agentId) {
+        agents.add(m.agentId);
+      }
+    }
+    return [...agents];
+  }
+
   async listByConversation(
     conversationId: string,
     options: { limit?: number; cursor?: string } = {},

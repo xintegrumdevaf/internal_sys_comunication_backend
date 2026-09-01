@@ -172,6 +172,11 @@ o en error:
 | `GET /api/quality/reviews?agentId=&from=&to=&minScore=&maxScore=&status=&departmentId=` | Lista de reviews de calidad — solo `manager`/`admin` |
 | `GET /api/quality/reviews/:id` | Detalle: review + findings + coaching notes (+ mensajes referenciados o ids) — solo `manager`/`admin` |
 | `GET /api/quality/pending-count?agentId=&departmentId=` | Cuántas reviews están `pending` (análisis en curso) — solo `manager`/`admin` |
+| `GET /api/analytics/overview?from=&to=&departmentId=` | Resumen ejecutivo con KPIs macro: volumen, casos activos, contención de IA, resolución media y SLA de espera en cola — solo `manager`/`admin` |
+| `GET /api/analytics/cases-distribution?from=&to=&departmentId=` | Distribución de casos por workflow, estado final y motivos principales de escalación — solo `manager`/`admin` |
+| `GET /api/analytics/ai-efficiency?from=&to=&departmentId=` | Tasa de contención, drop-off / fricción por paso de workflow y derivaciones a triage — solo `manager`/`admin` |
+| `GET /api/analytics/agents-performance?from=&to=&departmentId=` | Métricas detalladas de desempeño de agentes: FRT, AHT, FCR (48h), cordialidad, carga activa concurrente y transferencias — solo `manager`/`admin` |
+| `GET /api/analytics/infrastructure-alerts?from=&to=&departmentId=` | Reclamos activos agrupados por sector y OLT para detección temprana de incidentes masivos — solo `manager`/`admin` |
 
 ### C.2 Acciones
 
@@ -390,6 +395,58 @@ type QualityReviewDto = {
   startedAt: string | null;
   createdAt: string;
   completedAt: string | null;
+};
+
+type AnalyticsOverviewDto = {
+  totalCases: number;
+  activeCases: number;
+  completedCases: number;
+  botContainmentRate: number;
+  avgResolutionTimeMinutes: number | null;
+  avgQueueWaitTimeSeconds: number | null;
+  escalationRate: number;
+};
+
+type CasesDistributionDto = {
+  totalCases: number;
+  byWorkflow: Array<{ workflowType: string; count: number; percentage: number }>;
+  byFinalStatus: Array<{ status: string; count: number; percentage: number }>;
+  topEscalationReasons: Array<{ reason: string; count: number; percentage: number }>;
+};
+
+type AIEfficiencyDto = {
+  overallContainmentRate: number;
+  botCompletedCases: number;
+  humanEscalatedCases: number;
+  funnelDropOff: Array<{ workflowType: string; state: string; dropOffCount: number; percentage: number }>;
+  unclearTriageCount: number;
+};
+
+type AgentPerformanceDto = {
+  agentId: string;
+  agentName: string;
+  primaryDepartmentId: string | null;
+  primaryDepartmentName: string | null;
+  role: "agent" | "manager" | "admin";
+  autoAssignEnabled: boolean;
+  activeCasesNow: number;
+  maxCapacityThreshold: number;
+  casesAssigned: number;
+  casesCompleted: number;
+  casesTransferred: number;
+  avgFirstResponseTimeMs: number | null;
+  avgHandlingTimeMinutes: number | null;
+  fcrRatePercentage: number | null;
+  avgCordialityScore: number | null;
+  criticalAlertsCount: number;
+  openCoachingNotesCount: number;
+};
+
+type InfrastructureAlertDto = {
+  sector: string;
+  oltName: string | null;
+  activeCasesCount: number;
+  isHighVolumeAlert: boolean;
 };
 ```
 

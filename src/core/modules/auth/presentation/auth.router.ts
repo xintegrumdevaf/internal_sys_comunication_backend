@@ -8,12 +8,14 @@ import { toPublicAgentDto } from "../../departments/presentation/agent-dto.mappe
 import type { LoginUseCase } from "../application/use-cases/login.use-case";
 import type { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import type { ChangePasswordUseCase } from "../application/use-cases/change-password.use-case";
+import type { UpdateAgentAvailabilityUseCase } from "../application/use-cases/update-agent-availability.use-case";
 import type { AuditRepositoryPort } from "../../audit/application/ports/audit.repository.port";
 
 export type AuthRouterDeps = {
   login: LoginUseCase;
   logout: LogoutUseCase;
   changePassword: ChangePasswordUseCase;
+  updateAvailability: UpdateAgentAvailabilityUseCase;
   sessionTtlSeconds: number;
   auditRepo?: AuditRepositoryPort;
 };
@@ -26,6 +28,10 @@ const loginBodySchema = z.object({
 const changePasswordBodySchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8),
+});
+
+const availabilityBodySchema = z.object({
+  autoAssignEnabled: z.boolean(),
 });
 
 /**
@@ -154,6 +160,30 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       next(error);
     }
   });
+
+  const handleUpdateAvailability = async (
+    req: Parameters<Parameters<typeof router.patch>[1]>[0],
+    res: Parameters<Parameters<typeof router.patch>[1]>[1],
+    next: Parameters<Parameters<typeof router.patch>[1]>[2],
+  ) => {
+    try {
+      const agent = requireAuth(req);
+      const parsed = availabilityBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw validationError(parsed.error.issues.map((issue) => issue.message).join(", "));
+      }
+      const updated = await deps.updateAvailability.execute({
+        agentId: agent.id,
+        autoAssignEnabled: parsed.data.autoAssignEnabled,
+      });
+      res.json({ data: toPublicAgentDto(updated) });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  router.patch("/api/auth/me/availability", handleUpdateAvailability);
+  router.put("/api/auth/me/availability", handleUpdateAvailability);
 
   return router;
 }

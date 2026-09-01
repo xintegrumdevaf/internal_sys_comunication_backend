@@ -16,7 +16,8 @@ type ValidateClientContractResult = {
   name: string;
   address?: string;
   status?: string;
-  router: { sector: string; olt_name: string; pon: string; serial: string };
+  ip?: string;
+  router: { sector: string; olt_name: string; pon: string; serial: string; ip?: string };
 };
 
 type ValidateClientOutput = {
@@ -147,7 +148,7 @@ const validateClient: WorkflowStateHandler = async ({
           ...(reused.contract.router ? { router: reused.contract.router } : {}),
         },
       };
-      return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+      return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
     }
   }
 
@@ -218,6 +219,7 @@ const validateClient: WorkflowStateHandler = async ({
       oltName: found.router.olt_name,
       pon: found.router.pon,
       serial: found.router.serial,
+      ip: found.ip ?? found.router.ip,
     },
   };
   if (identity) {
@@ -234,7 +236,7 @@ const validateClient: WorkflowStateHandler = async ({
       },
     });
   }
-  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
 };
 
 const disambiguateContract: WorkflowStateHandler = async ({
@@ -285,6 +287,7 @@ const disambiguateContract: WorkflowStateHandler = async ({
       oltName: matched.oltName,
       pon: matched.pon,
       serial: matched.serial,
+      ip: matched.ip,
     },
   };
   if (identity && data.client?.nationalId) {
@@ -301,7 +304,70 @@ const disambiguateContract: WorkflowStateHandler = async ({
       },
     });
   }
-  return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
+};
+
+const checkClientStatus: WorkflowStateHandler = async ({
+  caseId,
+  conversationId,
+  correlationId,
+  context,
+  gateway,
+}) => {
+  const data = requireSupportInternetContext(context);
+  const sector = data.contract?.sector;
+  const ip = data.contract?.ip;
+
+  if (!sector || !ip) {
+    return { type: "CONTINUE", nextState: "DIAGNOSTIC", context };
+  }
+
+  const result = await gateway.executeAction({
+    action: "CHECK_CLIENT_STATUS",
+    caseId,
+    conversationId,
+    correlationId,
+    input: { sector, ip },
+  });
+
+  if (!result.success) {
+    return { type: "ESCALATED", reason: result.error.message, context };
+  }
+
+  const output = (result.result ?? {}) as {
+    status?: string;
+    list?: string;
+    clientName?: string;
+    creationTime?: string;
+    canBeReactivated?: boolean;
+    reason?: string;
+  };
+
+  const isCortado =
+    output.status?.toUpperCase() === "CORTADO" ||
+    output.list?.toUpperCase() === "CORTADO" ||
+    /cortado/i.test(output.status ?? "") ||
+    /cortado/i.test(output.list ?? "");
+
+  const nextData: SupportInternetContext = {
+    ...data,
+    clientStatus: {
+      sector,
+      ip,
+      status: output.status,
+      clientName: output.clientName,
+      list: output.list,
+      creationTime: output.creationTime,
+      canBeReactivated: output.canBeReactivated,
+      reason: output.reason,
+    },
+  };
+
+  if (isCortado) {
+    return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+  }
+
+  return { type: "CONTINUE", nextState: "DIAGNOSTIC", context: withContext(nextData, context) };
 };
 
 const checkBalance: WorkflowStateHandler = async ({ caseId, conversationId, correlationId, context, gateway }) => {
@@ -507,6 +573,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,
     WAITING_USER_DISAMBIGUATE: disambiguateContract,
+    CHECK_CLIENT_STATUS: checkClientStatus,
     CHECK_BALANCE: checkBalance,
     RESPOND_DEBT: respondDebt,
     WAITING_USER_PAYMENT: respondDebt,

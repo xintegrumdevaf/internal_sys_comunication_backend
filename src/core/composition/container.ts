@@ -16,6 +16,8 @@ import { createRequestLogger } from "../../shared/http/middlewares/request-logge
 import { createErrorHandler } from "../../shared/http/middlewares/error-handler.middleware";
 import { createCors } from "../../shared/http/middlewares/cors.middleware";
 import { createHealthRouter } from "../../shared/http/health.router";
+import { createMetricsMiddleware } from "../../shared/monitoring/metrics.middleware";
+import { createMetricsRouter } from "../../shared/monitoring/metrics.router";
 
 import { AuditRepositoryPg } from "../modules/audit/infrastructure/postgres/audit.repository.pg";
 import { ListAuditEventsUseCase } from "../modules/audit/application/use-cases/list-audit-events.use-case";
@@ -64,6 +66,7 @@ import { SessionStoreRedis } from "../modules/auth/infrastructure/redis/session-
 import { LoginUseCase } from "../modules/auth/application/use-cases/login.use-case";
 import { LogoutUseCase } from "../modules/auth/application/use-cases/logout.use-case";
 import { ChangePasswordUseCase } from "../modules/auth/application/use-cases/change-password.use-case";
+import { UpdateAgentAvailabilityUseCase } from "../modules/auth/application/use-cases/update-agent-availability.use-case";
 import { createSessionMiddleware } from "../modules/auth/presentation/session.middleware";
 import { createAuthRouter } from "../modules/auth/presentation/auth.router";
 
@@ -80,6 +83,8 @@ import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
 import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
 import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.http";
+import { MikrotikDiagnosticAdapter } from "../modules/cases/infrastructure/diagnostic/mikrotik-diagnostic.adapter";
+import { CompositeActionGateway } from "../modules/cases/infrastructure/gateways/composite-action-gateway";
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
@@ -141,6 +146,14 @@ import { SendInternalMessageUseCase } from "../modules/internal_chat/application
 import { MarkThreadAsReadUseCase } from "../modules/internal_chat/application/use-cases/mark-thread-as-read.use-case";
 import { createInternalChatRouter } from "../modules/internal_chat/presentation/internal-chat.router";
 
+import { AnalyticsRepositoryPg } from "../modules/analytics/infrastructure/postgres/analytics.repository.pg";
+import { GetAnalyticsOverviewUseCase } from "../modules/analytics/application/use-cases/get-analytics-overview.use-case";
+import { GetCasesDistributionUseCase } from "../modules/analytics/application/use-cases/get-cases-distribution.use-case";
+import { GetAIEfficiencyUseCase } from "../modules/analytics/application/use-cases/get-ai-efficiency.use-case";
+import { GetAgentsPerformanceUseCase } from "../modules/analytics/application/use-cases/get-agents-performance.use-case";
+import { GetInfrastructureAlertsUseCase } from "../modules/analytics/application/use-cases/get-infrastructure-alerts.use-case";
+import { createAnalyticsRouter } from "../modules/analytics/presentation/analytics.router";
+
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
  * Aqui, y solo aqui, se instancian adapters de infraestructura y se
@@ -193,9 +206,18 @@ export function createContainer(): Container {
   const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
   const metaTemplatesGateway = new MetaTemplatesGatewayHttp(env, logger.child({ module: "message-templates" }));
 
-  // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
+  // --- Catalogo de n8n + gateway directo de diagnostico + gateway compuesto ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
   const n8nGateway = new N8nGatewayHttp(n8nWorkflowRegistryCache, env.API_INTERNAL_KEY, casesLogger);
+  const diagnosticGateway = new MikrotikDiagnosticAdapter({
+    baseUrl: env.MIKROTIK_SERVICE_URL,
+    timeoutMs: env.MIKROTIK_DIAGNOSTIC_TIMEOUT_MS,
+    logger: casesLogger,
+  });
+  const actionGateway = new CompositeActionGateway({
+    n8nGateway,
+    diagnosticGateway,
+  });
 
   // --- AI (Etapa 5) ---
   const aiLogger = logger.child({ module: "ai" });
@@ -235,21 +257,21 @@ export function createContainer(): Container {
   const embeddingProvider =
     env.AI_PROVIDER === "gemini" && env.GEMINI_API_KEY
       ? new GeminiEmbeddingAdapter(
-          {
-            apiKey: env.GEMINI_API_KEY,
-            model: env.GEMINI_EMBEDDING_MODEL,
-            dimension: env.GEMINI_EMBEDDING_DIMENSION,
-          },
-          aiLogger,
-        )
+        {
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_EMBEDDING_MODEL,
+          dimension: env.GEMINI_EMBEDDING_DIMENSION,
+        },
+        aiLogger,
+      )
       : new OllamaEmbeddingAdapter(
-          {
-            baseUrl: env.OLLAMA_BASE_URL,
-            model: env.OLLAMA_EMBEDDING_MODEL,
-            dimension: env.OLLAMA_EMBEDDING_DIMENSION,
-          },
-          aiLogger,
-        );
+        {
+          baseUrl: env.OLLAMA_BASE_URL,
+          model: env.OLLAMA_EMBEDDING_MODEL,
+          dimension: env.OLLAMA_EMBEDDING_DIMENSION,
+        },
+        aiLogger,
+      );
 
   const ragService = new RagService({
     documentRepository: ragDocumentRepo,
@@ -413,7 +435,7 @@ export function createContainer(): Container {
     workflowExecutionRepo,
     conversationRepo,
     engine: workflowEngine,
-    gateway: n8nGateway,
+    gateway: actionGateway,
     logger: casesLogger,
     identity: conversationIdentity,
     escalationService,
@@ -462,6 +484,18 @@ export function createContainer(): Container {
     agentRepo,
     escalationRepo,
   });
+
+  // --- Analíticas operativas y gerenciales (Admin / Managers) ---
+  const analyticsRepo = new AnalyticsRepositoryPg(pgPool);
+  const getAnalyticsOverview = new GetAnalyticsOverviewUseCase({ analyticsRepo, agentRepo });
+  const getCasesDistribution = new GetCasesDistributionUseCase({ analyticsRepo, agentRepo });
+  const getAIEfficiency = new GetAIEfficiencyUseCase({ analyticsRepo, agentRepo });
+  const getAgentsPerformance = new GetAgentsPerformanceUseCase({
+    analyticsRepo,
+    agentRepo,
+    maxCapacityThreshold: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
+  const getInfrastructureAlerts = new GetInfrastructureAlertsUseCase({ analyticsRepo, agentRepo });
 
   const inboundBuffer = new InboundBufferService(
     redisClient,
@@ -543,6 +577,7 @@ export function createContainer(): Container {
   });
   const logout = new LogoutUseCase(sessionStore);
   const changePassword = new ChangePasswordUseCase({ agentRepo, logger });
+  const updateAvailability = new UpdateAgentAvailabilityUseCase({ agentRepo, auditRepo, logger });
 
   const listN8nWorkflows = new ListN8nWorkflowsUseCase(n8nWorkflowRegistryRepo);
   const upsertN8nWorkflow = new UpsertN8nWorkflowUseCase({
@@ -569,15 +604,26 @@ export function createContainer(): Container {
     }),
   );
   app.use(createRequestLogger(logger));
+  app.use(createMetricsMiddleware());
 
+  app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
   app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient }));
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
-  // §1.b) — health y el webhook de WhatsApp quedan afuera a proposito (no
+  // §1.b) — health, metrics y el webhook de WhatsApp quedan afuera a proposito (no
   // tienen identidad de agente; usan su propia verificacion).
   app.use(createSessionMiddleware({ sessionStore, agentRepo, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
-  app.use(createAuthRouter({ login, logout, changePassword, sessionTtlSeconds: env.SESSION_TTL_SECONDS, auditRepo }));
+  app.use(
+    createAuthRouter({
+      login,
+      logout,
+      changePassword,
+      updateAvailability,
+      sessionTtlSeconds: env.SESSION_TTL_SECONDS,
+      auditRepo,
+    }),
+  );
 
   app.use(
     createConversationsRouter({
@@ -668,6 +714,15 @@ export function createContainer(): Container {
       listMessages: listInternalMessages,
       sendInternalMessage,
       markThreadAsRead: markInternalThreadAsRead,
+    }),
+  );
+  app.use(
+    createAnalyticsRouter({
+      getOverview: getAnalyticsOverview,
+      getCasesDistribution,
+      getAIEfficiency,
+      getAgentsPerformance,
+      getInfrastructureAlerts,
     }),
   );
 

@@ -21,6 +21,7 @@ describe("ChangePasswordUseCase (docs/spec/06_BACKEND_GAPS.md §1.b POST /api/au
     const updated = agentRepo.agents.get(agent.id)!;
     expect(await verifyPassword(updated.passwordHash!, "MiPropia2024!")).toBe(true);
     expect(await verifyPassword(updated.passwordHash!, "temporal123")).toBe(false);
+    expect(updated.mustChangePassword).toBe(false);
   });
 
   it("rechaza si la contrasena actual no coincide", async () => {

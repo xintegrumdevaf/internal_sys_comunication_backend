@@ -43,14 +43,17 @@ export class ClaimCaseUseCase {
 
     await this.deps.caseRepo.setAssignedAgent(aggregate.case.id, agent.id);
 
-    if (aggregate.case.status === "ESCALATED") {
+    const targetDepartmentId = aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;
+
+    if (aggregate.case.status === "ESCALATED" || (aggregate.case.departmentId === null && targetDepartmentId !== null)) {
       await this.deps.caseRepo.applyTransition({
         caseId: aggregate.case.id,
         expectedCaseVersion: aggregate.case.version,
         expectedWorkflowVersion: aggregate.workflowInstance.version,
-        status: "HUMAN_ACTIVE",
+        status: aggregate.case.status === "ESCALATED" ? "HUMAN_ACTIVE" : aggregate.case.status,
         context: aggregate.case.context,
         currentState: aggregate.workflowInstance.currentState,
+        departmentId: targetDepartmentId,
         expiresAt: null,
       });
     }
@@ -60,6 +63,7 @@ export class ClaimCaseUseCase {
       await this.deps.escalationRepo.updateAssignment(escalation.id, {
         assignedAgentId: agent.id,
         status: "ASSIGNED",
+        departmentId: targetDepartmentId,
       });
     }
 

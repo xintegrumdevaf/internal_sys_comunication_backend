@@ -208,12 +208,12 @@ describe("06_AI_PROMPTS.md §6 — regresion WaitingStep / entities", () => {
             {
               id: "16272728",
               name: "Ana",
-              router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" },
+              router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1", ip: "10.1.1.1" },
             },
           ],
         },
       }),
-      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
+      CHECK_CLIENT_STATUS: () => ({ success: true, result: { status: "ACTIVO" } }),
       DIAGNOSTIC: () => ({
         success: true,
         result: { status: "WAITING_USER", question: "¿La luz ONU esta roja?" },
@@ -249,7 +249,7 @@ describe("06_AI_PROMPTS.md §6 — regresion WaitingStep / entities", () => {
       expect(afterCedula.outcome.nextState).toBe("WAITING_USER_DIAGNOSTIC");
     }
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
-    expect(gateway.actionsCalledFor("CHECK_BALANCE")).toBe(1);
+    expect(gateway.actionsCalledFor("CHECK_CLIENT_STATUS")).toBe(1);
     expect(gateway.actionsCalledFor("DIAGNOSTIC")).toBe(1);
   });
 
