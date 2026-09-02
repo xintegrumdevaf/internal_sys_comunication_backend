@@ -234,10 +234,26 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
 
 export class WhatsAppSenderFake implements WhatsAppSenderPort {
   readonly sent: Array<{ waPhone: string; body: string }> = [];
+  readonly sentTemplates: Array<{
+    waPhone: string;
+    templateName: string;
+    languageCode?: string;
+    parameters?: string[];
+  }> = [];
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
     this.sent.push({ waPhone, body });
     return { externalId: `wamid.${randomUUID()}` };
+  }
+
+  async sendTemplate(
+    waPhone: string,
+    templateName: string,
+    languageCode?: string,
+    parameters?: string[],
+  ): Promise<{ externalId: string }> {
+    this.sentTemplates.push({ waPhone, templateName, languageCode, parameters });
+    return { externalId: `wamid.template.${randomUUID()}` };
   }
 }
 

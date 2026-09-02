@@ -773,6 +773,9 @@ export function createContainer(): Container {
       listCampaigns,
       getCampaign,
       deleteCampaign,
+    }),
+  );
+  app.use(
     createAnalyticsRouter({
       getOverview: getAnalyticsOverview,
       getCasesDistribution,

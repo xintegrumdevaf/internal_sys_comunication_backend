@@ -1,4 +1,10 @@
-import type { MessageTemplateRepositoryPort } from "../../message-templates/application/ports/message-template.repository.port";
+import type { Logger } from "../../../../../shared/logging/logger";
+import type { WhatsAppSenderPort } from "../../../conversations/application/ports/whatsapp-sender.port";
+import type { MessageTemplateRepositoryPort } from "../../../message-templates/application/ports/message-template.repository.port";
+import type { CampaignRecipient } from "../../domain/campaign-recipient.entity";
+import type { Campaign } from "../../domain/campaign.entity";
+import type { CampaignRecipientRepositoryPort } from "../ports/campaign-recipient.repository.port";
+import type { CampaignRepositoryPort } from "../ports/campaign.repository.port";
 
 export type ProcessBatchResult = {
   finished: boolean;

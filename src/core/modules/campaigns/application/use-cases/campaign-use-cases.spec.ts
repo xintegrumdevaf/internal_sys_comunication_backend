@@ -114,6 +114,7 @@ describe("Campaign Use Cases", () => {
 
     const mockSender: WhatsAppSenderPort = {
       sendText: vi.fn().mockResolvedValue({ externalId: "wa-msg-123" }),
+      sendTemplate: vi.fn().mockResolvedValue({ externalId: "wa-tpl-123" }),
     };
 
     const campaign = await campaignRepo.create({
@@ -162,6 +163,7 @@ describe("Campaign Use Cases", () => {
         .fn()
         .mockRejectedValueOnce(new Error("Error Meta API"))
         .mockResolvedValueOnce({ externalId: "wa-msg-456" }),
+      sendTemplate: vi.fn().mockResolvedValue({ externalId: "wa-tpl-456" }),
     };
 
     const campaign = await campaignRepo.create({

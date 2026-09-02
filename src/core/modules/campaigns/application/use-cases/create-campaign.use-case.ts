@@ -1,4 +1,6 @@
-import type { MessageTemplateRepositoryPort } from "../../message-templates/application/ports/message-template.repository.port";
+import type { MessageTemplateRepositoryPort } from "../../../message-templates/application/ports/message-template.repository.port";
+import type { Campaign } from "../../domain/campaign.entity";
+import type { CampaignRepositoryPort, CreateCampaignInput } from "../ports/campaign.repository.port";
 
 export class CreateCampaignUseCase {
   constructor(

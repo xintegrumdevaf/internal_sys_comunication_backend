@@ -17,6 +17,10 @@ class FakeWhatsAppSender implements WhatsAppSenderPort {
     this.sentTo.push(waPhone);
     return { externalId: `wamid.fake.${randomUUID()}` };
   }
+
+  async sendTemplate(): Promise<{ externalId: string }> {
+    return { externalId: `wamid.fake.tpl.${randomUUID()}` };
+  }
 }
 
 describe("ReplyAsHumanUseCase", () => {
