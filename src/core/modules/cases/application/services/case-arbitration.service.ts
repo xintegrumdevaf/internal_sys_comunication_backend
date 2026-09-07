@@ -4,6 +4,7 @@ import type { Logger } from "../../../../../shared/logging/logger";
 import { mapIntentToWorkflowType } from "./intent-workflow-mapper";
 import { confidenceThreshold } from "./confidence-threshold";
 import { ExpirationService } from "./expiration.service";
+import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 
 export type ArbitrationDecision =
   | { action: "CONTINUE_ACTIVE"; caseId: string }
@@ -28,6 +29,7 @@ export class CaseArbitrationService {
   constructor(
     private readonly caseRepo: CaseRepositoryPort,
     logger: Logger,
+    private readonly routingService?: DepartmentRoutingService,
   ) {
     this.expirationService = new ExpirationService(caseRepo, logger);
   }
@@ -44,7 +46,13 @@ export class CaseArbitrationService {
       return { action: "CLARIFY" };
     }
 
-    const targetWorkflowType = mapIntentToWorkflowType(interpretation.intent);
+    let targetWorkflowType = mapIntentToWorkflowType(interpretation.intent);
+    if (!targetWorkflowType && this.routingService) {
+      const dynamicRouting = await this.routingService.resolveByIntent(interpretation.intent);
+      if (dynamicRouting) {
+        targetWorkflowType = dynamicRouting.workflowType;
+      }
+    }
     const activeAggregate = await this.caseRepo.findActiveByConversation(conversationId);
     const meetsConfidence = interpretation.confidence >= confidenceThreshold(interpretation.intent);
 

@@ -6,17 +6,21 @@ import type {
 } from "../../src/core/modules/conversations/application/ports/conversation.repository.port";
 import type { Message } from "../../src/core/modules/conversations/domain/message.entity";
 import type {
+  InsertHistoricalMessageInput,
   InsertInboundMessageInput,
   InsertOutboundMessageInput,
   MessageRepositoryPort,
 } from "../../src/core/modules/conversations/application/ports/message.repository.port";
 import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
-import type { Department } from "../../src/core/modules/departments/domain/department.entity";
 import type {
   CreateDepartmentInput,
   UpdateDepartmentInput,
+  CreateDepartmentCaseRoutingInput,
+  UpdateDepartmentCaseRoutingInput,
   DepartmentRepositoryPort,
 } from "../../src/core/modules/departments/application/ports/department.repository.port";
+import type { Department } from "../../src/core/modules/departments/domain/department.entity";
+import type { DepartmentCaseRouting } from "../../src/core/modules/departments/domain/department-case-routing.entity";
 
 /**
  * Fakes en memoria (docs/skills/testing-strategy.md).
@@ -64,6 +68,13 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     const conversation = this.conversations.get(id);
     if (conversation) {
       this.conversations.set(id, { ...conversation, lastActivityAt: new Date() });
+    }
+  }
+
+  async setLastActivityAt(id: string, date: Date): Promise<void> {
+    const conversation = this.conversations.get(id);
+    if (conversation) {
+      this.conversations.set(id, { ...conversation, lastActivityAt: date });
     }
   }
 
@@ -176,6 +187,31 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     return message;
   }
 
+  async insertHistorical(input: InsertHistoricalMessageInput): Promise<{ message: Message; isDuplicate: boolean }> {
+    const existing = this.messages.find(
+      (m) => m.conversationId === input.conversationId && m.externalId === input.externalId,
+    );
+    if (existing) return { message: existing, isDuplicate: true };
+    const message: Message = {
+      id: randomUUID(),
+      conversationId: input.conversationId,
+      caseId: null,
+      direction: input.direction,
+      author: input.author,
+      agentId: null,
+      externalId: input.externalId,
+      body: input.body,
+      type: input.type ?? "text",
+      mediaId: input.mediaId ?? null,
+      mimeType: input.mimeType ?? null,
+      caption: input.caption ?? null,
+      filename: input.filename ?? null,
+      createdAt: input.createdAt,
+    };
+    this.messages.push(message);
+    return { message, isDuplicate: false };
+  }
+
   async listByCaseAuthors(
     caseId: string,
     authors: Array<"customer" | "agent">,
@@ -259,6 +295,7 @@ export class WhatsAppSenderFake implements WhatsAppSenderPort {
 
 export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
   readonly departments = new Map<string, Department>();
+  readonly routings = new Map<string, DepartmentCaseRouting>();
 
   seed(department: Partial<Department> & { slug: string; name: string }): Department {
     const now = new Date();
@@ -266,6 +303,7 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
       id: department.id ?? randomUUID(),
       slug: department.slug,
       name: department.name,
+      description: department.description ?? null,
       visibility: department.visibility ?? "shared",
       active: department.active ?? true,
       createdAt: department.createdAt ?? now,
@@ -312,5 +350,52 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
 
   async hasOpenCases(_id: string): Promise<boolean> {
     return false;
+  }
+
+  async listRoutings(departmentId?: string): Promise<DepartmentCaseRouting[]> {
+    const all = [...this.routings.values()];
+    if (departmentId) return all.filter((r) => r.departmentId === departmentId);
+    return all;
+  }
+
+  async createRouting(input: CreateDepartmentCaseRoutingInput): Promise<DepartmentCaseRouting> {
+    const now = new Date();
+    const existing = [...this.routings.values()].find((r) => r.intentKey === input.intentKey);
+    const routing: DepartmentCaseRouting = {
+      id: existing ? existing.id : randomUUID(),
+      departmentId: input.departmentId,
+      intentKey: input.intentKey,
+      label: input.label,
+      description: input.description,
+      handlingMode: input.handlingMode ?? "ai_assisted",
+      workflowType: input.workflowType ?? "GENERAL_INQUIRY",
+      active: input.active ?? true,
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+    };
+    this.routings.set(routing.id, routing);
+    return routing;
+  }
+
+  async updateRouting(id: string, input: UpdateDepartmentCaseRoutingInput): Promise<DepartmentCaseRouting> {
+    const routing = this.routings.get(id);
+    if (!routing) throw new Error("Routing not found");
+    const updated: DepartmentCaseRouting = {
+      ...routing,
+      ...input,
+      updatedAt: new Date(),
+    };
+    this.routings.set(id, updated);
+    return updated;
+  }
+
+  async deleteRouting(id: string): Promise<void> {
+    this.routings.delete(id);
+  }
+
+  async findRoutingByIntent(intentKey: string): Promise<DepartmentCaseRouting | null> {
+    return (
+      [...this.routings.values()].find((r) => r.intentKey === intentKey && r.active) ?? null
+    );
   }
 }

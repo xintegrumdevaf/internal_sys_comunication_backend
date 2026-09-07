@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { Message, MessageAuthor } from "../../domain/message.entity";
 import type {
+  InsertHistoricalMessageInput,
   InsertInboundMessageInput,
   InsertOutboundMessageInput,
   MessageRepositoryPort,
@@ -92,6 +93,43 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       ],
     );
     return mapRow(rows[0]!);
+  }
+
+  async insertHistorical(
+    input: InsertHistoricalMessageInput,
+  ): Promise<{ message: Message; isDuplicate: boolean }> {
+    const inserted = await this.pool.query<MessageRow>(
+      `INSERT INTO message (
+        conversation_id, direction, author, external_id, body, type,
+        media_id, mime_type, caption, filename, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (conversation_id, external_id) DO NOTHING
+      RETURNING *`,
+      [
+        input.conversationId,
+        input.direction,
+        input.author,
+        input.externalId,
+        input.body,
+        input.type ?? "text",
+        input.mediaId ?? null,
+        input.mimeType ?? null,
+        input.caption ?? null,
+        input.filename ?? null,
+        input.createdAt,
+      ],
+    );
+
+    if (inserted.rows[0]) {
+      return { message: mapRow(inserted.rows[0]), isDuplicate: false };
+    }
+
+    const existing = await this.pool.query<MessageRow>(
+      `SELECT * FROM message WHERE conversation_id = $1 AND external_id = $2`,
+      [input.conversationId, input.externalId],
+    );
+    return { message: mapRow(existing.rows[0]!), isDuplicate: true };
   }
 
   async listByConversation(

@@ -26,6 +26,8 @@ import { createAuditRouter } from "../modules/audit/presentation/audit.router";
 
 import { MessageTemplateRepositoryPg } from "../modules/message-templates/infrastructure/postgres/message-template.repository.pg";
 import { MetaTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/meta/meta-templates-gateway.http";
+import { ZernioTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/zernio/zernio-templates-gateway.http";
+import type { MetaTemplatesGatewayPort } from "../modules/message-templates/application/ports/meta-templates-gateway.port";
 import { CreateMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/create-message-template.use-case";
 import { ListMessageTemplatesUseCase } from "../modules/message-templates/application/use-cases/list-message-templates.use-case";
 import { DeleteMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/delete-message-template.use-case";
@@ -35,13 +37,21 @@ import { createMessageTemplatesRouter } from "../modules/message-templates/prese
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
+import { ZernioSenderHttp } from "../modules/conversations/infrastructure/zernio/zernio-sender.http";
+import type { WhatsAppSenderPort } from "../modules/conversations/application/ports/whatsapp-sender.port";
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
 import { ListMessagesUseCase } from "../modules/conversations/application/use-cases/list-messages.use-case";
 import { MarkConversationAsReadUseCase } from "../modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
 import { ReplyAsHumanUseCase } from "../modules/conversations/application/use-cases/reply-as-human.use-case";
 import { createWhatsAppWebhookRouter } from "../modules/conversations/presentation/whatsapp-webhook.router";
+import { createZernioWebhookRouter } from "../modules/conversations/presentation/zernio-webhook.router";
 import { createConversationsRouter } from "../modules/conversations/presentation/conversations.router";
+import { ZernioHistoryGatewayHttp } from "../modules/conversations/infrastructure/zernio/zernio-history.gateway.http";
+import { ZernioHistorySyncWorker } from "../modules/conversations/infrastructure/queue/zernio-history-sync.worker";
+import { StartZernioHistorySyncUseCase } from "../modules/conversations/application/use-cases/start-zernio-history-sync.use-case";
+import { GetZernioHistorySyncStatusUseCase } from "../modules/conversations/application/use-cases/get-zernio-history-sync-status.use-case";
+import { createZernioHistorySyncRouter } from "../modules/conversations/presentation/zernio-history-sync.router";
 
 import { CustomerRepositoryPg } from "../modules/customers/infrastructure/postgres/customer.repository.pg";
 import { ContractRepositoryPg } from "../modules/customers/infrastructure/postgres/contract.repository.pg";
@@ -60,6 +70,12 @@ import { createAgentsAdminRouter } from "../modules/departments/presentation/adm
 import { CreateDepartmentUseCase } from "../modules/departments/application/use-cases/create-department.use-case";
 import { UpdateDepartmentUseCase } from "../modules/departments/application/use-cases/update-department.use-case";
 import { DeactivateDepartmentUseCase } from "../modules/departments/application/use-cases/deactivate-department.use-case";
+import {
+  AddDepartmentCaseUseCase,
+  DeleteDepartmentCaseUseCase,
+  ListDepartmentCasesUseCase,
+} from "../modules/departments/application/use-cases/manage-department-cases.use-case";
+import { DepartmentRoutingService } from "../modules/departments/application/services/department-routing.service";
 import { createDepartmentsAdminRouter } from "../modules/departments/presentation/admin/departments.router";
 
 import { SessionStoreRedis } from "../modules/auth/infrastructure/redis/session-store.repository.redis";
@@ -211,8 +227,25 @@ export function createContainer(): Container {
     customerRepo,
     contractRepo,
   );
-  const whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
+  let whatsappSender: WhatsAppSenderPort;
+  let zernioSender: ZernioSenderHttp | undefined;
+
+  if (env.WHATSAPP_PROVIDER === "zernio") {
+    conversationsLogger.info("Configurando proveedor de WhatsApp: Zernio");
+    zernioSender = new ZernioSenderHttp(env, conversationsLogger);
+    whatsappSender = zernioSender;
+  } else {
+    conversationsLogger.info("Configurando proveedor de WhatsApp: Meta Cloud API directo");
+    whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
+  }
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
+  const departmentRoutingService = new DepartmentRoutingService(
+    departmentRepo,
+    logger.child({ module: "departments" }),
+  );
+  void departmentRoutingService.loadCache().catch((err) => {
+    logger.warn({ err }, "Error al precargar caché de enrutamiento de departamentos");
+  });
   const agentRepo = new AgentRepositoryPg(pgPool);
   const sessionStore = new SessionStoreRedis(redisClient);
   const caseRepo = new CaseRepositoryPg(pgPool);
@@ -220,7 +253,11 @@ export function createContainer(): Container {
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
   const escalationRepo = new EscalationRepositoryPg(pgPool);
   const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
-  const metaTemplatesGateway = new MetaTemplatesGatewayHttp(env, logger.child({ module: "message-templates" }));
+  const templatesLogger = logger.child({ module: "message-templates" });
+  const metaTemplatesGateway: MetaTemplatesGatewayPort =
+    env.WHATSAPP_PROVIDER === "zernio"
+      ? new ZernioTemplatesGatewayHttp(env, templatesLogger)
+      : new MetaTemplatesGatewayHttp(env, templatesLogger);
 
   // --- Campañas (Campaigns) ---
   const campaignRepo = new CampaignRepositoryPg(pgPool);
@@ -256,6 +293,7 @@ export function createContainer(): Container {
         qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
       },
       aiLogger,
+      departmentRoutingService,
     );
   } else {
     aiProvider = new OllamaAdapter(
@@ -266,6 +304,7 @@ export function createContainer(): Container {
         qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
       },
       aiLogger,
+      departmentRoutingService,
     );
   }
   const interpretationProvider = new AiInterpretationAdapter(aiProvider, aiLogger);
@@ -317,8 +356,8 @@ export function createContainer(): Container {
     billingBalanceWorkflow,
     generalInquiryWorkflow,
   ]);
-  const departmentResolver = new DepartmentResolverService(departmentRepo);
-  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
+  const departmentResolver = new DepartmentResolverService(departmentRepo, departmentRoutingService);
+  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger, departmentRoutingService);
 
   // --- Calidad (Etapa 10) — antes de complete/expiration que encolan reviews ---
   const qualityLogger = logger.child({ module: "quality" });
@@ -469,6 +508,7 @@ export function createContainer(): Container {
     messageRepo,
     whatsappSender,
     departmentResolver,
+    routingService: departmentRoutingService,
     arbitrationService,
     interpretationProvider,
     engine: workflowEngine,
@@ -588,9 +628,22 @@ export function createContainer(): Container {
   const deactivateAgent = new DeactivateAgentUseCase({ agentRepo, auditRepo, logger });
   const resetAgentPassword = new ResetAgentPasswordUseCase({ agentRepo, auditRepo, logger });
 
-  const createDepartment = new CreateDepartmentUseCase({ departmentRepo, auditRepo, logger });
-  const updateDepartment = new UpdateDepartmentUseCase({ departmentRepo, auditRepo, logger });
+  const createDepartment = new CreateDepartmentUseCase({
+    departmentRepo,
+    auditRepo,
+    routingService: departmentRoutingService,
+    logger,
+  });
+  const updateDepartment = new UpdateDepartmentUseCase({
+    departmentRepo,
+    auditRepo,
+    routingService: departmentRoutingService,
+    logger,
+  });
   const deactivateDepartment = new DeactivateDepartmentUseCase({ departmentRepo, auditRepo, logger });
+  const addDepartmentCase = new AddDepartmentCaseUseCase(departmentRepo, departmentRoutingService);
+  const deleteDepartmentCase = new DeleteDepartmentCaseUseCase(departmentRepo, departmentRoutingService);
+  const listDepartmentCases = new ListDepartmentCasesUseCase(departmentRepo);
 
   const login = new LoginUseCase({
     agentRepo,
@@ -640,6 +693,25 @@ export function createContainer(): Container {
   const getCampaign = new GetCampaignUseCase(campaignRepo, campaignRecipientRepo);
   const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
 
+  // --- Zernio Historical Sync (Worker + Use Cases) ---
+  const zernioHistoryGateway = new ZernioHistoryGatewayHttp(env, conversationsLogger);
+  const zernioHistorySyncWorker = new ZernioHistorySyncWorker(
+    redisClient,
+    zernioHistoryGateway,
+    conversationRepo,
+    messageRepo,
+    conversationsLogger,
+  );
+  zernioHistorySyncWorker.startWorker();
+
+  const startZernioHistorySync = new StartZernioHistorySyncUseCase(
+    redisClient,
+    zernioHistoryGateway,
+    zernioHistorySyncWorker,
+    conversationsLogger,
+  );
+  const getZernioHistorySyncStatus = new GetZernioHistorySyncStatusUseCase(redisClient);
+
   // --- HTTP (presentation) ---
   const app = express();
   app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
@@ -656,6 +728,7 @@ export function createContainer(): Container {
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
   app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
+  app.use(createZernioWebhookRouter({ env, receiveInboundMessage, redisClient, zernioSender }));
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
   // §1.b) — health, metrics y el webhook de WhatsApp quedan afuera a proposito (no
@@ -683,6 +756,12 @@ export function createContainer(): Container {
       broadcaster,
     }),
   );
+  app.use(
+    createZernioHistorySyncRouter({
+      startSync: startZernioHistorySync,
+      getStatus: getZernioHistorySyncStatus,
+    }),
+  );
   app.use(createDepartmentsRouter({ listDepartments, listAgents }));
   app.use(
     createAgentsAdminRouter({
@@ -697,6 +776,9 @@ export function createContainer(): Container {
       createDepartment,
       updateDepartment,
       deactivateDepartment,
+      addCase: addDepartmentCase,
+      deleteCase: deleteDepartmentCase,
+      listCases: listDepartmentCases,
     }),
   );
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
@@ -793,6 +875,7 @@ export function createContainer(): Container {
 
   const shutdown = async (): Promise<void> => {
     campaignWorker.stopWorker();
+    zernioHistorySyncWorker.stopWorker();
     enqueueQualityReview.stop();
     inboundBuffer.clearAllTimers();
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);

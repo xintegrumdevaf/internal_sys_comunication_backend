@@ -10,6 +10,7 @@ export interface ConversationRepositoryPort {
   /** Atomico solo si el llamador ya sostiene el lock de docs/spec 00 §3 (ver withConversationLock). */
   findOrCreateByWaPhone(waPhone: string): Promise<Conversation>;
   touchLastActivity(id: string): Promise<void>;
+  setLastActivityAt(id: string, date: Date): Promise<void>;
   incrementUnreadCount(id: string): Promise<void>;
   resetUnreadCount(id: string): Promise<void>;
   list(filter: ListConversationsFilter): Promise<Conversation[]>;

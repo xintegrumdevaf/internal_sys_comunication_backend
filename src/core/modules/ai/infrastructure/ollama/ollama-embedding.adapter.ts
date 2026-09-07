@@ -23,13 +23,13 @@ export class OllamaEmbeddingAdapter implements EmbeddingProviderPort {
     try {
       const url = `${this.baseUrl}/api/embeddings`;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8_000);
+      const timeout = setTimeout(() => controller.abort(), 25_000);
       try {
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({ model: this.model, prompt: text }),
+          body: JSON.stringify({ model: this.model, prompt: text, keep_alive: "24h" }),
         });
 
         if (res.ok) {

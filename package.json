@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --include .env src/index.ts",
     "build": "tsc -p tsconfig.json",
     "build:prod": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
@@ -13,6 +13,7 @@
     "seed": "tsx scripts/seed.ts",
     "seed:quality": "tsx scripts/seed-quality-samples.ts",
     "clean:conversations": "node scratch/run-wipe.js",
+    "sync:zernio-history": "tsx scripts/sync-zernio-history.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

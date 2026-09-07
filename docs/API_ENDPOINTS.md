@@ -43,17 +43,27 @@ No está bajo `/api`.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| `GET` | `/api/departments` | sesión | Lista departamentos (`slug`, `visibility`, …) |
-| `POST` | `/api/departments` | sesión de `role=admin` | Crea un departamento. Body: `{ name, slug, visibility }` |
-| `PUT` | `/api/departments/:id` | sesión de `role=admin` | Edita un departamento. Body: `{ name?, slug?, visibility?, active? }` |
+| `GET` | `/api/departments` | sesión | Lista departamentos (`id`, `name`, `slug`, `description`, `visibility`, `cases: [...]`) |
+| `POST` | `/api/departments` | sesión de `role=admin` | Crea departamento con casos. Body: `{ name, slug, description?, visibility?, cases?: [{ label, description, handlingMode?, workflowType? }] }` |
+| `PUT` | `/api/departments/:id` | sesión de `role=admin` | Edita departamento y sus casos. Body: `{ name?, slug?, description?, visibility?, active?, cases? }` |
 | `DELETE` | `/api/departments/:id` | sesión de `role=admin` | Desactiva un departamento (soft delete) |
+| `GET` | `/api/departments/:id/cases` | sesión (`admin` o `manager`) | Lista casos/solicitudes configuradas que atiende ese departamento |
+| `POST` | `/api/departments/:id/cases` | sesión de `role=admin` | Agrega un nuevo caso al departamento. Body: `{ label, description, handlingMode?, workflowType? }` |
+| `DELETE` | `/api/departments/cases/:caseId` | sesión de `role=admin` | Elimina un caso configurado de un departamento |
 | `GET` | `/api/agents` | sesión | Lista agentes (incluye `id`, `role`, `primaryDepartmentId`) |
 | `POST` | `/api/agents` | sesión de `role=admin` | Crea un agente. Body: `{ name, email, role?, primaryDepartmentId? }` → `{ agent, temporaryPassword }` |
 | `PUT` | `/api/agents/:id` | sesión de `role=admin` | Edita un agente. Body: `{ name?, email?, role?, primaryDepartmentId?, active? }` |
 | `DELETE` | `/api/agents/:id` | sesión de `role=admin` | Desactiva un agente (soft delete). No permite quedarse sin ningún admin activo |
 | `POST` | `/api/agents/:id/reset-password` | sesión de `role=admin` | Nueva contraseña temporal → `{ agent, temporaryPassword }` |
 
-Útiles al arrancar el frontend o al configurar la colección de Postman (login primero — ver §1).
+### Modelo de Casos por Departamento (`cases`)
+Cada departamento puede declarar qué motivos o solicitudes atiende:
+- **`label`**: Nombre amigable para el operador (ej. *"Cancelación de Contrato"*).
+- **`description`**: Frases o ejemplos de lo que dice el cliente (ej. *"cuando el cliente pide cancelar el contrato o darse de baja"*). Se inyecta en el prompt de la IA en tiempo real.
+- **`handlingMode`**:
+  - `"ai_assisted"`: La IA atiende primero con RAG y escala si no se resuelve.
+  - `"human_direct"`: Escala de inmediato al departamento y notifica al cliente sin preguntas de bot.
+- **`workflowType`**: Flujo base asignado (por defecto `"GENERAL_INQUIRY"`).
 
 ---
 
@@ -68,6 +78,8 @@ No está bajo `/api`.
 | `POST` | `/api/conversations/:id/read` | — | Marca todos los mensajes de la conversación como leídos (pone `unreadCount` en 0) |
 | `POST` | `/api/conversations/:id/reply` | `{ "body" }` → `201` | Respuesta humana a WhatsApp (el agente es el de la sesión); desactiva automation si hacía falta |
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
+| `POST` | `/api/conversations/sync-history` | sesión de `role=admin` | Encola en Redis la sincronización de mensajes históricos de Zernio. Body opcional: `{ "days": 30, "limit": 100 }` |
+| `GET` | `/api/conversations/sync-history/status` | sesión (`admin` o `manager`) | Consulta el estado del worker de sincronización (`idle`, `running`, `completed`, `failed`), total sincronizado y errores |
 
 Todas requieren sesión (§1) — el agente que responde/toma control es siempre el de la cookie, nunca uno declarado en el body.
 
@@ -224,18 +236,19 @@ Endpoints administrativos para ingesta, gestión y consulta de la base de conoci
 
 ---
 
-## 11. WhatsApp webhook (no es para el frontend)
+## 11. Webhooks de Entrada (Zernio y WhatsApp Cloud API)
 
 | Método | Ruta | Quién | Descripción |
 |---|---|---|---|
-| `GET` | `/api/webhooks/whatsapp` | Meta | Verificación del webhook |
-| `POST` | `/api/webhooks/whatsapp` | Meta | Ingesta de mensajes (firma `X-Hub-Signature-256`) |
+| `POST` | `/api/webhooks/zernio` | Zernio | Ingesta de mensajes y estados de Zernio (firma HMAC-SHA256 en header `x-zernio-signature`) |
+| `GET` | `/api/webhooks/whatsapp` | Meta | Verificación del webhook directo de WhatsApp Cloud API |
+| `POST` | `/api/webhooks/whatsapp` | Meta | Ingesta de mensajes de Meta (firma `X-Hub-Signature-256`) |
 
 No lo uses desde el panel de agentes. El flujo de cliente llega por aquí → buffer → IA → casos → WhatsApp outbound.
 
 ---
 
-## 11. Flujos típicos en el frontend
+## 12. Flujos típicos en el frontend
 
 ### Inbox de agente
 1. `POST /api/auth/login` (una vez, deja la cookie) → `GET /api/agents` + `GET /api/departments` (bootstrap)
@@ -257,7 +270,7 @@ No lo uses desde el panel de agentes. El flujo de cliente llega por aquí → bu
 
 ---
 
-## 12. Colección Postman sugerida
+## 13. Colección Postman sugerida
 
 Variables de entorno:
 
@@ -279,7 +292,7 @@ Orden recomendado al armar la colección:
 
 ---
 
-## 13. Qué **no** es HTTP en esta API
+## 14. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.

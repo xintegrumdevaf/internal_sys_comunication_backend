@@ -72,6 +72,13 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
     );
   }
 
+  async setLastActivityAt(id: string, date: Date): Promise<void> {
+    await this.pool.query(
+      `UPDATE conversation SET last_activity_at = $2, updated_at = now() WHERE id = $1`,
+      [id, date],
+    );
+  }
+
   async incrementUnreadCount(id: string): Promise<void> {
     await this.pool.query(
       `UPDATE conversation SET unread_count = unread_count + 1, updated_at = now() WHERE id = $1`,
