@@ -4,6 +4,7 @@ export interface Department {
   id: string;
   slug: string;
   name: string;
+  description?: string | null;
   /**
    * 'shared' (default): cualquier agente autenticado puede VER (lectura) casos
    * de este departamento. 'restricted': solo agentes con agent_membership en

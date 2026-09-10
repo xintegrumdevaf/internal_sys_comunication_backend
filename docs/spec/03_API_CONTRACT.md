@@ -508,3 +508,17 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 **v4 → v5**: `ConversationDto.waProfileName` (migración `0010_conversation_wa_profile_name.sql`) — nombre real de perfil/agenda de WhatsApp, capturado del webhook sin llamada extra a la API de Meta. La foto de perfil no se agrega: no existe endpoint oficial de Meta para obtenerla (ver nota en `01_DATA_MODEL.md`).
 
 **v5 → v6**: opt-in de auto-asignación por agente (`agent.auto_assign_enabled` / `AgentDto.autoAssignEnabled`, migración `0011_agent_auto_assign_enabled.sql`). Default `false`. `AutoAssignAgentService` solo considera agentes `active && autoAssignEnabled` con pertenencia al departamento.
+
+**v6 → v7**: Integración de Zernio como proveedor alternativo de WhatsApp (`WHATSAPP_PROVIDER=zernio | meta`):
+- Sender HTTP (`ZernioSenderHttp`) y gateway de plantillas (`ZernioTemplatesGatewayHttp`).
+- Webhook de entrada Zernio (`POST /api/webhooks/zernio`) con verificación HMAC-SHA256 (`x-zernio-signature`).
+- Worker de sincronización histórica en background con Redis (`POST /api/conversations/sync-history`, `GET /api/conversations/sync-history/status`).
+
+**v7 → v8**: Enrutamiento Dinámico de Departamentos y Casos Configurable desde Frontend (migración `0023_department_case_routing.sql`):
+- `department.description`: descripción en lenguaje natural de las responsabilidades del departamento.
+- Tabla `department_case_routing`: configuración dinámica de intenciones/casos atendidos por cada departamento (`label`, `description`, `handling_mode`, `workflow_type`, `intent_key`, `active`).
+- Endpoints administrativos para casos por departamento (`GET/POST /api/departments/:id/cases`, `DELETE /api/departments/cases/:caseId`).
+- `POST /api/departments` y `PUT /api/departments/:id` aceptan `cases: [...]`.
+- `DepartmentRoutingService`: caché en memoria con invalidación inmediata al modificar departamentos o casos.
+- Inyección dinámica en tiempo real al prompt de interpretación de IA (`interpret-message.prompt.ts`) con normalización de acentos sin requerir nuevo deploy ni reinicio.
+- Soporte para `handling_mode = "human_direct"`: escalación inmediata y asignación al departamento sin pasos previos de bot.

@@ -37,7 +37,13 @@ export const INTENT_CATALOG = [
 ] as const;
 ```
 
-Agregar un intent nuevo = una fila nueva aquí — el prompt y el motor de arbitraje lo recogen automáticamente, no hay que tocarlos.
+Agregar un intent nuevo = una fila nueva aquí (estático) O agregar un caso desde el panel de administración / frontend en la tabla `department_case_routing` (dinámico).
+
+### Catálogo Dinámico de Departamentos (`DepartmentRoutingService`)
+A partir de la migración `0023_department_case_routing.sql`, los motivos y casos atendidos por cada departamento son configurables dinámicamente desde el frontend. `DepartmentRoutingService` carga la tabla `department_case_routing` en memoria y la inyecta al vuelo en `buildInterpretMessagePrompt`:
+- Las descripciones redactadas por el operador en lenguaje natural se transforman en reglas para el modelo.
+- Se normalizan acentos y caracteres especiales automáticamente.
+- Cualquier adición, edición o baja de casos en el frontend invalida la caché y se refleja en el prompt de la IA en el siguiente mensaje, sin requerir reinicio del servidor ni redespliegue de código.
 
 ## 3. System prompt — `interpretMessage`
 

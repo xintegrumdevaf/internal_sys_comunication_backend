@@ -1,17 +1,39 @@
 import { intentListForPrompt } from "../../../cases/domain/intent-catalog";
 import type { InterpretMessageInput } from "../ports/ai-provider.port";
 
+export type DynamicPromptIntentItem = {
+  intent: string;
+  description: string;
+};
+
 /**
  * Prompt normativo de interpretMessage (docs/spec/06_AI_PROMPTS.md §3).
  * requireAll/requireAny se inyectan por llamada desde el WaitingStep activo.
+ * Si se pasa dynamicIntents, se inyectan en caliente los casos de los departamentos.
  */
-export function buildInterpretMessagePrompt(input: InterpretMessageInput): {
+export function buildInterpretMessagePrompt(
+  input: InterpretMessageInput,
+  dynamicIntents?: DynamicPromptIntentItem[],
+): {
   system: string;
   user: string;
 } {
-  const intents = intentListForPrompt();
+  const defaultIntents = intentListForPrompt();
+  const intents = dynamicIntents && dynamicIntents.length > 0
+    ? Array.from(new Set([...dynamicIntents.map((d) => d.intent), "general.inquiry", "unknown"])).join(" | ")
+    : defaultIntents;
+
   const active = input.conversationSnapshot.activeCase;
   const recentMessages = input.conversationSnapshot.recentMessages;
+
+  const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
+    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label}): ${d.description}`).join("\n")
+    : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional, y consultas sobre planes o servicios) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida. IMPORTANTE: Si el cliente envía un mensaje de agradecimiento o cortesía indicando que pagará más tarde (ej: "Listo muchas gracias mas tarde le pago", "Gracias luego transfiero", "Ok muchas gracias", "Listo gracias"), clasifica SIEMPRE como CANCEL o general.inquiry con intent="general.inquiry" y question="<texto del cliente>". NUNCA clasificar como billing.balance ni billing.record_payment. El cliente NO está pidiendo su saldo de nuevo ni adjuntando un comprobante, solo está cerrando la atención.
+- sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
+- sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.
+- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
+- billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
+- billing.record_payment: envío o reporte de comprobante/transferencia de pago YA realizado (ÚNICAMENTE CUANDO EL CLIENTE YA REALIZÓ EL PAGO Y ADJUNTA/ENVÍA LA FOTO DEL COMPROBANTE O EL NÚMERO DE REFERENCIA). NUNCA clasificar como billing.record_payment si el cliente apenas está pidiendo las cuentas bancarias o despidiéndose para ir a pagar más tarde.`;
 
   const system = `Eres un módulo de interpretación de lenguaje para el sistema de atención automatizada de un proveedor de internet (ISP) en Ecuador. Tu ÚNICA función es analizar el mensaje del cliente y devolver una interpretación estructurada.
 
@@ -46,12 +68,7 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   → NUNCA clasificar como REQUEST_HUMAN, CHANGE_TOPIC ni CANCEL. Mantén el hilo activo.
 
 ## Catálogo de "intent" y reglas de clasificación
-- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional, y consultas sobre planes o servicios) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida. IMPORTANTE: Si el cliente envía un mensaje de agradecimiento o cortesía indicando que pagará más tarde (ej: "Listo muchas gracias mas tarde le pago", "Gracias luego transfiero", "Ok muchas gracias", "Listo gracias"), clasifica SIEMPRE como CANCEL o general.inquiry con intent="general.inquiry" y question="<texto del cliente>". NUNCA clasificar como billing.balance ni billing.record_payment. El cliente NO está pidiendo su saldo de nuevo ni adjuntando un comprobante, solo está cerrando la atención.
-- sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
-- sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.
-- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
-- billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
-- billing.record_payment: envío o reporte de comprobante/transferencia de pago YA realizado (ÚNICAMENTE CUANDO EL CLIENTE YA REALIZÓ EL PAGO Y ADJUNTA/ENVÍA LA FOTO DEL COMPROBANTE O EL NÚMERO DE REFERENCIA). NUNCA clasificar como billing.record_payment si el cliente apenas está pidiendo las cuentas bancarias o despidiéndose para ir a pagar más tarde.
+${dynamicCatalogSection}
 - unknown: no se puede determinar.
 
 Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, valida mi problema de internet" → \`support.internet\`, no \`billing.balance\`).
@@ -63,11 +80,13 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
   - Si el cliente venía hablando de planes y pregunta "¿Cuánto cuesta?", "¿Qué incluye?", "¿La instalación es gratis?":
     Formula en \`entities.question\` la consulta completa: ej. "¿Cuánto cuestan los planes de internet y qué promociones de instalación tienen?".
 - Si el cliente envía una ubicación o sector aislado ("Vivo en Yanuncay", "Estoy en Conocoto", "En San Sebastián"), contextualiza \`entities.question\`: ej. "Cobertura y servicio en el sector de Yanuncay".
-- ATENCIÓN: Si NO hay un caso activo ("caso activo": null) y el cliente envía un saludo aislado (ej: "Buenas tardes", "Hola", "Buenos días", "Buenas noches"), trátalo como un saludo nuevo con intent general.inquiry y entidades vacías {}.
-- ATENCIÓN COMPUESTA: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenas tardes en qué horario atienden", "Hola quiero información de los planes", "Buenas tardes me ayudan con mi saldo"), NUNCA lo clasifiques como saludo genérico ni descartes la pregunta. Asigna el intent de la pregunta e incluye en \`entities.question\` el texto completo y contextualizado de la consulta.
+- ATENCIÓN - SALUDOS Y APERTURA DE CONVERSACIÓN: Si el cliente envía un saludo, cortesía o apertura de conversación (en cualquier forma o modismo del lenguaje natural, ej: "Hola", "Buenas", "Hola qué tal", "Cómo estás", "Qué más", "Buenos días", etc.) SIN una consulta técnica o comercial específica:
+  → Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true}. NUNCA inventes ni agregues un campo \`question\` si no hubo una pregunta de negocio.
+- ATENCIÓN COMPUESTA: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenas tardes en qué horario atienden", "Hola quiero información de los planes", "Hola qué tal, cuánto cuesta el plan de 500?"):
+  → Asigna el intent correspondiente a la consulta e incluye en \`entities.question\` la pregunta completa y contextualizada, y NO pongas \`isGreeting\`.
 
 ## "entities"
-- Extrae claves que el cliente mencionó explícitamente (ej: \`question\`, \`location\`, \`sector\`, \`nationalId\`, \`plan\`, \`speed\`).
+- Extrae claves que el cliente mencionó explícitamente (ej: \`question\`, \`location\`, \`sector\`, \`nationalId\`, \`plan\`, \`speed\`, \`isGreeting\`).
 - Si es una consulta de información general o RAG, incluye SIEMPRE en \`question\` la consulta contextualizada y autocontenida para alimentar la búsqueda documental.
 
 ## "confidence"

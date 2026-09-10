@@ -34,6 +34,8 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
   "UNCLEAR",
 ]);
 
+import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+
 /**
  * Adapter Ollama: solo transporta prompts ya armados (06_AI_PROMPTS.md §1).
  */
@@ -41,6 +43,7 @@ export class OllamaAdapter implements AIProviderPort {
   constructor(
     private readonly config: OllamaAdapterConfig,
     private readonly logger: Logger,
+    private readonly routingService?: DepartmentRoutingService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -49,7 +52,8 @@ export class OllamaAdapter implements AIProviderPort {
       conversationId: input.conversationId,
       messageId: input.messageId,
     });
-    const { system, user } = buildInterpretMessagePrompt(input);
+    const dynamicIntents = this.routingService ? await this.routingService.getPromptIntents() : undefined;
+    const { system, user } = buildInterpretMessagePrompt(input, dynamicIntents);
     const started = Date.now();
     try {
       const raw = await this.chat(system, user, { jsonMode: true, temperature: 0.2 });
@@ -150,6 +154,7 @@ export class OllamaAdapter implements AIProviderPort {
         model: this.config.model,
         stream: false,
         think: false,
+        keep_alive: "24h",
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

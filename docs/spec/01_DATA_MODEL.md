@@ -18,6 +18,7 @@ erDiagram
     ESCALATION }o--o| AGENT : asignado_a
     CASE ||--|| AUTOMATION_STATE : tiene
     DEPARTMENT ||--o{ AGENT_MEMBERSHIP : agrupa
+    DEPARTMENT ||--o{ DEPARTMENT_CASE_ROUTING : resuelve_casos
     AGENT ||--o{ AGENT_MEMBERSHIP : pertenece_a
     N8N_WORKFLOW_REGISTRY }o--|| WORKFLOW_EXECUTION : resuelve_url_de
 ```
@@ -33,12 +34,29 @@ CREATE TABLE department (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slug          TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
+  description   TEXT,                         -- descripción en lenguaje natural del área (migración 0023)
   -- 'shared': todos los agentes pueden VER (no editar) casos de este departamento (default).
   -- 'restricted': solo agentes con membership en este departamento pueden verlo (ej. datos sensibles).
   visibility    TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('shared','restricted')),
   active        BOOLEAN NOT NULL DEFAULT true,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migración 0023_department_case_routing.sql: catálogo dinámico de motivos/casos por departamento
+CREATE TABLE department_case_routing (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  department_id UUID NOT NULL REFERENCES department(id) ON DELETE CASCADE,
+  intent_key    VARCHAR(100) NOT NULL UNIQUE, -- ej: 'support.internet', 'retention.cancel_service'
+  label         VARCHAR(150) NOT NULL,        -- nombre de negocio amigable para el operador
+  description   TEXT NOT NULL,                -- guía en lenguaje del cliente inyectada al prompt de IA
+  handling_mode VARCHAR(30) NOT NULL DEFAULT 'ai_assisted' CHECK (handling_mode IN ('ai_assisted', 'human_direct')),
+  workflow_type VARCHAR(50) NOT NULL DEFAULT 'GENERAL_INQUIRY',
+  active        BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_dept_case_routing_dept ON department_case_routing(department_id);
+CREATE INDEX idx_dept_case_routing_intent ON department_case_routing(intent_key);
 
 CREATE TABLE agent (
   id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

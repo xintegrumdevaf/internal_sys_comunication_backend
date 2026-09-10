@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import path from "node:path";
+dotenv.config({ override: true });
 import { z } from "zod";
 
 // Cargar .env normal (si existe)
@@ -48,8 +49,14 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(""),
   WHATSAPP_ACCESS_TOKEN: z.string().default(""),
 
-  // AIProviderPort (docs/spec/03_API_CONTRACT.md §A) — implementado en la
-  // Etapa 5, se valida desde ahora porque ya vive en .env.example.
+  // Proveedor de mensajería (WhatsApp Cloud directo o Zernio)
+  WHATSAPP_PROVIDER: z.enum(["meta", "zernio"]).default("meta"),
+  ZERNIO_API_KEY: z.string().default(""),
+  ZERNIO_ACCOUNT_ID: z.string().default(""),
+  ZERNIO_WEBHOOK_SECRET: z.string().default(""),
+  ZERNIO_BASE_URL: z.string().default("https://zernio.com/api/v1"),
+
+  // AIProviderPort (docs/spec/03_API_CONTRACT.md Â§A)
   AI_PROVIDER: z.enum(["ollama", "gemini"]).default("ollama"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen3.5:4b"),

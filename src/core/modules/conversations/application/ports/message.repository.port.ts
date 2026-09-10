@@ -22,6 +22,20 @@ export type InsertOutboundMessageInput = {
   caseId?: string | null;
 };
 
+export type InsertHistoricalMessageInput = {
+  conversationId: string;
+  direction: "inbound" | "outbound";
+  author: MessageAuthor;
+  externalId: string;
+  body: string;
+  type?: string;
+  mediaId?: string | null;
+  mimeType?: string | null;
+  caption?: string | null;
+  filename?: string | null;
+  createdAt: Date;
+};
+
 export type ListMessagesOptions = {
   limit?: number;
   /** Cursor = createdAt ISO del último mensaje visto (paginación hacia atrás en el tiempo). */
@@ -36,6 +50,8 @@ export interface MessageRepositoryPort {
    */
   insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
   insertOutbound(input: InsertOutboundMessageInput): Promise<Message>;
+  /** Inserción histórica con timestamp explícito y soporte para inbound u outbound. */
+  insertHistorical(input: InsertHistoricalMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
   listByConversation(conversationId: string, options?: ListMessagesOptions): Promise<Message[]>;
   /** Usado por el buffer/debounce (docs/spec/02_STATE_MACHINE.md §12) para recuperar la unidad de trabajo agrupada. */
   findByIds(ids: string[]): Promise<Message[]>;

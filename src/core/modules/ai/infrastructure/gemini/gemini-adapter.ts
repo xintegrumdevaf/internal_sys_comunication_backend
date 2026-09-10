@@ -33,10 +33,13 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
   "UNCLEAR",
 ]);
 
+import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+
 export class GeminiAdapter implements AIProviderPort {
   constructor(
     private readonly config: GeminiAdapterConfig,
     private readonly logger: Logger,
+    private readonly routingService?: DepartmentRoutingService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -45,7 +48,8 @@ export class GeminiAdapter implements AIProviderPort {
       conversationId: input.conversationId,
       messageId: input.messageId,
     });
-    const { system, user } = buildInterpretMessagePrompt(input);
+    const dynamicIntents = this.routingService ? await this.routingService.getPromptIntents() : undefined;
+    const { system, user } = buildInterpretMessagePrompt(input, dynamicIntents);
     const started = Date.now();
     try {
       const payload = this.buildBasePayload(system, user, { jsonMode: true, temperature: 0.2 });

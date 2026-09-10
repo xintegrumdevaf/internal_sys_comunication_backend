@@ -69,22 +69,18 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
   const queryKnowledgeBase: WorkflowStateHandler = async ({ context, entities, text }) => {
     let data = requireContext(context);
 
-    // Preferir el texto raw completo si contiene una pregunta acompañada de saludo (ej: "Buenos días en qué horario atienden")
-    const rawText = (typeof text === "string" ? text : "").trim();
-    const isRawGreetingOnly = /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(rawText);
+    // 1. La IA es la única fuente de verdad: determina si hay una pregunta concreta de negocio para RAG
+    const hasExplicitQuestion =
+      typeof entities?.question === "string" && entities.question.trim().length > 3;
 
-    let question = rawText;
-    if (!isRawGreetingOnly && typeof entities?.question === "string" && entities.question.trim().length > 3) {
-      question = entities.question.trim();
-    } else if (!question) {
-      question = typeof entities?.location === "string" ? `¿Tienen cobertura en ${entities.location}?` : data.question || "";
-    }
-
-    // Si el mensaje es un saludo aislado real (ej: "Buenas tardes", "Hola", "Buenos días"):
-    const isGreeting = isRawGreetingOnly || /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(question.trim());
+    // 2. Si la AI determino que es un saludo (isGreeting) o no extrajo ninguna pregunta de negocio:
+    const isGreeting =
+      entities?.isGreeting === true ||
+      entities?.is_greeting === true ||
+      (!hasExplicitQuestion && !entities?.location);
 
     if (isGreeting) {
-      const greetingPhrase = getGreetingPhrase(rawText || question);
+      const greetingPhrase = getGreetingPhrase(typeof text === "string" ? text : "");
       const nextData: GeneralInquiryContext = {
         ...data,
         answer: `${greetingPhrase} ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.`,
@@ -96,9 +92,19 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
       };
     }
 
+    const question = hasExplicitQuestion
+      ? (entities!.question as string).trim()
+      : typeof entities?.location === "string"
+        ? `¿Tienen cobertura en ${entities.location}?`
+        : typeof text === "string"
+          ? text.trim()
+          : data.question || "";
+
     // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias", "listo muchas gracias mas tarde le pago"):
     // responder amablemente y completar el caso sin consultar RAG ni escalar a un asesor.
     const isThankYou =
+      entities?.isThankYou === true ||
+      entities?.is_thank_you === true ||
       /gracias|agradecid[oa]|excelente|entendido|de\s+nada|mas\s+tarde\s+(le\s+)?pago|luego\s+pago|despu[eé]s\s+pago|listo\s+muchas\s+gracias/i.test(
         question.trim()
       );

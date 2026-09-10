@@ -20,6 +20,7 @@ import { resolveReplyTemplate } from "../services/resolve-reply-template";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { AdvanceCaseUseCase } from "./advance-case.use-case";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
+import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -27,6 +28,7 @@ export type ProcessBufferedMessagesDeps = {
   messageRepo: MessageRepositoryPort;
   whatsappSender: WhatsAppSenderPort;
   departmentResolver: DepartmentResolverService;
+  routingService?: DepartmentRoutingService;
   arbitrationService: CaseArbitrationService;
   interpretationProvider: InterpretationPort;
   engine: WorkflowEngine;
@@ -432,6 +434,30 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+
+      // Si el caso está configurado en modo human_direct, se escala de inmediato sin avance de IA
+      if (!decision.resumeCaseId && this.deps.routingService) {
+        const routing = await this.deps.routingService.resolveByIntent(interpretation.intent);
+        if (routing?.handlingMode === "human_direct" && this.deps.escalationService) {
+          log.info(
+            { caseId: targetCaseId, intent: interpretation.intent, routingId: routing.id },
+            "caso configurado como human_direct; escalando directamente a agentes humanos del departamento",
+          );
+          const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
+            caseId: targetCaseId,
+            reason: `Atención personalizada requerida: ${routing.label}`,
+            correlationId,
+          });
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: customerMessage,
+            log,
+          });
+          return;
+        }
+      }
+
       const seededEntities = seedPurposeEntities(interpretation.intent, interpretation.entities);
       const advanced = await this.deps.advanceCase.execute({
         caseId: targetCaseId,
@@ -693,7 +719,7 @@ export class ProcessBufferedMessagesUseCase {
       throw new DomainError("UNSUPPORTED", `No hay WorkflowDefinition registrada para '${workflowType}'`);
     }
 
-    const departmentId = await this.deps.departmentResolver.resolveDepartmentId(workflowType);
+    const departmentId = await this.deps.departmentResolver.resolveDepartmentId(workflowType, intent);
     const expiresAt = new Date(Date.now() + definition.expirationHours * 60 * 60 * 1000);
     const context = seedInitialContext(workflowType, intent);
 

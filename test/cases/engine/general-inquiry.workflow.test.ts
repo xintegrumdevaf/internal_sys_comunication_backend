@@ -147,4 +147,38 @@ describe("GENERAL_INQUIRY workflow", () => {
       expect(outcome.context.data.answer).not.toContain("Buenas tardes");
     }
   });
+
+  it("responde como saludo y completa el caso si el cliente dice 'Hola que tal'", async () => {
+    const fakeRagService = {
+      query: async () => {
+        throw new Error("RAG no deberia ser llamado para un saludo");
+      },
+    } as unknown as RagService;
+    const workflow = createGeneralInquiryWorkflow(fakeRagService);
+
+    const context: CaseContext = {
+      workflowType: "GENERAL_INQUIRY",
+      data: { question: "Hola que tal" },
+    };
+
+    const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler QUERY_KNOWLEDGE_BASE is undefined");
+
+    const outcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "QUERY_KNOWLEDGE_BASE",
+      context,
+      text: "Hola que tal",
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+
+    expect(outcome.type).toBe("COMPLETED");
+    if (outcome.type === "COMPLETED" && outcome.context.workflowType === "GENERAL_INQUIRY") {
+      expect(outcome.context.data.found).toBe(true);
+      expect(outcome.context.data.answer).toContain("¿En qué te podemos ayudar hoy?");
+    }
+  });
 });
