@@ -5,6 +5,8 @@ export type BillingBalanceContext = {
   /** balance = consulta de saldo; record_payment = registrar comprobante. */
   purpose?: "balance" | "record_payment";
   client?: { nationalId: string; fullName: string };
+  lastSearchedNationalId?: string;
+  clientNotFound?: boolean;
   invoices?: { id: string; amount: number; dueDate: string }[];
   balance?: { hasDebt: boolean; amount?: number };
   payment?: {

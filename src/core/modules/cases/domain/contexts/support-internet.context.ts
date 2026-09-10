@@ -12,6 +12,7 @@ export type SupportInternetPendingContract = {
   oltName: string;
   pon: string;
   serial: string;
+  ip?: string;
 };
 
 /**
@@ -46,14 +47,28 @@ export type SupportInternetDiagnosticTechnical = {
 // ... (rest of file)
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
+  lastSearchedNationalId?: string;
+  clientNotFound?: boolean;
   contract?: {
     id: string;
     sector: string;
     oltName: string;
     pon: string;
     serial: string;
+    ip?: string;
     /** Modelo de router — el workflow real `find-client-contract` no lo devuelve hoy. */
     router?: string;
+  };
+  /** Estado del cliente en MikroTik (/v1/mikrotik/client-status) */
+  clientStatus?: {
+    sector?: string;
+    ip?: string;
+    status?: string;
+    clientName?: string;
+    list?: string;
+    creationTime?: string;
+    canBeReactivated?: boolean;
+    reason?: string;
   };
   /** Contratos candidatos cuando VALIDATE_CLIENT devuelve mas de uno (§13 desambiguar). */
   pendingContracts?: SupportInternetPendingContract[];

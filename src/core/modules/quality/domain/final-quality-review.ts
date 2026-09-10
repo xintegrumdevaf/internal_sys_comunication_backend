@@ -8,6 +8,7 @@ export type FindingForFinalReview = {
   category: string;
   excerpt: string;
   rationale: string;
+  recommendation?: string;
 };
 
 export function averageChunkScore(scores: number[]): number {
@@ -30,6 +31,15 @@ const CATEGORY_ES: Record<string, string> = {
   inefficiency: "Ineficiencia",
   other: "Otro",
 };
+
+function formatFinding(f: FindingForFinalReview): string {
+  const cat = CATEGORY_ES[f.category] ?? f.category;
+  let text = `- [${cat}] «${f.excerpt}» — ${f.rationale}`;
+  if (f.recommendation?.trim()) {
+    text += ` | Cómo debió abordarse: ${f.recommendation.trim()}`;
+  }
+  return text;
+}
 
 /**
  * Review final: score total + fallos destacados + síntesis de tramos.
@@ -58,16 +68,14 @@ export function buildFinalQualityReview(input: {
       lines.push("");
       lines.push(`Fallos graves (${high.length}):`);
       for (const f of high.slice(0, 8)) {
-        const cat = CATEGORY_ES[f.category] ?? f.category;
-        lines.push(`- [${cat}] «${f.excerpt}» — ${f.rationale}`);
+        lines.push(formatFinding(f));
       }
     }
     if (medium.length > 0) {
       lines.push("");
       lines.push(`Puntos a mejorar (${medium.length}):`);
       for (const f of medium.slice(0, 6)) {
-        const cat = CATEGORY_ES[f.category] ?? f.category;
-        lines.push(`- [${cat}] «${f.excerpt}» — ${f.rationale}`);
+        lines.push(formatFinding(f));
       }
     }
   }

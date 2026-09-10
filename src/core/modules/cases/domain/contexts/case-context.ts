@@ -1,6 +1,7 @@
 import type { SupportInternetContext } from "./support-internet.context";
 import type { BillingBalanceContext } from "./billing-balance.context";
 import type { SalesPackagesContext } from "./sales-packages.context";
+import type { GeneralInquiryContext } from "./general-inquiry.context";
 import type { CaseEngineMeta } from "./engine-meta";
 
 /**
@@ -30,7 +31,7 @@ export type CaseContext =
     }
   | {
       workflowType: "GENERAL_INQUIRY";
-      data: { question?: string };
+      data: GeneralInquiryContext;
       _engine?: CaseEngineMeta;
     };
 

@@ -213,7 +213,7 @@ describe("Etapa 5 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     expect(after?.case.status).toBe("HUMAN_ACTIVE");
     const automation = await caseRepo.getAutomationState(created.id);
     expect(automation?.enabled).toBe(false);
-    expect(whatsappSender.sent[0]!.body.toLowerCase()).toContain("especialista");
+    expect(whatsappSender.sent[0]!.body.toLowerCase()).toContain("recibido");
   });
 
   it("intencion valida activa SUPPORT_INTERNET", async () => {

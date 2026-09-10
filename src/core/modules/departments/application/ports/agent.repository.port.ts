@@ -5,8 +5,12 @@ export type CreateAgentInput = {
   email: string;
   role?: AgentRole;
   primaryDepartmentId?: string | null;
+  /** Departamentos adicionales (agent_membership). */
+  departmentIds?: string[];
   /** Si se omite, el repo persiste `false` (opt-in). */
   autoAssignEnabled?: boolean;
+  /** Si se omite, el repo persiste `true` por defecto. */
+  mustChangePassword?: boolean;
   /** Hash argon2 ya calculado — nunca texto plano llega hasta aqui. */
   passwordHash?: string | null;
 };
@@ -17,8 +21,10 @@ export type UpdateAgentPatch = Partial<{
   email: string;
   role: AgentRole;
   primaryDepartmentId: string | null;
+  departmentIds: string[];
   active: boolean;
   autoAssignEnabled: boolean;
+  mustChangePassword: boolean;
   /** Hash argon2 ya calculado — nunca texto plano llega hasta aqui. */
   passwordHash: string | null;
 }>;
@@ -36,6 +42,7 @@ export interface AgentRepositoryPort {
    */
   countActiveAdmins(excludeAgentId?: string): Promise<number>;
   addMembership(agentId: string, departmentId: string): Promise<void>;
+  setMemberships(agentId: string, departmentIds: string[]): Promise<void>;
   belongsToDepartment(agentId: string, departmentId: string): Promise<boolean>;
   /** Departamentos con membership (alcance manager en calidad / triage). */
   listMembershipDepartmentIds(agentId: string): Promise<string[]>;

@@ -58,4 +58,34 @@ describe("InstrumentedN8nGateway (docs/spec/03_API_CONTRACT.md §B)", () => {
     const execution = [...executionRepo.executions.values()][0]!;
     expect(execution.status).toBe("FAILED");
   });
+
+  it("un reintento tras fallo vuelve a invocar al gateway real (no cachea errores)", async () => {
+    const executionRepo = new WorkflowExecutionRepositoryFake();
+    let attempts = 0;
+    const gateway = new N8nGatewayFake({
+      CHECK_BALANCE: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return { success: false, error: { type: "EXTERNAL_SERVICE_ERROR", message: "Timeout temporal", retryable: true } };
+        }
+        return { success: true, result: { hasDebt: false, debt: 0 } };
+      },
+    });
+    const instrumented = new InstrumentedN8nGateway(gateway, executionRepo, "wi-3", silentLogger);
+    const params = {
+      action: "CHECK_BALANCE",
+      caseId: "case-3",
+      conversationId: "conv-3",
+      correlationId: "corr-3",
+      input: { id: "12345" },
+    };
+
+    const first = await instrumented.executeAction(params);
+    expect(first.success).toBe(false);
+
+    // Segundo intento tras resolverse el error externo:
+    const second = await instrumented.executeAction(params);
+    expect(second.success).toBe(true);
+    expect(gateway.calls).toHaveLength(2);
+  });
 });

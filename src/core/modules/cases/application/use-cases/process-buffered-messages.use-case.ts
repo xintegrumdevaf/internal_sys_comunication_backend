@@ -1,8 +1,8 @@
 import { DomainError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { Case } from "../../domain/case.entity";
-import { emptyContextFor } from "../../domain/contexts/case-context";
-import type { CaseContext } from "../../domain/contexts/case-context";
+import { emptyContextFor, type CaseContext } from "../../domain/contexts/case-context";
+import type { BillingBalanceContext } from "../../domain/contexts/billing-balance.context";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
 import type { WhatsAppSenderPort } from "../../../conversations/application/ports/whatsapp-sender.port";
@@ -19,6 +19,7 @@ import { DepartmentResolverService } from "../services/department-resolver.servi
 import { resolveReplyTemplate } from "../services/resolve-reply-template";
 import { WorkflowEngine } from "../engine/workflow-engine";
 import { AdvanceCaseUseCase } from "./advance-case.use-case";
+import { normalizeNationalId } from "../../../customers/domain/national-id";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -131,15 +132,30 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       if (hasDocumentAttachment || (messages.some(m => m.type === "image") && (prevHasDebt || Object.keys(receiptEntities).length === 0))) {
-        log.info("Comprobante o archivo recibido (documento/imagen): derivando a Ventas");
-        const salesDeptId = await this.deps.departmentResolver.resolveDepartmentId("SALES_PACKAGES");
+        log.info("Comprobante o archivo recibido (documento/imagen): derivando a Facturación");
+        const billingDeptId = await this.deps.departmentResolver.resolveDepartmentId("BILLING_BALANCE");
         let targetCaseId: string;
 
-        const mergedContext = {
-          ...inheritedContext,
-          balance: inheritedContext.balance ?? { amount: 22.58, hasDebt: true, currency: "USD", status: "DEBT" },
-          problem: "Validación de comprobante de pago de saldo pendiente",
-          receiptAttached: true,
+        const rawBalance = inheritedContext.balance as Record<string, unknown> | undefined;
+        const inheritedClient = (inheritedContext as { client?: { nationalId: string; fullName: string } }).client;
+        const mergedContext: BillingBalanceContext = {
+          purpose: "record_payment",
+          client: inheritedClient,
+          balance: {
+            hasDebt: true,
+            amount:
+              typeof rawBalance?.amount === "number"
+                ? rawBalance.amount
+                : typeof rawBalance?.debt === "number"
+                  ? rawBalance.debt
+                  : 22.58,
+          },
+          payment: {
+            amount: typeof receiptEntities.amount === "number" ? receiptEntities.amount : undefined,
+            reference: typeof receiptEntities.reference === "string" ? receiptEntities.reference : undefined,
+            date: typeof receiptEntities.date === "string" ? receiptEntities.date : undefined,
+            status: "PENDING",
+          },
         };
 
         if (activeAggregate && activeAggregate.case.workflowType === "SUPPORT_INTERNET") {
@@ -157,8 +173,8 @@ export class ProcessBufferedMessagesUseCase {
 
         const created = await this.createCase(
           conversationId,
-          "SALES_PACKAGES",
-          "sales.payment_receipt",
+          "BILLING_BALANCE",
+          "billing.record_payment",
           log,
         );
         targetCaseId = created.id;
@@ -170,12 +186,12 @@ export class ProcessBufferedMessagesUseCase {
             expectedWorkflowVersion: fresh.workflowInstance.version,
             status: fresh.case.status,
             context: {
-              workflowType: "SALES_PACKAGES",
+              workflowType: "BILLING_BALANCE",
               data: mergedContext,
-            } as CaseContext,
+            },
             currentState: fresh.workflowInstance.currentState,
             expiresAt: null,
-            departmentId: salesDeptId,
+            departmentId: billingDeptId,
           });
         }
 
@@ -192,8 +208,21 @@ export class ProcessBufferedMessagesUseCase {
         });
         await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
 
+        const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
+        const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
+        const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
+
+        const rawAmount = receiptEntities.amount ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount ?? (inheritedContext.balance as { debt?: number } | undefined)?.debt;
+        const amountFormatted =
+          typeof rawAmount === "number" && Number.isFinite(rawAmount)
+            ? `$${rawAmount.toFixed(2).replace('.', ',')}`
+            : typeof rawAmount === "string" && rawAmount.trim() !== "" && Number.isFinite(Number(rawAmount))
+              ? `$${Number(rawAmount).toFixed(2).replace('.', ',')}`
+              : null;
+
+        const amountStr = amountFormatted ? `de ${amountFormatted} ` : "";
         const replyMessage =
-          "Recibimos tu comprobante de pago 📄. Lo hemos derivado al departamento de ventas para que validen la transacción y apliquen el pago a tu cuenta. Un especialista te confirmará en breve.";
+          `¡Recibido, gracias! 🙌 Estamos verificando tu pago ${amountStr}y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!`.replace("  ", " ");
 
         await this.deliverFixedReply({
           conversationId,
@@ -209,6 +238,16 @@ export class ProcessBufferedMessagesUseCase {
             activeAggregate.workflowInstance.currentState
           ]
         : undefined;
+
+      const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 6 });
+      const recentMessages = rawHistory
+        .reverse()
+        .filter((m) => !messages.some((bm) => bm.id === m.id))
+        .slice(-4)
+        .map((m) => ({
+          author: m.author,
+          body: m.body,
+        }));
 
       let interpretation = await this.deps.interpretationProvider.interpretMessage({
         correlationId,
@@ -227,6 +266,7 @@ export class ProcessBufferedMessagesUseCase {
               requireAny: waitingStep?.requireAny,
             }
           : null,
+        recentMessages,
       });
 
       // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
@@ -244,22 +284,33 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Auto-extracción de cédula (10 dígitos) del historial reciente si no se detectó
-      if (!interpretation.entities?.nationalId) {
+      // Auto-extracción de cédula SOLO cuando el intent activo o entrante es de soporte/facturación
+      // (nunca inyectar nationalId en flujos de ventas, consultas generales, etc.)
+      const identityRelatedIntents = ["support.internet", "support.slow_internet", "billing.balance", "billing.record_payment"];
+      const identityRelatedWorkflows = ["SUPPORT_INTERNET", "BILLING_BALANCE"];
+      const isIdentityContext =
+        identityRelatedIntents.includes(interpretation.intent) ||
+        (activeAggregate && identityRelatedWorkflows.includes(activeAggregate.case.workflowType));
+
+      if (isIdentityContext && !interpretation.entities?.nationalId) {
         const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 10 });
         const customerMessages = history.filter((m) => m.author === "customer");
         for (const msg of customerMessages) {
           const body = msg.body.trim();
-          const match = body.match(/\b\d{10}\b/);
+          const match = body.match(/\b\d{9,13}\b/);
           if (match) {
+            const normalized = normalizeNationalId(match[0]);
             interpretation.entities = {
               ...interpretation.entities,
-              nationalId: match[0],
+              nationalId: normalized,
             };
-            log.info({ nationalId: match[0] }, "cédula extraída automáticamente del historial de la conversación");
+            log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
             break;
           }
         }
+      }
+      if (interpretation.entities?.nationalId) {
+        interpretation.entities.nationalId = normalizeNationalId(interpretation.entities.nationalId);
       }
 
       log.info(
@@ -678,12 +729,11 @@ function seedPurposeEntities(
   if (intent === "billing.balance") {
     return { ...entities, billingPurpose: "balance" };
   }
+  // sales.upgrade → GENERAL_INQUIRY con flag wantsUpgrade para ofrecer especialista post-RAG
   if (intent === "sales.upgrade") {
-    return { ...entities, salesPurpose: "upgrade" };
+    return { ...entities, wantsUpgrade: true };
   }
-  if (intent === "sales.packages") {
-    return { ...entities, salesPurpose: "packages" };
-  }
+  // sales.packages → GENERAL_INQUIRY puro — la question ya viene en entities desde el NLU
   return entities;
 }
 
@@ -695,15 +745,6 @@ function seedInitialContext(workflowType: string, intent: string): CaseContext {
       data: {
         ...base.data,
         purpose: intent === "billing.record_payment" ? "record_payment" : "balance",
-      },
-    };
-  }
-  if (base.workflowType === "SALES_PACKAGES") {
-    return {
-      ...base,
-      data: {
-        ...base.data,
-        purpose: intent === "sales.upgrade" ? "upgrade" : "packages",
       },
     };
   }

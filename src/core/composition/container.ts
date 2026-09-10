@@ -1,3 +1,9 @@
+import { createRagRouter } from "../modules/ai/presentation/rag.router";
+import { RagDocumentRepositoryPg } from "../modules/ai/infrastructure/postgres/rag-document.repository.pg";
+import { PgVectorStoreAdapter } from "../modules/ai/infrastructure/postgres/pg-vector-store.adapter";
+import { OllamaEmbeddingAdapter } from "../modules/ai/infrastructure/ollama/ollama-embedding.adapter";
+import { GeminiEmbeddingAdapter } from "../modules/ai/infrastructure/gemini/gemini-embedding.adapter";
+import { RagService } from "../modules/ai/application/services/rag.service";
 import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import type { Pool } from "pg";
@@ -10,9 +16,21 @@ import { createRequestLogger } from "../../shared/http/middlewares/request-logge
 import { createErrorHandler } from "../../shared/http/middlewares/error-handler.middleware";
 import { createCors } from "../../shared/http/middlewares/cors.middleware";
 import { createHealthRouter } from "../../shared/http/health.router";
+import { createMetricsMiddleware } from "../../shared/monitoring/metrics.middleware";
+import { createMetricsRouter } from "../../shared/monitoring/metrics.router";
 
 import { AuditRepositoryPg } from "../modules/audit/infrastructure/postgres/audit.repository.pg";
+import { ListAuditEventsUseCase } from "../modules/audit/application/use-cases/list-audit-events.use-case";
+import { GetAuditStatsUseCase } from "../modules/audit/application/use-cases/get-audit-stats.use-case";
 import { createAuditRouter } from "../modules/audit/presentation/audit.router";
+
+import { MessageTemplateRepositoryPg } from "../modules/message-templates/infrastructure/postgres/message-template.repository.pg";
+import { MetaTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/meta/meta-templates-gateway.http";
+import { CreateMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/create-message-template.use-case";
+import { ListMessageTemplatesUseCase } from "../modules/message-templates/application/use-cases/list-message-templates.use-case";
+import { DeleteMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/delete-message-template.use-case";
+import { SyncTemplateStatusUseCase } from "../modules/message-templates/application/use-cases/sync-template-status.use-case";
+import { createMessageTemplatesRouter } from "../modules/message-templates/presentation/message-templates.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
@@ -48,6 +66,7 @@ import { SessionStoreRedis } from "../modules/auth/infrastructure/redis/session-
 import { LoginUseCase } from "../modules/auth/application/use-cases/login.use-case";
 import { LogoutUseCase } from "../modules/auth/application/use-cases/logout.use-case";
 import { ChangePasswordUseCase } from "../modules/auth/application/use-cases/change-password.use-case";
+import { UpdateAgentAvailabilityUseCase } from "../modules/auth/application/use-cases/update-agent-availability.use-case";
 import { createSessionMiddleware } from "../modules/auth/presentation/session.middleware";
 import { createAuthRouter } from "../modules/auth/presentation/auth.router";
 
@@ -64,10 +83,12 @@ import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
 import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
 import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.http";
+import { MikrotikDiagnosticAdapter } from "../modules/cases/infrastructure/diagnostic/mikrotik-diagnostic.adapter";
+import { CompositeActionGateway } from "../modules/cases/infrastructure/gateways/composite-action-gateway";
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
-import { salesPackagesWorkflow } from "../modules/cases/application/engine/definitions/sales-packages.workflow";
+import { createGeneralInquiryWorkflow } from "../modules/cases/application/engine/definitions/general-inquiry.workflow";
 import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
 import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
 import { ExpirationService } from "../modules/cases/application/services/expiration.service";
@@ -115,6 +136,39 @@ import { MarkReviewReviewedUseCase } from "../modules/quality/application/use-ca
 import { BatchEnqueueQualityReviewsUseCase } from "../modules/quality/application/use-cases/batch-enqueue-quality-reviews.use-case";
 import { resolveQualityDepartmentScope } from "../modules/quality/application/quality-auth";
 import { createQualityRouter } from "../modules/quality/presentation/quality.router";
+
+import { PostgresInternalThreadRepository } from "../modules/internal_chat/infrastructure/postgres/postgres-internal-thread.repository";
+import { PostgresInternalMessageRepository } from "../modules/internal_chat/infrastructure/postgres/postgres-internal-message.repository";
+import { GetOrCreateDirectThreadUseCase } from "../modules/internal_chat/application/use-cases/get-or-create-direct-thread.use-case";
+import { ListThreadsUseCase } from "../modules/internal_chat/application/use-cases/list-threads.use-case";
+import { ListMessagesUseCase as ListInternalMessagesUseCase } from "../modules/internal_chat/application/use-cases/list-messages.use-case";
+import { SendInternalMessageUseCase } from "../modules/internal_chat/application/use-cases/send-internal-message.use-case";
+import { MarkThreadAsReadUseCase } from "../modules/internal_chat/application/use-cases/mark-thread-as-read.use-case";
+import { createInternalChatRouter } from "../modules/internal_chat/presentation/internal-chat.router";
+import {
+  CampaignRepositoryPg,
+  CampaignRecipientRepositoryPg,
+} from "../modules/campaigns/infrastructure/postgres/campaign.repository.pg";
+import { CampaignFileParserService } from "../modules/campaigns/application/services/campaign-file-parser.service";
+import { CampaignWorkerService } from "../modules/campaigns/infrastructure/queue/campaign-worker.service";
+import { CreateCampaignUseCase } from "../modules/campaigns/application/use-cases/create-campaign.use-case";
+import { ImportCampaignRecipientsUseCase } from "../modules/campaigns/application/use-cases/import-campaign-recipients.use-case";
+import { StartCampaignUseCase } from "../modules/campaigns/application/use-cases/start-campaign.use-case";
+import { ProcessCampaignBatchUseCase } from "../modules/campaigns/application/use-cases/process-campaign-batch.use-case";
+import { SuspendCampaignUseCase } from "../modules/campaigns/application/use-cases/suspend-campaign.use-case";
+import { ResumeCampaignUseCase } from "../modules/campaigns/application/use-cases/resume-campaign.use-case";
+import { ListCampaignsUseCase } from "../modules/campaigns/application/use-cases/list-campaigns.use-case";
+import { GetCampaignUseCase } from "../modules/campaigns/application/use-cases/get-campaign.use-case";
+import { DeleteCampaignUseCase } from "../modules/campaigns/application/use-cases/delete-campaign.use-case";
+import { createCampaignsRouter } from "../modules/campaigns/presentation/campaigns.router";
+
+import { AnalyticsRepositoryPg } from "../modules/analytics/infrastructure/postgres/analytics.repository.pg";
+import { GetAnalyticsOverviewUseCase } from "../modules/analytics/application/use-cases/get-analytics-overview.use-case";
+import { GetCasesDistributionUseCase } from "../modules/analytics/application/use-cases/get-cases-distribution.use-case";
+import { GetAIEfficiencyUseCase } from "../modules/analytics/application/use-cases/get-ai-efficiency.use-case";
+import { GetAgentsPerformanceUseCase } from "../modules/analytics/application/use-cases/get-agents-performance.use-case";
+import { GetInfrastructureAlertsUseCase } from "../modules/analytics/application/use-cases/get-infrastructure-alerts.use-case";
+import { createAnalyticsRouter } from "../modules/analytics/presentation/analytics.router";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -165,20 +219,27 @@ export function createContainer(): Container {
   const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
   const n8nWorkflowRegistryRepo = new N8nWorkflowRegistryRepositoryPg(pgPool);
   const escalationRepo = new EscalationRepositoryPg(pgPool);
+  const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
+  const metaTemplatesGateway = new MetaTemplatesGatewayHttp(env, logger.child({ module: "message-templates" }));
 
-  // --- Motor de workflow (Etapa 2 + 8) ---
-  // Agregar una definicion nueva no toca WorkflowEngine ni AIProviderPort.
-  const workflowEngine = new WorkflowEngine([
-    supportInternetWorkflow,
-    billingBalanceWorkflow,
-    salesPackagesWorkflow,
-  ]);
-  const departmentResolver = new DepartmentResolverService(departmentRepo);
-  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
+  // --- Campañas (Campaigns) ---
+  const campaignRepo = new CampaignRepositoryPg(pgPool);
+  const campaignRecipientRepo = new CampaignRecipientRepositoryPg(pgPool);
+  const campaignFileParser = new CampaignFileParserService();
 
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
+  // --- Catalogo de n8n + gateway directo de diagnostico + gateway compuesto ---
   const n8nWorkflowRegistryCache = new N8nWorkflowRegistryCache(n8nWorkflowRegistryRepo);
   const n8nGateway = new N8nGatewayHttp(n8nWorkflowRegistryCache, env.API_INTERNAL_KEY, casesLogger);
+  const diagnosticGateway = new MikrotikDiagnosticAdapter({
+    baseUrl: env.MIKROTIK_SERVICE_URL,
+    timeoutMs: env.MIKROTIK_DIAGNOSTIC_TIMEOUT_MS,
+    logger: casesLogger,
+  });
+  const actionGateway = new CompositeActionGateway({
+    n8nGateway,
+    diagnosticGateway,
+  });
 
   // --- AI (Etapa 5) ---
   const aiLogger = logger.child({ module: "ai" });
@@ -211,6 +272,53 @@ export function createContainer(): Container {
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
+
+  // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
+  const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
+  const vectorStore = new PgVectorStoreAdapter(pgPool);
+  const embeddingProvider =
+    env.AI_PROVIDER === "gemini" && env.GEMINI_API_KEY
+      ? new GeminiEmbeddingAdapter(
+        {
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_EMBEDDING_MODEL,
+          dimension: env.GEMINI_EMBEDDING_DIMENSION,
+        },
+        aiLogger,
+      )
+      : new OllamaEmbeddingAdapter(
+        {
+          baseUrl: env.OLLAMA_BASE_URL,
+          model: env.OLLAMA_EMBEDDING_MODEL,
+          dimension: env.OLLAMA_EMBEDDING_DIMENSION,
+        },
+        aiLogger,
+      );
+
+  const ragService = new RagService({
+    documentRepository: ragDocumentRepo,
+    vectorStore,
+    embeddingProvider,
+    chatModelUrl: env.OLLAMA_BASE_URL,
+    chatModel: env.OLLAMA_MODEL,
+    geminiApiKey: env.GEMINI_API_KEY || undefined,
+    geminiModel: env.GEMINI_MODEL,
+    aiTimeoutMs: env.AI_CALL_TIMEOUT_MS,
+    logger: aiLogger,
+  });
+
+  // --- Motor de workflow (Etapa 2 + RAG unificado) ---
+  // SALES_PACKAGES ya no existe como workflow separado: sales.packages y sales.upgrade
+  // son respondidos por GENERAL_INQUIRY via RAG. Solo si el cliente quiere contratar/mejorar
+  // tras recibir la info → GENERAL_INQUIRY escala a ventas.
+  const generalInquiryWorkflow = createGeneralInquiryWorkflow(ragService);
+  const workflowEngine = new WorkflowEngine([
+    supportInternetWorkflow,
+    billingBalanceWorkflow,
+    generalInquiryWorkflow,
+  ]);
+  const departmentResolver = new DepartmentResolverService(departmentRepo);
+  const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger);
 
   // --- Calidad (Etapa 10) — antes de complete/expiration que encolan reviews ---
   const qualityLogger = logger.child({ module: "quality" });
@@ -250,6 +358,35 @@ export function createContainer(): Container {
 
   // --- Realtime (Etapa 7) — antes de use cases que emiten eventos ---
   const broadcaster = new RealtimeBroadcaster();
+
+  // --- Message Templates ---
+  const createMessageTemplate = new CreateMessageTemplateUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+  });
+  const listMessageTemplates = new ListMessageTemplatesUseCase(messageTemplateRepo);
+  const deleteMessageTemplate = new DeleteMessageTemplateUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+  });
+  const syncTemplateStatus = new SyncTemplateStatusUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+    broadcaster,
+  });
+
+  // --- Chat interno staff (Etapa 11) ---
+  const internalThreadRepo = new PostgresInternalThreadRepository(pgPool);
+  const internalMessageRepo = new PostgresInternalMessageRepository(pgPool);
+  const getOrCreateDirectThread = new GetOrCreateDirectThreadUseCase(internalThreadRepo, agentRepo);
+  const listInternalThreads = new ListThreadsUseCase(internalThreadRepo);
+  const listInternalMessages = new ListInternalMessagesUseCase(internalThreadRepo, internalMessageRepo);
+  const sendInternalMessage = new SendInternalMessageUseCase(internalThreadRepo, internalMessageRepo, broadcaster);
+  const markInternalThreadAsRead = new MarkThreadAsReadUseCase(internalThreadRepo, broadcaster);
+
+  // --- Auditoría (Enterprise Audit System) ---
+  const listAuditEvents = new ListAuditEventsUseCase(auditRepo, agentRepo);
+  const getAuditStats = new GetAuditStatsUseCase(auditRepo, agentRepo);
 
   // --- Escalacion / triage (Etapa 6) ---
   const summaryBuilder = new CaseSummaryBuilderService();
@@ -320,10 +457,11 @@ export function createContainer(): Container {
     workflowExecutionRepo,
     conversationRepo,
     engine: workflowEngine,
-    gateway: n8nGateway,
+    gateway: actionGateway,
     logger: casesLogger,
     identity: conversationIdentity,
     escalationService,
+    departmentResolver,
   });
   const processBufferedMessages = new ProcessBufferedMessagesUseCase({
     caseRepo,
@@ -369,6 +507,18 @@ export function createContainer(): Container {
     agentRepo,
     escalationRepo,
   });
+
+  // --- Analíticas operativas y gerenciales (Admin / Managers) ---
+  const analyticsRepo = new AnalyticsRepositoryPg(pgPool);
+  const getAnalyticsOverview = new GetAnalyticsOverviewUseCase({ analyticsRepo, agentRepo });
+  const getCasesDistribution = new GetCasesDistributionUseCase({ analyticsRepo, agentRepo });
+  const getAIEfficiency = new GetAIEfficiencyUseCase({ analyticsRepo, agentRepo });
+  const getAgentsPerformance = new GetAgentsPerformanceUseCase({
+    analyticsRepo,
+    agentRepo,
+    maxCapacityThreshold: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
+  const getInfrastructureAlerts = new GetInfrastructureAlertsUseCase({ analyticsRepo, agentRepo });
 
   const inboundBuffer = new InboundBufferService(
     redisClient,
@@ -450,6 +600,7 @@ export function createContainer(): Container {
   });
   const logout = new LogoutUseCase(sessionStore);
   const changePassword = new ChangePasswordUseCase({ agentRepo, logger });
+  const updateAvailability = new UpdateAgentAvailabilityUseCase({ agentRepo, auditRepo, logger });
 
   const listN8nWorkflows = new ListN8nWorkflowsUseCase(n8nWorkflowRegistryRepo);
   const upsertN8nWorkflow = new UpsertN8nWorkflowUseCase({
@@ -465,6 +616,30 @@ export function createContainer(): Container {
     logger: casesLogger,
   });
 
+  const campaignsLogger = logger.child({ module: "campaigns" });
+  const processCampaignBatch = new ProcessCampaignBatchUseCase(
+    campaignRepo,
+    campaignRecipientRepo,
+    whatsappSender,
+    campaignsLogger,
+    messageTemplateRepo,
+  );
+  const campaignWorker = new CampaignWorkerService(redisClient, processCampaignBatch, campaignsLogger);
+  campaignWorker.startWorker();
+
+  const createCampaign = new CreateCampaignUseCase(campaignRepo, messageTemplateRepo);
+  const importCampaignRecipients = new ImportCampaignRecipientsUseCase(
+    campaignRepo,
+    campaignRecipientRepo,
+    campaignFileParser,
+  );
+  const startCampaign = new StartCampaignUseCase(campaignRepo, campaignRecipientRepo, campaignWorker);
+  const suspendCampaign = new SuspendCampaignUseCase(campaignRepo);
+  const resumeCampaign = new ResumeCampaignUseCase(campaignRepo, campaignWorker);
+  const listCampaigns = new ListCampaignsUseCase(campaignRepo);
+  const getCampaign = new GetCampaignUseCase(campaignRepo, campaignRecipientRepo);
+  const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
+
   // --- HTTP (presentation) ---
   const app = express();
   app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
@@ -476,15 +651,26 @@ export function createContainer(): Container {
     }),
   );
   app.use(createRequestLogger(logger));
+  app.use(createMetricsMiddleware());
 
+  app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
-  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient }));
+  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
-  // §1.b) — health y el webhook de WhatsApp quedan afuera a proposito (no
+  // §1.b) — health, metrics y el webhook de WhatsApp quedan afuera a proposito (no
   // tienen identidad de agente; usan su propia verificacion).
   app.use(createSessionMiddleware({ sessionStore, agentRepo, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
-  app.use(createAuthRouter({ login, logout, changePassword, sessionTtlSeconds: env.SESSION_TTL_SECONDS }));
+  app.use(
+    createAuthRouter({
+      login,
+      logout,
+      changePassword,
+      updateAvailability,
+      sessionTtlSeconds: env.SESSION_TTL_SECONDS,
+      auditRepo,
+    }),
+  );
 
   app.use(
     createConversationsRouter({
@@ -513,7 +699,8 @@ export function createContainer(): Container {
       deactivateDepartment,
     }),
   );
-  app.use(createAuditRouter(auditRepo));
+  app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
+  app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     createN8nWorkflowsRouter({
       listN8nWorkflows,
@@ -558,6 +745,45 @@ export function createContainer(): Container {
       },
     }),
   );
+  app.use(
+    createMessageTemplatesRouter({
+      createTemplate: createMessageTemplate,
+      listTemplates: listMessageTemplates,
+      deleteTemplate: deleteMessageTemplate,
+      syncTemplateStatus,
+      templateRepo: messageTemplateRepo,
+    }),
+  );
+  app.use(
+    createInternalChatRouter({
+      getOrCreateDirectThread,
+      listThreads: listInternalThreads,
+      listMessages: listInternalMessages,
+      sendInternalMessage,
+      markThreadAsRead: markInternalThreadAsRead,
+    }),
+  );
+  app.use(
+    createCampaignsRouter({
+      createCampaign,
+      importRecipients: importCampaignRecipients,
+      startCampaign,
+      suspendCampaign,
+      resumeCampaign,
+      listCampaigns,
+      getCampaign,
+      deleteCampaign,
+    }),
+  );
+  app.use(
+    createAnalyticsRouter({
+      getOverview: getAnalyticsOverview,
+      getCasesDistribution,
+      getAIEfficiency,
+      getAgentsPerformance,
+      getInfrastructureAlerts,
+    }),
+  );
 
   app.use(createErrorHandler(logger));
 
@@ -566,6 +792,7 @@ export function createContainer(): Container {
   });
 
   const shutdown = async (): Promise<void> => {
+    campaignWorker.stopWorker();
     enqueueQualityReview.stop();
     inboundBuffer.clearAllTimers();
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);

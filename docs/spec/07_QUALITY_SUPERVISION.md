@@ -137,22 +137,19 @@ Migración: `message.agent_id UUID NULL REFERENCES agent(id)`.
 - `POST /api/conversations/:id/reply` (y cualquier reply humano) **debe** setear `agent_id` = agente de la sesión.
 - Mensajes históricos pueden quedar `NULL`; el análisis usa `case.assigned_agent_id` como dueño de la review y los findings siguen anclados a `message_id`.
 
-## 7. Coaching híbrido (MVP)
+## 7. Coaching y retroalimentación interactiva
 
 1. Supervisor crea `quality_coaching_note` vía `POST /api/quality/reviews/:id/notes` `{ body }`.
-2. UI ofrece CTA “Abrir chat interno” → `/chat-interno?peerId={agentId}&qualityReviewId={reviewId}`.
-3. El front carga la review por API y muestra un panel **Hallazgos a justificar** (severity medium/high, borde rojo/ámbar) + prefill del compositor pidiendo justificación por cada excerpt. El agente responde en el chat (canal informal; chat aún local).
-4. En MVP el agente **no** lee notes por API de calidad; `ack_status` queda para etapa posterior.
+2. UI ofrece CTA “Objetar en Chat Interno” / “Abrir chat con agente” → abre o crea el hilo 1:1 persistente (`POST /api/internal/threads/direct` `{ peerAgentId }`).
+3. El supervisor envía una observación estructurada vía `POST /api/internal/threads/:id/messages` con `type: 'quality_quote'` y `contextData: { qualityReviewId, originalMessageId, category, severity, excerpt, cordialityScore }`.
+4. El agente recibe en tiempo real (SSE `INTERNAL_MESSAGE_SENT`) una **Card de Calidad interactiva** con badge de severidad y enlace a la conversación auditada, y responde en el mismo hilo.
 
-## 8. Etapa futura — chat interno persistente
+## 8. Chat interno persistente (Etapa 11)
 
-Fuera de Etapa 10. Cuando se construya:
-
-- Tablas `internal_thread` / `internal_message` (staff↔staff), realtime, auditoría.
-- Deep-link desde calidad abre hilo real pre-cargado con contexto del `qualityReviewId`.
-- Hasta entonces el front mantiene `localStorage` y el backend **no** expone endpoints de chat staff.
-
-Documentar en `05_BUILD_PLAN.md` como etapa posterior explícita (no implementar en Etapa 10).
+- Tablas `internal_thread`, `internal_thread_participant`, `internal_message` (staff↔staff), realtime vía SSE, auditoría.
+- Deep-link y acciones desde calidad envían tarjetas enriquecidas (`quality_quote`) persistidas en PostgreSQL.
+- Modelo unificado 1:1 entre agentes/supervisores para evitar dispersión de hilos efímeros.
+- Documentado en `05_BUILD_PLAN.md` como Etapa 11.
 
 ## 9. Contrato IA (resumen)
 

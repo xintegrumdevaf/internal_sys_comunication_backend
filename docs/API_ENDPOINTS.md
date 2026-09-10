@@ -140,6 +140,22 @@ Respuesta típica (campos relevantes):
 | Método | Ruta | Query | Descripción |
 |---|---|---|---|
 | `GET` | `/api/audit` | sesión de `role=admin` — `?limit=` (máx 200, default 50) | Eventos recientes de escritura |
+ 
+---
+ 
+## 8. Base de Conocimiento (RAG)
+ 
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/rag/documents` | sesión | Listar todos los documentos RAG registrados en la base de datos |
+| `POST` | `/api/rag/documents` | sesión de `role=admin` | Registrar un nuevo documento RAG. Body: `{ name, category?, mimeType?, sizeBytes?, uploadedBy?, sourceUrl? }` |
+| `DELETE` | `/api/rag/documents/:id` | sesión de `role=admin` | Elimina un documento RAG de la base de datos |
+| `GET` | `/api/rag/faqs` | sesión | Listar todas las preguntas frecuentes (FAQs) del RAG |
+| `POST` | `/api/rag/faqs` | sesión de `role=admin` | Crear o actualizar una FAQ. Body: `{ id?, question, answer, category?, tags?, variations?, active? }` |
+| `DELETE` | `/api/rag/faqs/:id` | sesión de `role=admin` | Eliminar una FAQ de la base de datos |
+| `POST` | `/api/rag/query` | sesión | Realiza una consulta RAG simulada/basada en palabras clave. Body: `{ question }` → `{ answer, found, confidenceScore, sources, retrievedChunks, executionTimeMs }` |
+ 
+---
 
 ---
 
@@ -191,7 +207,24 @@ En Postman: tipo **SSE** / stream, o usa el navegador; no es un JSON único.
 
 ---
 
-## 10. WhatsApp webhook (no es para el frontend)
+## 10. RAG y Base de Conocimiento (100% Nativo en Backend)
+
+Endpoints administrativos para ingesta, gestión y consulta de la base de conocimiento vectorial (PGVector + Búsqueda Híbrida):
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/rag/stats` | sesión (admin/manager) | Estadísticas (total documentos, chunks, faqs) |
+| `GET` | `/api/rag/documents` | sesión (admin/manager) | Listado de documentos cargados |
+| `POST` | `/api/rag/documents/upload` | sesión (admin/manager) | Ingesta de PDF / Texto (multipart `file` o `text`, `title`, `description`) |
+| `DELETE` | `/api/rag/documents/:id` | sesión (admin/manager) | Elimina documento y sus embeddings vectoriales |
+| `GET` | `/api/rag/faqs` | sesión (admin/manager) | Listado de FAQs estructuradas |
+| `POST` | `/api/rag/faqs` | sesión (admin/manager) | Crea FAQ (`{ "question", "answer", "category?" }`) |
+| `DELETE` | `/api/rag/faqs/:id` | sesión (admin/manager) | Elimina una FAQ |
+| `POST` | `/api/rag/query` | sesión (admin/manager) | Playground de consulta RAG (`{ "question", "topK?" }`) |
+
+---
+
+## 11. WhatsApp webhook (no es para el frontend)
 
 | Método | Ruta | Quién | Descripción |
 |---|---|---|---|

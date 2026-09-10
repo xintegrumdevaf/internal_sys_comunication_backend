@@ -62,10 +62,10 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () =>
         result: {
           found: true,
           contractNumbers: 1,
-          contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } }],
+          contracts: [{ id: "1", name: "Ana", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1", ip: "10.1.1.1" } }],
         },
       }),
-      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
+      CHECK_CLIENT_STATUS: () => ({ success: true, result: { status: "ACTIVO" } }),
       DIAGNOSTIC: () => ({ success: true, result: { status: "WAITING_USER", question: "¿ONU encendida?" } }),
     });
     const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
@@ -93,7 +93,7 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () =>
     const aggregate = await caseRepo.findById(created.id);
     expect(aggregate?.workflowInstance.currentState).toBe("WAITING_USER_DIAGNOSTIC");
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
-    expect(gateway.actionsCalledFor("CHECK_BALANCE")).toBe(1);
+    expect(gateway.actionsCalledFor("CHECK_CLIENT_STATUS")).toBe(1);
     expect(gateway.actionsCalledFor("DIAGNOSTIC")).toBe(1);
 
     const conversationAfter = await conversationRepo.findById(conversation.id);

@@ -32,12 +32,26 @@ type WhatsAppContact = {
 type WhatsAppWebhookPayload = {
   entry?: Array<{
     changes?: Array<{
+      field?: string;
       value?: {
         messages?: WhatsAppInboundMessage[];
         contacts?: WhatsAppContact[];
+        event?: string;
+        message_template_id?: string | number;
+        message_template_name?: string;
+        message_template_language?: string;
+        reason?: string;
       };
     }>;
   }>;
+};
+
+export type NormalizedTemplateStatusUpdate = {
+  metaTemplateId?: string;
+  name?: string;
+  language?: string;
+  status: import("../../../message-templates/domain/message-template.entity").MessageTemplateStatus;
+  rejectedReason: string | null;
 };
 
 export type NormalizedInboundMessage = {
@@ -118,4 +132,41 @@ function mediaMessage(
     caption: media?.caption ?? null,
     filename: null,
   };
+}
+
+export function parseWhatsAppTemplateStatusUpdates(payload: unknown): NormalizedTemplateStatusUpdate[] {
+  const typed = payload as WhatsAppWebhookPayload;
+  const updates: NormalizedTemplateStatusUpdate[] = [];
+
+  for (const entry of typed.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const field = change.field;
+      const value = change.value;
+      if (!value) continue;
+
+      if (field === "message_template_status_update" || value.event || value.message_template_id) {
+        const rawEvent = (value.event || "").toUpperCase();
+        let status: import("../../../message-templates/domain/message-template.entity").MessageTemplateStatus = "PENDING";
+        if (rawEvent === "APPROVED") status = "APPROVED";
+        else if (rawEvent === "REJECTED") status = "REJECTED";
+        else if (rawEvent === "PAUSED") status = "PAUSED";
+        else if (rawEvent === "DISABLED") status = "DISABLED";
+
+        const metaTemplateId = value.message_template_id ? String(value.message_template_id) : undefined;
+        const name = value.message_template_name ? String(value.message_template_name) : undefined;
+
+        if (metaTemplateId || name) {
+          updates.push({
+            metaTemplateId,
+            name,
+            language: value.message_template_language,
+            status,
+            rejectedReason: value.reason || null,
+          });
+        }
+      }
+    }
+  }
+
+  return updates;
 }

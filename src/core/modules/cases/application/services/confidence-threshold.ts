@@ -6,6 +6,8 @@ const DEFAULT_THRESHOLD = 0.6;
 
 const THRESHOLD_OVERRIDE_BY_PREFIX: Readonly<Record<string, number>> = {
   billing: 0.8,
+  general: 0.55,  // preguntas informativas → umbral bajo, la pregunta ya es la intención
+  sales: 0.55,    // consultas de planes → umbral bajo
 };
 
 export function confidenceThreshold(intent: string): number {

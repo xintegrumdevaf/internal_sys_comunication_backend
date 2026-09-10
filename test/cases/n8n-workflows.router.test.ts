@@ -17,8 +17,15 @@ const TEST_PASSWORD = "Test1234!";
 describe("GET/PUT/DELETE /api/admin/n8n-workflows (docs/spec/03_API_CONTRACT.md §C.1/§C.2)", () => {
   const container = createContainer();
   const agentRepo = new AgentRepositoryPg(container.pgPool);
+  const createdAgentIds: string[] = [];
 
   afterAll(async () => {
+    if (createdAgentIds.length > 0) {
+      await container.pgPool.query("DELETE FROM n8n_workflow_registry WHERE action LIKE 'TEST_%'");
+      await container.pgPool.query("UPDATE n8n_workflow_registry SET updated_by = NULL WHERE updated_by = ANY($1::uuid[])", [createdAgentIds]);
+      await container.pgPool.query("DELETE FROM audit_event WHERE actor_id = ANY($1::uuid[])", [createdAgentIds]);
+      await container.pgPool.query("DELETE FROM agent WHERE id = ANY($1::uuid[])", [createdAgentIds]);
+    }
     await container.shutdown();
   });
 
@@ -31,6 +38,7 @@ describe("GET/PUT/DELETE /api/admin/n8n-workflows (docs/spec/03_API_CONTRACT.md 
       role,
       passwordHash,
     });
+    createdAgentIds.push(agent.id);
     return { id: agent.id, email };
   }
 

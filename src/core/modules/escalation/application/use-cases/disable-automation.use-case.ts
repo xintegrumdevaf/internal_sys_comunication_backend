@@ -5,6 +5,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { AutomationState } from "../../../cases/domain/automation-state.entity";
+import type { CaseStatus } from "../../../cases/domain/case.entity";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "./agent-case-auth";
 
@@ -87,6 +88,31 @@ export class ReactivateAutomationUseCase {
       reason: null,
       changedBy: agent.id,
     });
+
+    // docs/spec/02_STATE_MACHINE.md §2: HUMAN_ACTIVE / ESCALATED -> ACTIVE (o WAITING_USER si espera respuesta).
+    if (aggregate.case.status === "HUMAN_ACTIVE" || aggregate.case.status === "ESCALATED") {
+      const fresh = await this.deps.caseRepo.findById(aggregate.case.id);
+      if (fresh) {
+        const targetStatus: CaseStatus = stateBefore.startsWith("WAITING_USER")
+          ? "WAITING_USER"
+          : "ACTIVE";
+
+        await this.deps.caseRepo.applyTransition({
+          caseId: aggregate.case.id,
+          expectedCaseVersion: fresh.case.version,
+          expectedWorkflowVersion: fresh.workflowInstance.version,
+          status: targetStatus,
+          context: fresh.case.context,
+          currentState: stateBefore,
+          expiresAt: null,
+        });
+      }
+    }
+
+    // Al devolver control a la IA, se libera la asignación del agente humano
+    if (aggregate.case.assignedAgentId) {
+      await this.deps.caseRepo.setAssignedAgent(aggregate.case.id, null);
+    }
 
     const after = await this.deps.caseRepo.findById(aggregate.case.id);
     if (

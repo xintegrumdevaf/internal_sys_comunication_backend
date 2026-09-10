@@ -8,13 +8,13 @@ import { ExpirationService } from "./expiration.service";
 export type ArbitrationDecision =
   | { action: "CONTINUE_ACTIVE"; caseId: string }
   | {
-      action: "ACTIVATE";
-      workflowType: string;
-      /** Caso `PAUSED` no expirado del `workflowType` destino a reanudar, o null para crear uno nuevo. */
-      resumeCaseId: string | null;
-      /** Caso activo actual que hay que pausar antes de activar el destino, o null si no habia ninguno. */
-      pauseCaseId: string | null;
-    }
+    action: "ACTIVATE";
+    workflowType: string;
+    /** Caso `PAUSED` no expirado del `workflowType` destino a reanudar, o null para crear uno nuevo. */
+    resumeCaseId: string | null;
+    /** Caso activo actual que hay que pausar antes de activar el destino, o null si no habia ninguno. */
+    pauseCaseId: string | null;
+  }
   | { action: "CLARIFY" }
   | { action: "REQUEST_HUMAN"; caseId: string | null };
 
@@ -53,6 +53,18 @@ export class CaseArbitrationService {
 
       if (targetWorkflowType && targetWorkflowType === activeCase.workflowType) {
         return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
+      }
+
+      // Si el intent detectado mapea a un workflowType DISTINTO al activo y la confianza es suficiente,
+      // la intención del cliente cambió: pausar el caso activo y activar el nuevo flujo (ej. pasar de Soporte a Planes/RAG).
+      if (targetWorkflowType && targetWorkflowType !== activeCase.workflowType && meetsConfidence) {
+        const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
+        return {
+          action: "ACTIVATE",
+          workflowType: targetWorkflowType,
+          resumeCaseId,
+          pauseCaseId: activeCase.id,
+        };
       }
 
       if (

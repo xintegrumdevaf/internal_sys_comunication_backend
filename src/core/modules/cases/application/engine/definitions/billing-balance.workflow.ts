@@ -1,6 +1,7 @@
 import type { CaseContext } from "../../../domain/contexts/case-context";
 import type { BillingBalanceContext } from "../../../domain/contexts/billing-balance.context";
-import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
+import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 
 /**
@@ -123,8 +124,9 @@ const validateClient: WorkflowStateHandler = async ({
     }
   }
 
-  const nationalIdFromEntities =
+  const rawNationalId =
     typeof entities?.nationalId === "string" ? entities.nationalId.trim() : "";
+  const nationalIdFromEntities = normalizeNationalId(rawNationalId);
   if (nationalIdFromEntities) {
     data = {
       ...data,
@@ -133,9 +135,18 @@ const validateClient: WorkflowStateHandler = async ({
         fullName: data.client?.fullName ?? "",
       },
     };
+  } else if (data.client?.nationalId) {
+    data = {
+      ...data,
+      client: {
+        ...data.client,
+        nationalId: normalizeNationalId(data.client.nationalId),
+      },
+    };
   }
 
-  if (!data.client?.nationalId) {
+  const client = data.client;
+  if (!client?.nationalId) {
     const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
@@ -145,29 +156,59 @@ const validateClient: WorkflowStateHandler = async ({
     caseId,
     conversationId,
     correlationId,
-    input: { id: data.client.nationalId },
+    input: { id: client.nationalId },
   });
+
+  const isN8nNotFound =
+    !result.success &&
+    (result.error.type === "NOT_FOUND" ||
+      result.error.message?.toLowerCase().includes("not found") ||
+      result.error.message?.toLowerCase().includes("no se encontr"));
+
+  if (isN8nNotFound) {
+    const nextData: BillingBalanceContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
+    return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
+  }
 
   if (!result.success) {
     return { type: "ESCALATED", reason: result.error.message, context: withContext(data, context) };
   }
 
   const output = result.result as ValidateClientOutput;
+
   if (!output.found || output.contracts.length === 0) {
-    const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_CLIENT");
+    const nextData: BillingBalanceContext = {
+      ...data,
+      client: undefined,
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: true,
+    };
+    const waiting = bumpWaitingAttempts(withContext(nextData, context), ["nationalId"]);
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
+
+  data = {
+    ...data,
+    clientNotFound: false,
+    lastSearchedNationalId: undefined,
+  };
 
   const found = output.contracts[0]!;
   const nextData: BillingBalanceContext = {
     ...data,
-    client: { nationalId: data.client.nationalId, fullName: found.name },
+    client: { nationalId: client.nationalId, fullName: found.name },
   };
   if (identity) {
     const router = found.router;
     await identity.rememberValidatedIdentity({
       conversationId,
-      nationalId: data.client.nationalId,
+      nationalId: client.nationalId,
       fullName: found.name,
       contract: {
         contractNumber: found.id,
@@ -309,9 +350,9 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
   expirationHours: 24,
   waitingSteps: {
     WAITING_USER_CLIENT: {
-      pendingQuestion: "Para consultar tu saldo, ¿me confirmas tu número de cédula?",
+      pendingQuestion: "Para consultar el saldo, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
-      maxAttempts: 2,
+      maxAttempts: 3,
     },
     WAITING_USER_RECEIPT: {
       pendingQuestion:
@@ -321,7 +362,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     },
   },
   replyTemplates: {
-    WAITING_USER_CLIENT: "Para consultar tu saldo, ¿me confirmas tu número de cédula?",
+    WAITING_USER_CLIENT: "Para consultar el saldo, ¿me confirmas el número de cédula del titular del servicio?",
     WAITING_USER_RECEIPT:
       "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
     RESPOND_NO_DEBT:
@@ -331,7 +372,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     COMPLETED:
       "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
     ESCALATED:
-      "Escalamos tu caso de facturación a un especialista. En breve te contactarán por este chat.",
+      "¡Recibido, gracias! 🙌 Estamos verificando tu pago y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!",
     ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
   },
   states: {

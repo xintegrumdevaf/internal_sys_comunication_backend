@@ -48,6 +48,30 @@ export type RealtimeEvent =
       type: "AUTOMATION_DISABLED";
       caseId: string;
       conversationId?: string;
+    }
+  | {
+      type: "MESSAGE_TEMPLATE_UPDATED";
+      templateId: string;
+      metaTemplateId: string | null;
+      status: string;
+      rejectedReason?: string | null;
+    }
+  | {
+      type: "INTERNAL_MESSAGE_SENT";
+      threadId: string;
+      messageId: string;
+      senderAgentId: string;
+      recipientAgentIds: string[];
+      messageType: string;
+      preview: string;
+      createdAt: string;
+    }
+  | {
+      type: "INTERNAL_THREAD_READ";
+      threadId: string;
+      agentId: string;
+      readAt: string;
+      participantAgentIds?: string[];
     };
 
 export type RealtimeSubscriber = {
@@ -91,6 +115,14 @@ export class RealtimeBroadcaster {
   }
 
   private shouldDeliver(sub: RealtimeSubscriber, event: RealtimeEvent): boolean {
+    if (event.type === "INTERNAL_MESSAGE_SENT") {
+      return event.recipientAgentIds.includes(sub.userId) || event.senderAgentId === sub.userId;
+    }
+
+    if (event.type === "INTERNAL_THREAD_READ") {
+      return event.participantAgentIds ? event.participantAgentIds.includes(sub.userId) : true;
+    }
+
     if (sub.role === "admin") return true;
 
     if (event.type === "CASE_ESCALATED") {

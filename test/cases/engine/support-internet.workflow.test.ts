@@ -179,7 +179,7 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     expect(outcome).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE" });
   });
 
-  it("cliente validado sin deuda avanza a DIAGNOSTIC, traduciendo router.olt_name (snake_case) a oltName", async () => {
+  it("cliente validado avanza a CHECK_CLIENT_STATUS, y si está ACTIVO salta directamente a DIAGNOSTIC", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     const gateway = new N8nGatewayFake({
       VALIDATE_CLIENT: () => ({
@@ -188,11 +188,23 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
           found: true,
           contractNumbers: 1,
           contracts: [
-            { id: "123", name: "Juan", router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1" } },
+            {
+              id: "123",
+              name: "Juan",
+              router: { sector: "pomasqui", olt_name: "olt1", pon: "3", serial: "S1", ip: "10.100.14.6" },
+            },
           ],
         },
       }),
-      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: false } }),
+      CHECK_CLIENT_STATUS: () => ({
+        success: true,
+        result: {
+          sector: "pomasqui",
+          ip: "10.100.14.6",
+          status: "ACTIVO",
+          list: "ACTIVO",
+        },
+      }),
     });
 
     const step1 = await engine.step(
@@ -201,15 +213,54 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     );
     expect(step1.type).toBe("CONTINUE");
     if (step1.type !== "CONTINUE") throw new Error("unreachable");
-    expect(step1.nextState).toBe("CHECK_BALANCE");
+    expect(step1.nextState).toBe("CHECK_CLIENT_STATUS");
     if (step1.context.workflowType !== "SUPPORT_INTERNET") throw new Error("unreachable");
     expect(step1.context.data.contract?.oltName).toBe("olt1");
+    expect(step1.context.data.contract?.ip).toBe("10.100.14.6");
+
+    const step2 = await engine.step(
+      "SUPPORT_INTERNET",
+      baseInput("CHECK_CLIENT_STATUS", step1.context, gateway),
+    );
+    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "DIAGNOSTIC" });
+  });
+
+  it("cliente con status CORTADO avanza a CHECK_BALANCE para consultar deuda", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      CHECK_CLIENT_STATUS: () => ({
+        success: true,
+        result: {
+          sector: "totoracocha",
+          ip: "10.100.14.6",
+          status: "CORTADO",
+          list: "CORTADO",
+          reason: "El cliente se encuentra Cortado",
+        },
+      }),
+      CHECK_BALANCE: () => ({ success: true, result: { hasDebt: true, debt: 35.5 } }),
+    });
+
+    const withContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "123", fullName: "Juan" },
+        contract: { id: "123", sector: "totoracocha", oltName: "olt1", pon: "3", serial: "S1", ip: "10.100.14.6" },
+      },
+    };
+
+    const step1 = await engine.step(
+      "SUPPORT_INTERNET",
+      baseInput("CHECK_CLIENT_STATUS", withContract, gateway),
+    );
+    expect(step1).toMatchObject({ type: "CONTINUE", nextState: "CHECK_BALANCE" });
+    if (step1.type !== "CONTINUE") throw new Error("unreachable");
 
     const step2 = await engine.step(
       "SUPPORT_INTERNET",
       baseInput("CHECK_BALANCE", step1.context, gateway),
     );
-    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "DIAGNOSTIC" });
+    expect(step2).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_DEBT" });
   });
 
   it("cliente con deuda: CHECK_BALANCE -> RESPOND_DEBT -> COMPLETED", async () => {
@@ -338,10 +389,70 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
       ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
       entities: { address: "Amazonas" },
     });
-    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_BALANCE" });
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
     if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
       throw new Error("unreachable");
     }
     expect(outcome.context.data.contract?.oltName).toBe("olt1");
+  });
+
+  it("VALIDATE_CLIENT autocompleta con 0 si la cédula viene con 9 dígitos", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    let calledId = "";
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: (params) => {
+        calledId = String(params.input.id);
+        return {
+          success: true,
+          result: {
+            found: true,
+            contracts: [
+              {
+                id: "1",
+                name: "Juan",
+                router: { sector: "bellavista", olt_name: "cData", pon: "1", serial: "S1" },
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("VALIDATE_CLIENT", emptyContext, gateway),
+      entities: { nationalId: "942783440" },
+    });
+
+    expect(calledId).toBe("0942783440");
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+  });
+
+  it("VALIDATE_CLIENT no escala a humano si no encuentra al cliente; queda en WAITING_USER_CLIENT", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => ({
+        success: true,
+        result: {
+          found: false,
+          contractNumbers: 0,
+          contracts: [],
+        },
+      }),
+    });
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("VALIDATE_CLIENT", emptyContext, gateway),
+      entities: { nationalId: "0999999999" },
+    });
+
+    expect(outcome).toMatchObject({
+      type: "WAITING_USER",
+      nextState: "WAITING_USER_CLIENT",
+    });
+    if (outcome.type !== "WAITING_USER" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.clientNotFound).toBe(true);
+    expect(outcome.context.data.lastSearchedNationalId).toBe("0999999999");
   });
 });

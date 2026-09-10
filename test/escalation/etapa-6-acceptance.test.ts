@@ -162,7 +162,7 @@ describe("Etapa 6 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     const escalations = await stack.escalationRepo.list({ triage: true });
     expect(escalations).toHaveLength(1);
     expect(escalations[0]!.departmentId).toBeNull();
-    expect(whatsappSender.sent[0]!.body.toLowerCase()).toContain("especialista");
+    expect(whatsappSender.sent[0]!.body.toLowerCase()).toContain("recibido");
   });
 
   it("manager (no solo admin) ve el pool de triage y puede clasificarlo", async () => {
@@ -331,6 +331,7 @@ describe("Etapa 6 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     expect(result.contextPreserved).toBe(true);
     expect(after?.case.context).toEqual(before?.case.context);
     expect(after?.workflowInstance.currentState).toBe("WAITING_USER_DIAGNOSTIC");
-    expect(after?.case.status).toBe("HUMAN_ACTIVE");
+    expect(after?.case.status).toBe("WAITING_USER");
+    expect(after?.case.assignedAgentId).toBeNull();
   });
 });

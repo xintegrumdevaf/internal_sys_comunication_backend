@@ -30,8 +30,12 @@ export function createCors(allowedOrigins: string, nodeEnv: string) {
       // navegador lo rechazaria, y aqui siempre reflejamos un origin puntual.
       res.setHeader("Access-Control-Allow-Credentials", "true");
     }
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-agent-id, x-correlation-id");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    const requestedHeaders = req.header("access-control-request-headers");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      requestedHeaders || "Content-Type, Authorization, x-agent-id, x-correlation-id",
+    );
 
     if (req.method === "OPTIONS") {
       res.status(204).end();

@@ -86,27 +86,23 @@ Confirmado con tus flujos reales: `VALIDATE_CLIENT` (`find-client-contract`) y `
 
 `DIAGNOSTIC`/`CONTINUE_DIAGNOSTIC` sí son específicos de `SUPPORT_INTERNET` (proxies hacia tu microservicio de diagnóstico), pero siguen siendo `case_action` — la diferencia entre "compartida" y "específica" no es estructural, es solo cuántos `WorkflowDefinition` la referencian.
 
-### 6.2 `case_action` — consulta general (nuevo, a construir)
-**`QUERY_KNOWLEDGE_BASE`**: nuevo workflow de n8n (aún no existe, es el que planteas construir) — recibe una pregunta, busca en el vector store (reutilizando el `Postgres PGVector Store1` de `Upload files RAG.json`, en modo `retrieve-as-tool` ya configurado ahí), y responde con el resultado. Mismo patrón síncrono `Webhook → Respond to Webhook` que el resto.
+### 6.2 `GENERAL_INQUIRY` — Consultas abiertas con RAG Nativo en Backend
+El flujo **`GENERAL_INQUIRY`** atiende consultas abiertas (números de cuenta, ubicación de oficinas, planes, promociones, cobertura general) de forma **100% nativa en el Backend** mediante [`RagService`](../../src/core/modules/ai/application/services/rag.service.ts) (PGVector + Búsqueda Híbrida Vectorial + Síntesis LLM).
 
-```json
-// Request
-{ "correlationId": "...", "executionId": "...", "idempotencyKey": "...", "caseId": "...", "conversationId": "...",
-  "input": { "question": "¿qué paquetes de 500 megas tienen?" } }
-// Response
-{ "success": true, "result": { "found": true, "answer": "...", "sources": ["catalogo-2026.pdf"] }, "error": null }
-```
+- **Sin intermediación de n8n para RAG**: Las consultas a la base de conocimiento y la ingesta de documentos (PDF parsing, chunking, embeddings) se ejecutan directamente en la API en milisegundos.
+- **Escalación**: Si el RAG no encuentra información suficiente (`found: false` o confianza < 60%), el caso no inventa datos y se escala al **Pool de Triage (General)** para que un Administrador o Manager lo revise o reclasifique.
 
-Se asocia a un `workflow_type` nuevo, **`GENERAL_INQUIRY`** (`01_DATA_MODEL.md` §4) — un workflow de un solo paso (`RETRIEVE_KNOWLEDGE → COMPLETED`), sin la máquina de estados de soporte/facturación. Se diferencia explícitamente de `SUPPORT_INTERNET`/`BILLING_BALANCE`/`SALES_PACKAGES` en intención (`intent: "general.inquiry"`), en workflow, y normalmente **sin `department_id`** salvo que no se encuentre respuesta y se decida escalar (candidato razonable por defecto: `SALES`, ya que la mayoría de consultas generales son sobre paquetes/cobertura — a confirmar contigo).
-
-### 6.3 `admin_action` — administración de contenido (RAG), no es parte de una conversación de cliente
-El flujo `Upload files RAG.json` (form trigger + extracción de PDF + embeddings + inserción en PGVector) es una **herramienta administrativa**: la usas tú (o el frontend, más adelante, para un panel de gestión de la base de conocimiento) para cargar documentos — el motor de workflow de un `Case` **nunca** la invoca. Se registra en el catálogo con `category = 'admin_action'` para que quede claro que no aparece como opción al construir un `WorkflowDefinition` nuevo, y para que la Etapa 3/futuro admin endpoint pueda listar/filtrar por categoría.
+### 6.3 Workflows de integración externa en n8n
+n8n se utiliza **exclusivamente para integraciones y microservicios externos** (MikroTik, CRMs, pasarelas de pago, diagnóstico de red):
+1. `VALIDATE_CLIENT` (consulta de contratos y credenciales por cédula)
+2. `CHECK_BALANCE` (consulta de facturación y deudas en CRM/ERP)
+3. `DIAGNOSTIC` y `CONTINUE_DIAGNOSTIC` (proxy al microservicio técnico de diagnóstico de red)
+4. `RECORD_PAYMENT` (registro y aplicación de pagos/comprobantes)
+5. `APPLY_BANK_ACCOUNT` (solicitud de cuentas bancarias)
 
 ## 7. Registro de acciones → URL (catálogo en base de datos, no `.env`)
 
-Tabla `n8n_workflow_registry` (`01_DATA_MODEL.md` §2), gestionable en caliente vía `PUT/DELETE /api/admin/n8n-workflows/:action` (`03_API_CONTRACT.md` §C.2) — agregar o cambiar una URL de acción no requiere redeploy ni tocar variables de entorno.
-
-Seed inicial (migración, no hardcodeado en código de aplicación) — nombres de campo en `camelCase` (el estándar del contrato de la API, `01_DATA_MODEL.md` §5); el nodo de n8n que llama al microservicio de diagnóstico es quien traduce a `olt_name` (snake_case) internamente, no el contrato:
+Tabla `n8n_workflow_registry` (`01_DATA_MODEL.md` §2), gestionable en caliente vía `PUT/DELETE /api/admin/n8n-workflows/:action` (`03_API_CONTRACT.md` §C.2).
 
 ```sql
 INSERT INTO n8n_workflow_registry (action, category, url, description) VALUES
@@ -115,9 +111,7 @@ INSERT INTO n8n_workflow_registry (action, category, url, description) VALUES
   ('DIAGNOSTIC',            'case_action',  'https://localhost:5678/webhook/do-diagnostic',         'Diagnóstico técnico inicial (proxy a microservicio propio)'),
   ('CONTINUE_DIAGNOSTIC',   'case_action',  'https://localhost:5678/webhook/continue-diagnostic',   'Continúa diagnóstico con el mensaje textual del usuario'),
   ('RECORD_PAYMENT',        'case_action',  'https://localhost:5678/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey)'),
-  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://localhost:5678/webhook/apply-bank-account',    'Devuelve cuentas bancarias para depósito / transferencia'),
-  ('QUERY_KNOWLEDGE_BASE',  'case_action',  'https://localhost:5678/webhook/query-knowledge-base',  'Consulta la base de conocimiento (RAG)'),
-  ('UPLOAD_RAG_DOCUMENT',   'admin_action', 'https://localhost:5678/form/cargar-documentos',        'Ingesta de documentos al RAG — herramienta administrativa, ya existe');
+  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://localhost:5678/webhook/apply-bank-account',    'Devuelve cuentas bancarias para depósito / transferencia');
 ```
 
 > **Estado local (2026-08-08):** Los 7 `case_action` + `UPLOAD_RAG_DOCUMENT` están construidos y activos en el n8n de `docker-compose`. URLs de producción: `http://localhost:5678/webhook/record-payment`, `…/apply-bank-account`, `…/query-knowledge-base`, y form `http://localhost:5678/form/cargar-documentos`. JSON versionado en `n8n/`. Tablas de efecto: `n8n_recorded_payments` / `n8n_bank_account_requests` (`migrations/0008_n8n_payment_bank_tables.sql`).

@@ -31,6 +31,7 @@ describe("CreateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 POST /api/agents)
       primaryDepartmentId: support.id,
       active: true,
       autoAssignEnabled: false,
+      mustChangePassword: true,
     });
     expect(agent.passwordHash).toBeTruthy();
     expect(temporaryPassword).toHaveLength(12);
@@ -92,5 +93,21 @@ describe("CreateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 POST /api/agents)
     await expect(
       useCase.execute({ name: "A", email: "a@isp.local", actorId: "admin-1" }),
     ).rejects.toMatchObject({ type: "VALIDATION_ERROR" });
+  });
+
+  it("permite asignar múltiples departamentos adicionales y los persiste en agent_membership", async () => {
+    const { departmentRepo, useCase } = build();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const billing = departmentRepo.seed({ slug: "billing", name: "Facturación" });
+
+    const { agent } = await useCase.execute({
+      name: "Agente Multidepto",
+      email: "multi@isp.local",
+      primaryDepartmentId: support.id,
+      departmentIds: [support.id, billing.id],
+      actorId: "admin-1",
+    });
+
+    expect(agent.departmentIds).toEqual([support.id, billing.id]);
   });
 });

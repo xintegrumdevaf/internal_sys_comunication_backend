@@ -2,6 +2,7 @@ import type { CaseContext } from "../../../domain/contexts/case-context";
 import type { SalesPackagesContext } from "../../../domain/contexts/sales-packages.context";
 import { resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
+import type { RagService } from "../../../../ai/application/services/rag.service";
 
 /**
  * SALES_PACKAGES (docs/spec/05_BUILD_PLAN.md Etapa 8 + §13 WaitingSteps).
@@ -73,8 +74,6 @@ const collectPreference: WorkflowStateHandler = async ({ context, entities, text
   // Sin velocidad pedida: preguntar una vez (requireAny). Si el usuario no la da,
   // QUERY_PACKAGES igual puede correr con pregunta genérica.
   if (!data.requestedSpeed && data.purpose === "packages") {
-    // Solo pedir si no hay texto útil todavía — si ya preguntaron "qué planes tienen"
-    // avanzamos a QUERY con pregunta genérica.
     if (entities && Object.keys(entities).length === 0 && text && text.trim().length < 8) {
       const waiting = resetWaitingAttempts(withContext(data, context), "WAITING_USER_SPEED");
       return { type: "WAITING_USER", nextState: "WAITING_USER_SPEED", context: waiting };
@@ -91,7 +90,7 @@ const waitingSpeed: WorkflowStateHandler = async ({ context, entities, text }) =
   return { type: "CONTINUE", nextState: "QUERY_PACKAGES", context: withContext(data, context) };
 };
 
-const queryPackages: WorkflowStateHandler = async ({
+const createQueryPackages = (ragService?: RagService): WorkflowStateHandler => async ({
   caseId,
   conversationId,
   correlationId,
@@ -104,19 +103,31 @@ const queryPackages: WorkflowStateHandler = async ({
     ? `¿Qué planes de internet de aproximadamente ${data.requestedSpeed} tienen disponibles?`
     : text?.trim() || "¿Qué planes y paquetes de internet ofrecen actualmente?";
 
-  const result = await gateway.executeAction({
-    action: "QUERY_KNOWLEDGE_BASE",
-    caseId,
-    conversationId,
-    correlationId,
-    input: { question },
-  });
+  let output: KnowledgeOutput;
 
-  if (!result.success) {
-    return { type: "ESCALATED", reason: result.error.message, context };
+  if (ragService) {
+    const ragRes = await ragService.query(question, 4);
+    output = {
+      found: ragRes.found,
+      answer: ragRes.answer,
+      speed: data.requestedSpeed,
+    };
+  } else {
+    const result = await gateway.executeAction({
+      action: "QUERY_KNOWLEDGE_BASE",
+      caseId,
+      conversationId,
+      correlationId,
+      input: { question },
+    });
+
+    if (!result.success) {
+      return { type: "ESCALATED", reason: result.error.message, context };
+    }
+
+    output = result.result as KnowledgeOutput;
   }
 
-  const output = result.result as KnowledgeOutput;
   if (!output.found) {
     return {
       type: "ESCALATED",
@@ -167,37 +178,41 @@ const waitingUpgrade: WorkflowStateHandler = async ({ context, entities, text })
   };
 };
 
-export const salesPackagesWorkflow: WorkflowDefinition = {
-  workflowType: "SALES_PACKAGES",
-  initialState: "COLLECT_PREFERENCE",
-  expirationHours: 24,
-  waitingSteps: {
-    WAITING_USER_SPEED: {
-      pendingQuestion: "¿Qué velocidad o plan te interesa? (por ejemplo 100, 300 o 500 Mbps)",
-      requireAny: ["requestedSpeed"],
-      maxAttempts: 2,
+export function createSalesPackagesWorkflow(ragService?: RagService): WorkflowDefinition {
+  return {
+    workflowType: "SALES_PACKAGES",
+    initialState: "COLLECT_PREFERENCE",
+    expirationHours: 24,
+    waitingSteps: {
+      WAITING_USER_SPEED: {
+        pendingQuestion: "¿Qué velocidad o plan te interesa? (por ejemplo 100, 300 o 500 Mbps)",
+        requireAny: ["requestedSpeed"],
+        maxAttempts: 2,
+      },
+      WAITING_USER_UPGRADE: {
+        pendingQuestion:
+          "¿Confirmas que quieres que un especialista de ventas gestione el cambio de plan por ti?",
+        requireAny: ["confirm", "answer"],
+        maxAttempts: 2,
+      },
     },
-    WAITING_USER_UPGRADE: {
-      pendingQuestion:
+    replyTemplates: {
+      WAITING_USER_SPEED: "¿Qué velocidad o plan te interesa? (por ejemplo 100, 300 o 500 Mbps)",
+      WAITING_USER_UPGRADE:
         "¿Confirmas que quieres que un especialista de ventas gestione el cambio de plan por ti?",
-      requireAny: ["confirm", "answer"],
-      maxAttempts: 2,
+      RESPOND_OFFER: "{{offerAnswer}}",
+      COMPLETED: "{{offerAnswer}}",
+      ESCALATED: "Te conectamos con un especialista de ventas para ayudarte con tu plan. En breve te contactan.",
+      ACTIVE: "Estamos buscando los planes disponibles. Un momento por favor.",
     },
-  },
-  replyTemplates: {
-    WAITING_USER_SPEED: "¿Qué velocidad o plan te interesa? (por ejemplo 100, 300 o 500 Mbps)",
-    WAITING_USER_UPGRADE:
-      "¿Confirmas que quieres que un especialista de ventas gestione el cambio de plan por ti?",
-    RESPOND_OFFER: "{{offerAnswer}}",
-    COMPLETED: "{{offerAnswer}} Si quieres contratar o cambiar de plan, escríbenos y te ayudamos.",
-    ESCALATED: "Te conectamos con un especialista de ventas para ayudarte con tu plan. En breve te contactan.",
-    ACTIVE: "Estamos buscando los planes disponibles. Un momento por favor.",
-  },
-  states: {
-    COLLECT_PREFERENCE: collectPreference,
-    WAITING_USER_SPEED: waitingSpeed,
-    QUERY_PACKAGES: queryPackages,
-    RESPOND_OFFER: respondOffer,
-    WAITING_USER_UPGRADE: waitingUpgrade,
-  },
-};
+    states: {
+      COLLECT_PREFERENCE: collectPreference,
+      WAITING_USER_SPEED: waitingSpeed,
+      QUERY_PACKAGES: createQueryPackages(ragService),
+      RESPOND_OFFER: respondOffer,
+      WAITING_USER_UPGRADE: waitingUpgrade,
+    },
+  };
+}
+
+export const salesPackagesWorkflow = createSalesPackagesWorkflow();

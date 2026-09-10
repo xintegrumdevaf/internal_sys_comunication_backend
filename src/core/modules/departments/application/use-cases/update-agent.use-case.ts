@@ -59,6 +59,15 @@ export class UpdateAgentUseCase {
       }
     }
 
+    if (patch.departmentIds && patch.departmentIds.length > 0) {
+      for (const deptId of patch.departmentIds) {
+        const department = await this.deps.departmentRepo.findById(deptId);
+        if (!department) {
+          throw validationError(`El departamento ${deptId} no existe`);
+        }
+      }
+    }
+
     await assertKeepsAtLeastOneActiveAdmin(this.deps.agentRepo, current, {
       active: patch.active,
       role: patch.role,

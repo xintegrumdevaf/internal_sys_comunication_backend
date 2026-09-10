@@ -231,13 +231,27 @@ CREATE TABLE n8n_workflow_registry (
 CREATE TABLE audit_event (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   action        TEXT NOT NULL,
+  category      TEXT NOT NULL DEFAULT 'operational' CHECK (category IN ('security', 'operational', 'data_change', 'system')),
   resource_type TEXT NOT NULL,
   resource_id   TEXT NOT NULL,
-  metadata      JSONB NOT NULL DEFAULT '{}',
+  actor_type    TEXT NOT NULL DEFAULT 'agent' CHECK (actor_type IN ('agent', 'system', 'customer', 'external_api')),
   actor_id      UUID,
+  department_id UUID REFERENCES department(id) ON DELETE SET NULL,
+  metadata      JSONB NOT NULL DEFAULT '{}',
+  before_state  JSONB,
+  after_state   JSONB,
+  ip_address    TEXT,
+  user_agent    TEXT,
+  correlation_id TEXT,
   occurred_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_audit_resource ON audit_event(resource_type, resource_id, occurred_at);
+CREATE INDEX idx_audit_occurred_at ON audit_event(occurred_at DESC);
+CREATE INDEX idx_audit_resource ON audit_event(resource_type, resource_id, occurred_at DESC);
+CREATE INDEX idx_audit_actor ON audit_event(actor_id, occurred_at DESC);
+CREATE INDEX idx_audit_action ON audit_event(action, occurred_at DESC);
+CREATE INDEX idx_audit_department ON audit_event(department_id, occurred_at DESC);
+CREATE INDEX idx_audit_category ON audit_event(category, occurred_at DESC);
+CREATE INDEX idx_audit_correlation ON audit_event(correlation_id) WHERE correlation_id IS NOT NULL;
 
 -- Supervisión de calidad de atenciones humanas (07_QUALITY_SUPERVISION.md). Etapa 10.
 CREATE TABLE quality_review (
@@ -289,6 +303,34 @@ CREATE TABLE quality_coaching_note (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_quality_coaching_note_review ON quality_coaching_note(review_id);
+
+CREATE TABLE internal_thread (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  type         TEXT NOT NULL DEFAULT 'direct' CHECK (type IN ('direct', 'group', 'quality_coaching')),
+  reference_id UUID,                                -- opcional, ej. quality_review_id o case_id
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_internal_thread_updated ON internal_thread(updated_at DESC);
+
+CREATE TABLE internal_thread_participant (
+  thread_id     UUID NOT NULL REFERENCES internal_thread(id) ON DELETE CASCADE,
+  agent_id      UUID NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  last_read_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (thread_id, agent_id)
+);
+CREATE INDEX idx_internal_participant_agent ON internal_thread_participant(agent_id);
+
+CREATE TABLE internal_message (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  thread_id        UUID NOT NULL REFERENCES internal_thread(id) ON DELETE CASCADE,
+  sender_agent_id  UUID NOT NULL REFERENCES agent(id),
+  type             TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'quality_quote', 'conversation_excerpt')),
+  body             TEXT NOT NULL,
+  context_data     JSONB NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_internal_message_thread ON internal_message(thread_id, created_at ASC);
 ```
 
 ## 3. Reglas de integridad relevantes

@@ -102,9 +102,19 @@ Normativo: `07_QUALITY_SUPERVISION.md`, DDL en `01_DATA_MODEL.md`, contratos en 
 
 **Aceptación (tests):** migración aplica; reply humano persiste `agent_id`; cierre de caso con mensajes agent crea una sola review `…:auto`; Zod/post-filtro descarta `messageId` inventado; manager no ve reviews de otro depto y admin sí; on-demand con `pending` existente no duplica job; coaching note queda en `audit_event`; fake AI produce findings persistidos y score en rango 0–100.
 
-## Etapa futura (no Etapa 10) — Chat interno staff persistente
+## Etapa 11 — Chat interno staff persistente
 
-Documentado en `07_QUALITY_SUPERVISION.md` §8. Fuera de alcance de la Etapa 10: hilos/mensajes staff↔staff en Postgres + realtime. El frontend sigue con chat local + deep-link desde calidad hasta esa etapa.
+Normativo: `07_QUALITY_SUPERVISION.md` §8, DDL en `01_DATA_MODEL.md` §2, contratos y DTOs en `03_API_CONTRACT.md` §C.1/§C.3/§C.4.
+
+- Migración: tablas `internal_thread`, `internal_thread_participant`, `internal_message`.
+- Módulo `src/core/modules/internal_chat/`:
+  - Entidades y repositorios para hilos y mensajes staff con `context_data` JSONB.
+  - Casos de uso: `get-or-create-direct-thread`, `list-threads`, `list-messages`, `send-internal-message`, `mark-thread-as-read`.
+  - Routers `/api/internal/threads*` con autenticación JWT de sesión y validación de participantes.
+- Integración con tiempo real: eventos SSE `INTERNAL_MESSAGE_SENT` e `INTERNAL_THREAD_READ` en `RealtimeBroadcaster`, filtrados por los agentes receptores.
+- Tarjetas de calidad: soporte de mensajes `type: 'quality_quote'` para llamadas de atención / feedback de supervisores hacia agentes con metadatos del finding.
+
+**Aceptación (tests en `test/internal-chat/internal-chat.test.ts`):** migración aplica; `get-or-create-direct-thread` es idempotente (no duplica hilos entre los mismos agentes); envío de mensaje persiste `sender_agent_id`, `type` y `context_data`; `list-messages` pagina correctamente; agente no participante recibe `403` al intentar leer/escribir; `mark-thread-as-read` actualiza `last_read_at` y reduce `unreadCount`; `send-internal-message` emite evento SSE con destinatarios filtrados.
 
 ---
 

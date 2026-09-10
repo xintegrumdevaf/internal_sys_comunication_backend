@@ -3,14 +3,14 @@
  * (docs/spec/05_BUILD_PLAN.md Etapa 6) — nunca el error técnico crudo.
  */
 const BY_REASON: Record<string, string> = {
-  TIMEOUT: "Estamos teniendo una demora técnica. Un especialista revisará tu caso en breve.",
+  TIMEOUT: "Estamos verificando los detalles de tu solicitud y te confirmamos por aquí mismo en un momento.",
   EXTERNAL_SERVICE_ERROR:
-    "Hay un problema temporal con nuestros sistemas. Un especialista se pondrá en contacto contigo.",
-  AI_ERROR: "Un especialista revisará tu solicitud para ayudarte mejor.",
-  UNSUPPORTED: "Un especialista revisará tu solicitud y te contactará por este chat.",
-  REQUEST_HUMAN: "Te conectamos con un especialista humano. En breve te atenderán por este mismo chat.",
-  TRIAGE: "Un especialista revisará tu solicitud. Te responderemos por este mismo chat.",
-  TECHNICAL: "No pudimos completar el proceso automático. Un especialista te atenderá en breve.",
+    "Estamos revisando tu caso en nuestro sistema y te confirmamos por aquí mismo en cuanto quede listo.",
+  AI_ERROR: "¡Recibido, gracias! 🙌 Estamos revisando la información y te confirmamos por aquí mismo en breve.",
+  UNSUPPORTED: "¡Recibido, gracias! 🙌 Estamos revisando tu solicitud y te confirmamos por este mismo chat en breve.",
+  REQUEST_HUMAN: "¡Con gusto! 🙌 Estamos revisando los detalles para ayudarte por aquí mismo. ¡Un momento por favor!",
+  TRIAGE: "¡Recibido, gracias! 🙌 Estamos verificando tu información y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!",
+  TECHNICAL: "¡Recibido, gracias! 🙌 Estamos revisando la información y te confirmamos por aquí mismo en cuanto quede listo.",
 };
 
 export function businessReplyForReason(reason: string, departmentSlug?: string | null): string {
@@ -18,7 +18,7 @@ export function businessReplyForReason(reason: string, departmentSlug?: string |
   if (BY_REASON[key]) return BY_REASON[key]!;
   if (BY_REASON[reason]) return BY_REASON[reason]!;
   if (departmentSlug === "support") {
-    return "Un especialista de soporte técnico revisará tu caso y te contactará pronto.";
+    return "¡Recibido, gracias! 🙌 Estamos revisando los detalles de tu servicio técnico y te confirmamos por aquí mismo en breve.";
   }
   return BY_REASON.TECHNICAL!;
 }

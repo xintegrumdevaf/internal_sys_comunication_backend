@@ -8,6 +8,7 @@ import {
   buildFinalQualityReview,
   mergeQualityFindings,
 } from "../../domain/final-quality-review";
+import { extractAgentConversationFragment } from "../../domain/agent-conversation-fragment";
 import type { QualityReviewDetail } from "../ports/quality-review.repository.port";
 import type { QualityReviewRepositoryPort } from "../ports/quality-review.repository.port";
 
@@ -39,6 +40,7 @@ export const qualityAnalysisSchema = z.object({
         ]),
         excerpt: z.string().min(1),
         rationale: z.string().min(1),
+        recommendation: z.string().min(1).optional(),
       }),
     )
     .default([]),
@@ -92,10 +94,12 @@ export class RunQualityAnalysisUseCase {
       return detail;
     }
 
-    const allMessages = await this.deps.messageRepo.listByCaseAuthors(detail.review.caseId, [
+    const rawMessages = await this.deps.messageRepo.listByCaseAuthors(detail.review.caseId, [
       "customer",
       "agent",
     ]);
+
+    const allMessages = extractAgentConversationFragment(rawMessages, detail.review.agentId);
 
     const chunkSize = Math.min(
       80,

@@ -5,7 +5,7 @@ const CLARIFY_TEMPLATE =
   "¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un especialista?";
 
 const REQUEST_HUMAN_TEMPLATE =
-  "Te conectamos con un especialista humano. En breve te atenderán por este mismo chat.";
+  "¡Recibido, gracias! 🙌 Estamos revisando tu solicitud y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!";
 
 /**
  * Formatea montos para plantillas/compose (ej. 45.5 → "45.50").
@@ -76,19 +76,25 @@ export function resolveReplyTemplate(input: {
       templates.WAITING_USER_CLIENT ??
       CLARIFY_TEMPLATE;
     const friendlyMissingFields = missingFields?.map(f => {
-      if (f === "nationalId") return "tu número de cédula";
-      if (f === "address") return "tu dirección";
+      if (f === "nationalId") return "el número de cédula del titular del servicio";
+      if (f === "address") return "la dirección del servicio";
       if (f === "fullName") return "el nombre completo del titular";
       if (f === "answer") return "una respuesta clara";
       return f;
     });
 
-    if (friendlyMissingFields && friendlyMissingFields.length > 0) {
-      templateHint = `Aún me falta ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
+    if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
+      templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
+    } else if (friendlyMissingFields && friendlyMissingFields.length > 0) {
+      templateHint = `Aún necesitamos ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
     }
     return {
       templateHint,
-      resultVars: { ...flattenContext(contextData), question },
+      resultVars: {
+        ...flattenContext(contextData),
+        question,
+        notFoundNationalId: contextData.lastSearchedNationalId ?? "",
+      },
       action: outcome.nextState,
       status: "WAITING_USER",
       missingFields,
@@ -183,6 +189,8 @@ function resolveCompleted(
     return debtReply(templates, contextData, balance, "COMPLETED");
   }
 
+  const answerStr = typeof contextData.answer === "string" ? contextData.answer : typeof offer.answer === "string" ? offer.answer : "";
+
   return {
     templateHint: templates.COMPLETED ?? "Tu solicitud fue atendida.",
     resultVars: {
@@ -191,7 +199,8 @@ function resolveCompleted(
         typeof (contextData.diagnostic as { result?: string } | undefined)?.result === "string"
           ? (contextData.diagnostic as { result: string }).result
           : "",
-      offerAnswer: typeof offer.answer === "string" ? offer.answer : "",
+      offerAnswer: answerStr,
+      answer: answerStr,
       paymentMessage: "",
     },
     action: "COMPLETED",

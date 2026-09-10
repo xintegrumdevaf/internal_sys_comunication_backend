@@ -49,5 +49,9 @@ export interface MessageRepositoryPort {
     caseId: string,
     authors: Array<"customer" | "agent">,
   ): Promise<Message[]>;
+  /**
+   * Agentes distintos que enviaron mensajes en el caso (para análisis de calidad multi-agente).
+   */
+  listDistinctAgentIdsByCase(caseId: string): Promise<string[]>;
 }
 

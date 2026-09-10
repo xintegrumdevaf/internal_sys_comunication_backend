@@ -186,6 +186,16 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
 
+  async listDistinctAgentIdsByCase(caseId: string): Promise<string[]> {
+    const agents = new Set<string>();
+    for (const m of this.messages) {
+      if (m.caseId === caseId && m.author === "agent" && m.agentId) {
+        agents.add(m.agentId);
+      }
+    }
+    return [...agents];
+  }
+
   async listByConversation(
     conversationId: string,
     options: { limit?: number; cursor?: string } = {},
@@ -224,10 +234,26 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
 
 export class WhatsAppSenderFake implements WhatsAppSenderPort {
   readonly sent: Array<{ waPhone: string; body: string }> = [];
+  readonly sentTemplates: Array<{
+    waPhone: string;
+    templateName: string;
+    languageCode?: string;
+    parameters?: string[];
+  }> = [];
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
     this.sent.push({ waPhone, body });
     return { externalId: `wamid.${randomUUID()}` };
+  }
+
+  async sendTemplate(
+    waPhone: string,
+    templateName: string,
+    languageCode?: string,
+    parameters?: string[],
+  ): Promise<{ externalId: string }> {
+    this.sentTemplates.push({ waPhone, templateName, languageCode, parameters });
+    return { externalId: `wamid.template.${randomUUID()}` };
   }
 }
 

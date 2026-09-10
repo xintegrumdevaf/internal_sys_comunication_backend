@@ -11,6 +11,8 @@ export type CreateAgentInput = {
   email: string;
   role?: AgentRole;
   primaryDepartmentId?: string | null;
+  /** Departamentos adicionales a los que pertenece el agente. */
+  departmentIds?: string[];
   /** Si se omite → `false` (opt-in al pool de auto-asignacion). */
   autoAssignEnabled?: boolean;
   /** Admin que ejecuta el alta (para audit_event). */
@@ -64,6 +66,15 @@ export class CreateAgentUseCase {
       }
     }
 
+    if (input.departmentIds && input.departmentIds.length > 0) {
+      for (const deptId of input.departmentIds) {
+        const dept = await this.deps.departmentRepo.findById(deptId);
+        if (!dept) {
+          throw validationError(`El departamento ${deptId} no existe`);
+        }
+      }
+    }
+
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await hashPassword(temporaryPassword);
 
@@ -72,7 +83,9 @@ export class CreateAgentUseCase {
       email,
       role: input.role ?? "agent",
       primaryDepartmentId: input.primaryDepartmentId ?? null,
+      departmentIds: input.departmentIds,
       autoAssignEnabled: input.autoAssignEnabled ?? false,
+      mustChangePassword: true,
       passwordHash,
     });
 
@@ -84,6 +97,7 @@ export class CreateAgentUseCase {
       metadata: {
         role: agent.role,
         primaryDepartmentId: agent.primaryDepartmentId,
+        departmentIds: agent.departmentIds,
         autoAssignEnabled: agent.autoAssignEnabled,
       },
     });

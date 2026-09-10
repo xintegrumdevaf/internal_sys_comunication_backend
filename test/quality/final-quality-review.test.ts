@@ -66,4 +66,24 @@ describe("final-quality-review", () => {
     expect(text).toContain("mmm no sé");
     expect(text).toContain("Síntesis por tramos");
   });
+
+  it("incluye la recomendación pedagógica en cada fallo cuando está presente", () => {
+    const text = buildFinalQualityReview({
+      cordialityScore: 50,
+      messagesTotal: 10,
+      chunkCount: 1,
+      findings: [
+        {
+          severity: "high",
+          category: "aggression",
+          excerpt: "no me moleste",
+          rationale: "Tono hostil",
+          recommendation: "«Con gusto le asisto en un momento»",
+        },
+      ],
+      chunkSummaries: ["Atención deficiente"],
+      efficiencyNotes: null,
+    });
+    expect(text).toContain("Cómo debió abordarse: «Con gusto le asisto en un momento»");
+  });
 });
