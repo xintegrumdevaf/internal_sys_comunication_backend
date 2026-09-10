@@ -4,6 +4,7 @@ import type { InterpretMessageInput } from "../ports/ai-provider.port";
 export type DynamicPromptIntentItem = {
   intent: string;
   description: string;
+  label?: string;
 };
 
 /**
@@ -27,7 +28,7 @@ export function buildInterpretMessagePrompt(
   const recentMessages = input.conversationSnapshot.recentMessages;
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
-    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label}): ${d.description}`).join("\n")
+    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n")
     : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional, y consultas sobre planes o servicios) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida. IMPORTANTE: Si el cliente envía un mensaje de agradecimiento o cortesía indicando que pagará más tarde (ej: "Listo muchas gracias mas tarde le pago", "Gracias luego transfiero", "Ok muchas gracias", "Listo gracias"), clasifica SIEMPRE como CANCEL o general.inquiry con intent="general.inquiry" y question="<texto del cliente>". NUNCA clasificar como billing.balance ni billing.record_payment. El cliente NO está pidiendo su saldo de nuevo ni adjuntando un comprobante, solo está cerrando la atención.
 - sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
 - sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.

@@ -154,13 +154,16 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
         create: async () => ({} as any),
         findById: async () => null,
         findActiveByConversation: async () => null,
-        findByConversationAndWorkflow: async () => null,
+        findPausedByConversationAndType: async () => null,
         listByConversation: async () => [],
+        listAutomatableExpiring: async () => [],
         applyTransition: async () => ({} as any),
-        setAutomationEnabled: async () => {},
+        setAssignedAgent: async () => {},
+        getAutomationState: async () => null,
+        setAutomationEnabled: async () => ({} as any),
         appendEvent: async () => {},
         listEvents: async () => [],
-        findPausedByConversationAndType: async () => null,
+        countActiveCasesByAgent: async () => ({}),
       };
 
       const arbitration = new CaseArbitrationService(caseRepoFake, silentLogger, routingService);

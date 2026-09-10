@@ -33,7 +33,8 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
   private readonly logger: Logger;
 
   constructor(config: MikrotikDiagnosticAdapterConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+    const rawUrl = config.baseUrl || "http://localhost:3001/api";
+    this.baseUrl = rawUrl.replace(/\/+$/, "");
     this.timeoutMs = config.timeoutMs ?? 35000;
     this.logger = config.logger;
   }
