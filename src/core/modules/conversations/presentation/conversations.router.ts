@@ -158,23 +158,40 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         res.status(400).json({ error: "Parametro mediaId o url es requerido" });
         return;
       }
-      if (!rawTarget.startsWith("/") && !/^https?:\/\//i.test(rawTarget) && (rawTarget.startsWith("api/v1/") || rawTarget.includes("whatsapp/media/"))) {
-        rawTarget = "/" + rawTarget;
-      }
-      const mediaTarget = decodeURIComponent(rawTarget);
-      let isUrl = /^https?:\/\//i.test(mediaTarget);
-      let resolvedUrl = mediaTarget;
 
-      if (mediaTarget.includes("zernio") || mediaTarget.startsWith("/api/v1/") || mediaTarget.startsWith("/whatsapp/")) {
-        const baseUrl = (env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
-        if (mediaTarget.startsWith("/api/v1/")) {
-          resolvedUrl = `${baseUrl.replace(/\/api\/v1$/, "")}${mediaTarget}`;
-          isUrl = true;
-        } else if (mediaTarget.startsWith("/")) {
-          resolvedUrl = `${baseUrl}${mediaTarget}`;
-          isUrl = true;
-        }
+      let decodedTarget = decodeURIComponent(rawTarget);
+
+      if (/^https?:\/+[^\/]/i.test(decodedTarget)) {
+        decodedTarget = decodedTarget.replace(/^(https?):\/*/, "$1://");
       }
+
+      let isUrl = /^https?:\/\//i.test(decodedTarget);
+      let resolvedUrl = decodedTarget;
+
+      if (decodedTarget.includes("zernio.com")) {
+        const idx = decodedTarget.indexOf("zernio.com");
+        resolvedUrl = "https://" + decodedTarget.substring(idx);
+        isUrl = true;
+      } else if (
+        decodedTarget.includes("zernio") ||
+        decodedTarget.startsWith("/api/v1/") ||
+        decodedTarget.startsWith("api/v1/") ||
+        decodedTarget.startsWith("/whatsapp/") ||
+        decodedTarget.startsWith("whatsapp/")
+      ) {
+        const baseUrl = (env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+        let cleanPath = decodedTarget;
+        if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
+
+        if (cleanPath.startsWith("/api/v1/")) {
+          resolvedUrl = `${baseUrl.replace(/\/api\/v1$/, "")}${cleanPath}`;
+        } else {
+          resolvedUrl = `${baseUrl}${cleanPath}`;
+        }
+        isUrl = true;
+      }
+
+      const mediaTarget = decodedTarget;
 
       if (isUrl) {
         const queryKeys = Object.keys(req.query).filter((k) => k !== "url");
@@ -200,8 +217,35 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         if (!fileRes.ok && Object.keys(headers).length > 0) {
           fileRes = await fetch(resolvedUrl);
         }
+
+        if (!fileRes.ok && fileRes.status === 404 && resolvedUrl.includes("zernio") && env.ZERNIO_ACCOUNT_ID) {
+          try {
+            const retryUrlObj = new URL(resolvedUrl);
+            if (retryUrlObj.searchParams.get("accountId") !== env.ZERNIO_ACCOUNT_ID) {
+              retryUrlObj.searchParams.set("accountId", env.ZERNIO_ACCOUNT_ID);
+              const retryRes = await fetch(retryUrlObj.toString(), { headers });
+              if (retryRes.ok) {
+                fileRes = retryRes;
+              }
+            }
+          } catch {
+            // Ignorar error de parsing en reintento
+          }
+        }
+
         if (!fileRes.ok) {
-          res.status(fileRes.status).json({ error: "No se pudo descargar el archivo de la URL" });
+          let errMsg = "No se pudo descargar el archivo de la URL";
+          try {
+            const errJson = (await fileRes.clone().json()) as { error?: string; message?: string };
+            if (errJson.error) {
+              errMsg = errJson.error;
+            } else if (errJson.message) {
+              errMsg = errJson.message;
+            }
+          } catch {
+            // Ignorar si no es JSON
+          }
+          res.status(fileRes.status).json({ error: errMsg });
           return;
         }
         const contentType = fileRes.headers.get("content-type");

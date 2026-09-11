@@ -152,4 +152,40 @@ describe("ConversationsRouter - /api/media Proxy", () => {
       }),
     );
   });
+
+  it("repara URLs completas de Zernio con barras colapsadas de protocolo (/api/media/https:/zernio.com/...)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "image/jpeg" }),
+      arrayBuffer: async () => Buffer.from("zernio-repaired-bytes"),
+    });
+    global.fetch = mockFetch;
+
+    const router = createConversationsRouter({
+      listConversations: {} as any,
+      listMessages: {} as any,
+      replyAsHuman: {} as any,
+      takeControl: {} as any,
+      markAsRead: {} as any,
+      caseRepo: {} as any,
+    });
+
+    const app = express();
+    app.use(router);
+
+    const res = await request(app).get(
+      "/api/media/https:/zernio.com/api/v1/whatsapp/media/28447679298223789?accountId=6aa32c44726ebfe037d67a70",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/jpeg");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://zernio.com/api/v1/whatsapp/media/28447679298223789?accountId=6aa32c44726ebfe037d67a70",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer zernio-secret-key" },
+      }),
+    );
+  });
 });
+
