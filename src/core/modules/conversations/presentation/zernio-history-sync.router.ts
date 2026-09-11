@@ -29,7 +29,7 @@ function formatClientProgress(progress: ZernioSyncProgress & { percentage?: numb
 
   const lastErr =
     progress.errors && progress.errors.length > 0
-      ? progress.errors[progress.errors.length - 1].error
+      ? (progress.errors[progress.errors.length - 1]?.error ?? null)
       : null;
 
   return {
