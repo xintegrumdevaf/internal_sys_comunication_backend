@@ -159,12 +159,12 @@ export class ZernioHistorySyncWorker {
           );
         }
       } else {
-        // Seguir vaciando de inmediato
-        setImmediate(() => {
+        // Seguir vaciando con una leve pausa (200ms) para respetar rate limits de la API de Zernio y evitar ráfagas de 429
+        setTimeout(() => {
           this.processQueue().catch((e) => {
             this.logger.error({ err: e }, "Error en bucle continuo de procesamiento");
           });
-        });
+        }, 200);
       }
     } finally {
       this.isProcessing = false;

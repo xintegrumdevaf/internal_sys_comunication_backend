@@ -53,16 +53,24 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
   }
 
   async findOrCreateByWaPhone(waPhone: string): Promise<Conversation> {
-    const existing = await this.findByWaPhone(waPhone);
+    let existing = await this.findByWaPhone(waPhone);
     if (existing) {
       return existing;
     }
 
-    const { rows } = await this.pool.query<ConversationRow>(
-      `INSERT INTO conversation (wa_phone) VALUES ($1) RETURNING *`,
-      [waPhone],
-    );
-    return mapRow(rows[0]!);
+    try {
+      const { rows } = await this.pool.query<ConversationRow>(
+        `INSERT INTO conversation (wa_phone) VALUES ($1) RETURNING *`,
+        [waPhone],
+      );
+      return mapRow(rows[0]!);
+    } catch {
+      existing = await this.findByWaPhone(waPhone);
+      if (existing) {
+        return existing;
+      }
+      throw new Error(`No se pudo crear ni recuperar la conversacion para el telefono ${waPhone}`);
+    }
   }
 
   async touchLastActivity(id: string): Promise<void> {

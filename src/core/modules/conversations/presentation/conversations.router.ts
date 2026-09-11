@@ -149,15 +149,75 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
     }
   });
 
-  router.get("/api/media/:mediaId", async (req, res, next) => {
+  const handleMediaProxy = async (req: Parameters<Parameters<typeof router.get>[1]>[0], res: Parameters<Parameters<typeof router.get>[1]>[1], next: Parameters<Parameters<typeof router.get>[1]>[2]) => {
     try {
       requireAuth(req);
-      const { mediaId } = req.params;
+      const paramTarget = (req.params as Record<string, unknown>).path ?? req.params[0] ?? (req.params as Record<string, unknown>).mediaId;
+      let rawTarget = (req.query.url as string) || (Array.isArray(paramTarget) ? paramTarget.join("/") : (paramTarget as string));
+      if (!rawTarget) {
+        res.status(400).json({ error: "Parametro mediaId o url es requerido" });
+        return;
+      }
+      if (!rawTarget.startsWith("/") && !/^https?:\/\//i.test(rawTarget) && (rawTarget.startsWith("api/v1/") || rawTarget.includes("whatsapp/media/"))) {
+        rawTarget = "/" + rawTarget;
+      }
+      const mediaTarget = decodeURIComponent(rawTarget);
+      let isUrl = /^https?:\/\//i.test(mediaTarget);
+      let resolvedUrl = mediaTarget;
+
+      if (mediaTarget.includes("zernio") || mediaTarget.startsWith("/api/v1/") || mediaTarget.startsWith("/whatsapp/")) {
+        const baseUrl = (env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+        if (mediaTarget.startsWith("/api/v1/")) {
+          resolvedUrl = `${baseUrl.replace(/\/api\/v1$/, "")}${mediaTarget}`;
+          isUrl = true;
+        } else if (mediaTarget.startsWith("/")) {
+          resolvedUrl = `${baseUrl}${mediaTarget}`;
+          isUrl = true;
+        }
+      }
+
+      if (isUrl) {
+        const queryKeys = Object.keys(req.query).filter((k) => k !== "url");
+        if (queryKeys.length > 0) {
+          try {
+            const urlObj = new URL(resolvedUrl);
+            for (const k of queryKeys) {
+              if (typeof req.query[k] === "string" && !urlObj.searchParams.has(k)) {
+                urlObj.searchParams.set(k, req.query[k] as string);
+              }
+            }
+            resolvedUrl = urlObj.toString();
+          } catch {
+            // Ignorar errores de parsing de URL
+          }
+        }
+
+        const headers: Record<string, string> = {};
+        if (env.ZERNIO_API_KEY && (resolvedUrl.includes("zernio") || env.WHATSAPP_PROVIDER === "zernio")) {
+          headers["Authorization"] = `Bearer ${env.ZERNIO_API_KEY}`;
+        }
+        let fileRes = await fetch(resolvedUrl, { headers });
+        if (!fileRes.ok && Object.keys(headers).length > 0) {
+          fileRes = await fetch(resolvedUrl);
+        }
+        if (!fileRes.ok) {
+          res.status(fileRes.status).json({ error: "No se pudo descargar el archivo de la URL" });
+          return;
+        }
+        const contentType = fileRes.headers.get("content-type");
+        if (contentType) {
+          res.setHeader("Content-Type", contentType);
+        }
+        const buffer = Buffer.from(await fileRes.arrayBuffer());
+        res.send(buffer);
+        return;
+      }
+
       if (!env.WHATSAPP_ACCESS_TOKEN) {
         res.status(503).json({ error: "WHATSAPP_ACCESS_TOKEN no configurado" });
         return;
       }
-      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaTarget}`, {
         headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
       });
       if (!metaRes.ok) {
@@ -180,7 +240,11 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
     } catch (error) {
       next(error);
     }
-  });
+  };
+
+  router.get("/api/media", handleMediaProxy);
+  router.get("/api/media/:mediaId", handleMediaProxy);
+  router.get("/api/media/*path", handleMediaProxy);
 
   return router;
 }

@@ -3,6 +3,7 @@ import { ZernioHistoryGatewayHttp } from "../../src/core/modules/conversations/i
 import { ZernioHistorySyncWorker, ZERNIO_HISTORY_QUEUE_KEY, ZERNIO_HISTORY_STATUS_KEY } from "../../src/core/modules/conversations/infrastructure/queue/zernio-history-sync.worker";
 import { StartZernioHistorySyncUseCase } from "../../src/core/modules/conversations/application/use-cases/start-zernio-history-sync.use-case";
 import { GetZernioHistorySyncStatusUseCase } from "../../src/core/modules/conversations/application/use-cases/get-zernio-history-sync-status.use-case";
+import { createZernioHistorySyncRouter } from "../../src/core/modules/conversations/presentation/zernio-history-sync.router";
 import { ConversationRepositoryFake, MessageRepositoryFake } from "../support/fakes";
 import type { ZernioHistoryPort } from "../../src/core/modules/conversations/application/ports/zernio-history.port";
 import type { Env } from "../../src/shared/config/env";
@@ -369,6 +370,22 @@ describe("Zernio Historical Sync Architecture", () => {
       expect(finalProgress?.failedConversations).toBe(1);
       expect(finalProgress?.errors).toHaveLength(1);
       expect(finalProgress?.errors[0]?.error).toContain("Zernio timeout");
+    });
+  });
+
+  describe("createZernioHistorySyncRouter", () => {
+    it("registra correctamente las rutas de alias /api/conversations/sync-history y /api/admin/conversations/sync-zernio-history", () => {
+      const startSync = {} as any;
+      const getStatus = {} as any;
+      const router = createZernioHistorySyncRouter({ startSync, getStatus });
+
+      const routes = router.stack.map((layer) => ({
+        path: layer.route?.path,
+        methods: layer.route?.methods,
+      }));
+
+      expect(routes.some((r) => Array.isArray(r.path) ? r.path.includes("/api/conversations/sync-history") : r.path === "/api/conversations/sync-history")).toBe(true);
+      expect(routes.some((r) => Array.isArray(r.path) ? r.path.includes("/api/conversations/sync-history/status") : r.path === "/api/conversations/sync-history/status")).toBe(true);
     });
   });
 });
