@@ -52,6 +52,32 @@ describe("MessageTemplates Use Cases", () => {
     expect(metaGateway.submitted[0]?.name).toBe("bienvenida_cliente");
   });
 
+  it("CreateMessageTemplateUseCase: exige headerContent cuando headerType es IMAGE, VIDEO o DOCUMENT", async () => {
+    const templateRepo = new MessageTemplateRepositoryFake();
+    const metaGateway = new MetaTemplatesGatewayFake();
+    const useCase = new CreateMessageTemplateUseCase({ templateRepo, metaGateway });
+
+    await expect(
+      useCase.execute({
+        name: "promo_imagen_sin_url",
+        category: "MARKETING",
+        headerType: "IMAGE",
+        bodyText: "Mira esta oferta {{1}}",
+      }),
+    ).rejects.toThrow("headerContent");
+
+    const created = await useCase.execute({
+      name: "promo_imagen_valida",
+      category: "MARKETING",
+      headerType: "IMAGE",
+      headerContent: "https://example.com/imagen.jpg",
+      bodyText: "Mira esta oferta {{1}}",
+    });
+
+    expect(created.headerType).toBe("IMAGE");
+    expect(created.headerContent).toBe("https://example.com/imagen.jpg");
+  });
+
   it("ListMessageTemplatesUseCase: filtra por categoria, estado, busqueda y paginacion", async () => {
     const templateRepo = new MessageTemplateRepositoryFake();
     const listUseCase = new ListMessageTemplatesUseCase(templateRepo);

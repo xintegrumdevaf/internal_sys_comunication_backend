@@ -16,8 +16,8 @@ describe("ZernioTemplatesGatewayHttp", () => {
     WHATSAPP_APP_SECRET: "",
     WHATSAPP_VERIFY_TOKEN: "",
     WHATSAPP_PHONE_NUMBER_ID: "",
-    WHATSAPP_ACCESS_TOKEN: "",
-    META_WABA_ID: "",
+    WHATSAPP_ACCESS_TOKEN: "test-token",
+    META_WABA_ID: "123456789",
     META_ACCESS_TOKEN: "",
     WHATSAPP_PROVIDER: "zernio",
     ZERNIO_API_KEY: "test-zernio-key",
@@ -99,6 +99,40 @@ describe("ZernioTemplatesGatewayHttp", () => {
     );
     const sentBody = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string);
     expect(sentBody.components[0].type).toBe("body");
+  });
+
+  it("envía plantilla con encabezado de tipo IMAGE incluyendo example.header_handle", async () => {
+    const gateway = new ZernioTemplatesGatewayHttp(fakeEnv, fakeLogger);
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        template: {
+          id: "tpl_meta_img_123",
+          name: "oferta_imagen",
+          status: "PENDING",
+        },
+      }),
+    });
+    global.fetch = mockFetch;
+
+    const result = await gateway.submitTemplate({
+      name: "oferta_imagen",
+      category: "MARKETING",
+      language: "es",
+      headerType: "IMAGE",
+      headerContent: "https://example.com/promocion.png",
+      bodyText: "Hola {{1}}, mira nuestra promoción.",
+    });
+
+    expect(result.metaTemplateId).toBe("tpl_meta_img_123");
+    const sentBody = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string);
+    expect(sentBody.components[0].type).toBe("header");
+    expect(sentBody.components[0].format).toBe("image");
+    expect(sentBody.components[0].example).toEqual({
+      header_handle: ["https://example.com/promocion.png"],
+    });
   });
 
   it("consulta el estado de una plantilla en Zernio", async () => {

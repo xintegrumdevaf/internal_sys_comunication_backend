@@ -4,6 +4,7 @@ import { PgVectorStoreAdapter } from "../modules/ai/infrastructure/postgres/pg-v
 import { OllamaEmbeddingAdapter } from "../modules/ai/infrastructure/ollama/ollama-embedding.adapter";
 import { GeminiEmbeddingAdapter } from "../modules/ai/infrastructure/gemini/gemini-embedding.adapter";
 import { RagService } from "../modules/ai/application/services/rag.service";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import express, { type Express } from "express";
 import type { Pool } from "pg";
@@ -724,6 +725,7 @@ export function createContainer(): Container {
   );
   app.use(createRequestLogger(logger));
   app.use(createMetricsMiddleware());
+  app.use("/uploads", express.static(path.join(process.cwd(), "public", "uploads")));
 
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));

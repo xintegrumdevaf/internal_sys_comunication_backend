@@ -1,3 +1,4 @@
+import { resolveHeaderMediaUrl } from "../meta/meta-media-uploader";
 import { externalServiceError, validationError } from "../../../../../shared/errors/domain-errors";
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
@@ -93,6 +94,16 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
       };
       if (template.headerType === "TEXT" && template.headerContent) {
         headerComp.text = template.headerContent;
+      } else if (
+        (template.headerType === "IMAGE" ||
+          template.headerType === "VIDEO" ||
+          template.headerType === "DOCUMENT") &&
+        template.headerContent
+      ) {
+        const mediaUrl = await resolveHeaderMediaUrl(template.headerContent, this.env, this.logger);
+        headerComp.example = {
+          header_handle: [mediaUrl],
+        };
       }
       components.push(headerComp);
     }

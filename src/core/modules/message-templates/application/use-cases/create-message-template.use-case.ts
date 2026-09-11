@@ -46,9 +46,18 @@ export class CreateMessageTemplateUseCase {
 
     const language = input.language?.trim() || "es";
     const headerType = input.headerType || "NONE";
-    const headerContent = input.headerContent ?? null;
+    const headerContent = input.headerContent ? input.headerContent.trim() : null;
     const footerText = input.footerText ?? null;
     const buttons = input.buttons ?? null;
+
+    if (
+      (headerType === "IMAGE" || headerType === "VIDEO" || headerType === "DOCUMENT") &&
+      !headerContent
+    ) {
+      throw validationError(
+        `Debes proporcionar un enlace o ID de recurso de ejemplo en el encabezado (headerContent) para plantillas de tipo ${headerType}`,
+      );
+    }
 
     const existing = await this.deps.templateRepo.findByName(name);
     if (existing) {
