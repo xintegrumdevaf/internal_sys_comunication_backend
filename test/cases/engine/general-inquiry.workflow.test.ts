@@ -118,7 +118,7 @@ describe("GENERAL_INQUIRY workflow", () => {
     expect(outcome.type).toBe("COMPLETED");
   });
 
-  it("responde con 'Buenos días' si el cliente dice 'Buenos dias'", async () => {
+  it("responde con 'Buenos días' si el cliente dice 'Buenos dias' y mantiene el caso en WAITING_USER_INQUIRY", async () => {
     const fakeRagService = {} as unknown as RagService;
     const workflow = createGeneralInquiryWorkflow(fakeRagService);
 
@@ -141,14 +141,17 @@ describe("GENERAL_INQUIRY workflow", () => {
       gateway: { executeAction: async () => ({ success: true, result: {} }) },
     });
 
-    expect(outcome.type).toBe("COMPLETED");
-    if (outcome.type === "COMPLETED" && outcome.context.workflowType === "GENERAL_INQUIRY") {
-      expect(outcome.context.data.answer).toContain("Buenos días");
-      expect(outcome.context.data.answer).not.toContain("Buenas tardes");
+    expect(outcome.type).toBe("WAITING_USER");
+    if (outcome.type === "WAITING_USER") {
+      expect(outcome.nextState).toBe("WAITING_USER_INQUIRY");
+      if (outcome.context.workflowType === "GENERAL_INQUIRY") {
+        expect(outcome.context.data.answer).toContain("Buenos días");
+        expect(outcome.context.data.answer).not.toContain("Buenas tardes");
+      }
     }
   });
 
-  it("responde como saludo y completa el caso si el cliente dice 'Hola que tal'", async () => {
+  it("responde como saludo y mantiene el caso en WAITING_USER_INQUIRY si el cliente dice 'Hola que tal'", async () => {
     const fakeRagService = {
       query: async () => {
         throw new Error("RAG no deberia ser llamado para un saludo");
@@ -175,10 +178,58 @@ describe("GENERAL_INQUIRY workflow", () => {
       gateway: { executeAction: async () => ({ success: true, result: {} }) },
     });
 
-    expect(outcome.type).toBe("COMPLETED");
-    if (outcome.type === "COMPLETED" && outcome.context.workflowType === "GENERAL_INQUIRY") {
-      expect(outcome.context.data.found).toBe(true);
-      expect(outcome.context.data.answer).toContain("¿En qué te podemos ayudar hoy?");
+    expect(outcome.type).toBe("WAITING_USER");
+    if (outcome.type === "WAITING_USER") {
+      expect(outcome.nextState).toBe("WAITING_USER_INQUIRY");
+      if (outcome.context.workflowType === "GENERAL_INQUIRY") {
+        expect(outcome.context.data.found).toBe(true);
+        expect(outcome.context.data.answer).toContain("¿En qué te podemos ayudar hoy?");
+      }
+    }
+  });
+
+  it("en estado WAITING_USER_INQUIRY procesa la consulta con RAG y avanza a RESPOND_ANSWER", async () => {
+    const fakeRagService = {
+      query: async (_question: string) => ({
+        answer: "Nuestros horarios son de lunes a viernes de 8:00 a 18:00.",
+        found: true,
+        confidenceScore: 0.9,
+        sources: ["Horarios.pdf"],
+        retrievedChunks: [],
+        executionTimeMs: 30,
+      }),
+    } as unknown as RagService;
+    const workflow = createGeneralInquiryWorkflow(fakeRagService);
+
+    const context: CaseContext = {
+      workflowType: "GENERAL_INQUIRY",
+      data: {
+        answer: "¡Hola! ¿En qué te podemos ayudar hoy?",
+        found: true,
+      },
+    };
+
+    const handler = workflow.states.WAITING_USER_INQUIRY;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler WAITING_USER_INQUIRY is undefined");
+
+    const outcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "WAITING_USER_INQUIRY",
+      context,
+      text: "¿Cuáles son sus horarios de atención?",
+      entities: { answer: "¿Cuáles son sus horarios de atención?" },
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+
+    expect(outcome.type).toBe("CONTINUE");
+    if (outcome.type === "CONTINUE") {
+      expect(outcome.nextState).toBe("RESPOND_ANSWER");
+      if (outcome.context.workflowType === "GENERAL_INQUIRY") {
+        expect(outcome.context.data.answer).toBe("Nuestros horarios son de lunes a viernes de 8:00 a 18:00.");
+      }
     }
   });
 });

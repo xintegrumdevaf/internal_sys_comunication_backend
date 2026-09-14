@@ -21,6 +21,8 @@ import type {
 } from "../../src/core/modules/departments/application/ports/department.repository.port";
 import type { Department } from "../../src/core/modules/departments/domain/department.entity";
 import type { DepartmentCaseRouting } from "../../src/core/modules/departments/domain/department-case-routing.entity";
+import type { QuickReply, QuickReplyFilter } from "../../src/core/modules/quick-replies/domain/quick-reply.entity";
+import type { QuickReplyRepositoryPort } from "../../src/core/modules/quick-replies/application/ports/quick-reply.repository.port";
 
 /**
  * Fakes en memoria (docs/skills/testing-strategy.md).
@@ -397,5 +399,66 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
     return (
       [...this.routings.values()].find((r) => r.intentKey === intentKey && r.active) ?? null
     );
+  }
+}
+
+export class QuickReplyRepositoryFake implements QuickReplyRepositoryPort {
+  readonly replies = new Map<string, QuickReply>();
+
+  seed(reply: QuickReply): QuickReply {
+    this.replies.set(reply.id, reply);
+    return reply;
+  }
+
+  async findById(id: string): Promise<QuickReply | null> {
+    return this.replies.get(id) ?? null;
+  }
+
+  async findByShortcut(shortcut: string, departmentId: string | null): Promise<QuickReply | null> {
+    const normalized = shortcut.trim().replace(/^\/+/, "").toLowerCase();
+    for (const r of this.replies.values()) {
+      const rNorm = r.shortcut.trim().replace(/^\/+/, "").toLowerCase();
+      if (rNorm === normalized && r.departmentId === departmentId) {
+        return r;
+      }
+    }
+    return null;
+  }
+
+  async list(filter?: QuickReplyFilter): Promise<QuickReply[]> {
+    let result = [...this.replies.values()];
+
+    if (filter?.departmentIds !== undefined) {
+      const deptSet = new Set(filter.departmentIds);
+      result = result.filter((r) => deptSet.has(r.departmentId));
+    }
+
+    if (filter?.activeOnly) {
+      result = result.filter((r) => r.active);
+    }
+
+    if (filter?.category) {
+      result = result.filter((r) => r.category === filter.category);
+    }
+
+    if (filter?.search) {
+      const s = filter.search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.shortcut.toLowerCase().includes(s) ||
+          r.title.toLowerCase().includes(s) ||
+          r.body.toLowerCase().includes(s),
+      );
+    }
+
+    return result.sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+  }
+
+  async save(reply: QuickReply): Promise<void> {
+    this.replies.set(reply.id, reply);
+  }
+
+  async delete(id: string): Promise<void> {
+    this.replies.delete(id);
   }
 }

@@ -35,6 +35,15 @@ import { DeleteMessageTemplateUseCase } from "../modules/message-templates/appli
 import { SyncTemplateStatusUseCase } from "../modules/message-templates/application/use-cases/sync-template-status.use-case";
 import { createMessageTemplatesRouter } from "../modules/message-templates/presentation/message-templates.router";
 
+import { QuickReplyRepositoryPg } from "../modules/quick-replies/infrastructure/postgres/quick-reply.repository.pg";
+import { QuickReplyCatalogService } from "../modules/quick-replies/application/services/quick-reply-catalog.service";
+import { CreateQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/create-quick-reply.use-case";
+import { UpdateQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/update-quick-reply.use-case";
+import { DeleteQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/delete-quick-reply.use-case";
+import { ListQuickRepliesUseCase } from "../modules/quick-replies/application/use-cases/list-quick-replies.use-case";
+import { ResolveQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/resolve-quick-reply.use-case";
+import { createQuickRepliesRouter } from "../modules/quick-replies/presentation/quick-replies.router";
+
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
@@ -202,6 +211,7 @@ export type Container = {
   inboundBuffer: InboundBufferService;
   cancelCase: CancelCaseUseCase;
   expirationService: ExpirationService;
+  quickReplyCatalogService?: QuickReplyCatalogService;
   shutdown: () => Promise<void>;
 };
 
@@ -264,6 +274,36 @@ export function createContainer(): Container {
   const campaignRepo = new CampaignRepositoryPg(pgPool);
   const campaignRecipientRepo = new CampaignRecipientRepositoryPg(pgPool);
   const campaignFileParser = new CampaignFileParserService();
+
+  // --- Respuestas Rápidas (Quick Replies estilo Whaticket) ---
+  const quickReplyRepo = new QuickReplyRepositoryPg(pgPool);
+  const quickReplyCatalogService = new QuickReplyCatalogService(
+    quickReplyRepo,
+    logger.child({ module: "quick-replies" }),
+  );
+  void quickReplyCatalogService.loadCache().catch((err) => {
+    logger.warn({ err }, "Error al precargar caché de respuestas rápidas");
+  });
+  const createQuickReply = new CreateQuickReplyUseCase({
+    quickReplyRepo,
+    departmentRepo,
+    catalogService: quickReplyCatalogService,
+  });
+  const updateQuickReply = new UpdateQuickReplyUseCase({
+    quickReplyRepo,
+    departmentRepo,
+    catalogService: quickReplyCatalogService,
+  });
+  const deleteQuickReply = new DeleteQuickReplyUseCase({
+    quickReplyRepo,
+    catalogService: quickReplyCatalogService,
+  });
+  const listQuickReplies = new ListQuickRepliesUseCase(quickReplyRepo);
+  const resolveQuickReply = new ResolveQuickReplyUseCase({
+    catalogService: quickReplyCatalogService,
+    conversationRepo,
+    customerRepo,
+  });
 
   // --- Catalogo de n8n + gateway HTTP real (Etapa 3) ---
   // --- Catalogo de n8n + gateway directo de diagnostico + gateway compuesto ---
@@ -621,6 +661,7 @@ export function createContainer(): Container {
     claimCase,
     logger: conversationsLogger,
     broadcaster,
+    agentRepo,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
@@ -860,6 +901,15 @@ export function createContainer(): Container {
     }),
   );
   app.use(
+    createQuickRepliesRouter({
+      createQuickReply,
+      updateQuickReply,
+      deleteQuickReply,
+      listQuickReplies,
+      resolveQuickReply,
+    }),
+  );
+  app.use(
     createAnalyticsRouter({
       getOverview: getAnalyticsOverview,
       getCasesDistribution,
@@ -883,5 +933,5 @@ export function createContainer(): Container {
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };
 
-  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, shutdown };
+  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, shutdown };
 }
