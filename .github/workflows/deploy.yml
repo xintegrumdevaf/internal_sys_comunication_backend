@@ -72,7 +72,7 @@ jobs:
         run: |
           if [ -n "${{ secrets.COOLIFY_WEBHOOK_TEST }}" ]; then
             echo "Triggering Coolify Test deployment..."
-            curl -s -X GET "${{ secrets.COOLIFY_WEBHOOK_TEST }}"
+            curl -sS --max-time 60 -X GET "${{ secrets.COOLIFY_WEBHOOK_TEST }}"
           else
             echo "COOLIFY_WEBHOOK_TEST is not set. Skipping deployment."
           fi
@@ -82,7 +82,8 @@ jobs:
         run: |
           if [ -n "${{ secrets.COOLIFY_WEBHOOK_MAIN }}" ]; then
             echo "Triggering Coolify Main deployment..."
-            curl -s -X GET "${{ secrets.COOLIFY_WEBHOOK_MAIN }}"
+            curl -sS --max-time 60 -X GET "${{ secrets.COOLIFY_WEBHOOK_MAIN }}"
           else
             echo "COOLIFY_WEBHOOK_MAIN is not set. Skipping deployment."
           fi
+
