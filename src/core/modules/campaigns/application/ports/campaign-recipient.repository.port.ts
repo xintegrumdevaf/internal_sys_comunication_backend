@@ -4,6 +4,7 @@ export type CreateRecipientInput = {
   phone: string;
   name?: string | null;
   customBody?: string | null;
+  variables?: Record<string, string>;
 };
 
 export type RecipientCounts = {
@@ -20,8 +21,18 @@ export interface CampaignRecipientRepositoryPort {
   updateStatus(
     id: string,
     status: RecipientStatus,
-    data?: { externalId?: string | null; errorMessage?: string | null; sentAt?: Date | null },
+    data?: {
+      externalId?: string | null;
+      errorMessage?: string | null;
+      sentAt?: Date | null;
+      customBody?: string | null;
+    },
   ): Promise<CampaignRecipient>;
+  updateStatusByExternalId(
+    externalId: string,
+    status: RecipientStatus,
+    data?: { errorMessage?: string | null },
+  ): Promise<CampaignRecipient | null>;
   resetRecipientsToPending(campaignId: string, onlyFailed?: boolean): Promise<number>;
   countByCampaign(campaignId: string): Promise<RecipientCounts>;
   listByCampaignId(campaignId: string): Promise<CampaignRecipient[]>;

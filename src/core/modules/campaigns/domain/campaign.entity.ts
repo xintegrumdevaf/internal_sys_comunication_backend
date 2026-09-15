@@ -29,6 +29,7 @@ export interface Campaign {
   failedCount: number;
   templateName?: string | null;
   templateLanguage?: string | null;
+  variableMapping?: Record<string, string>;
   createdAt: Date;
   startedAt: Date | null;
   completedAt: Date | null;

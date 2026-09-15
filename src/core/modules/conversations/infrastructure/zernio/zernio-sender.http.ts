@@ -8,6 +8,11 @@ type ZernioMessageResponse = {
   platformMessageId?: string;
   success?: boolean;
   message?: string;
+  data?: {
+    messageId?: string;
+    conversationId?: string;
+    participantId?: string;
+  };
 };
 
 type ZernioConversationItem = {
@@ -225,8 +230,62 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
 
     const data = (await response.json()) as ZernioMessageResponse;
-    const externalId = data.platformMessageId || data.messageId || data.id || `zernio-tpl-${Date.now()}`;
+    const externalId =
+      data.data?.messageId ||
+      data.platformMessageId ||
+      data.messageId ||
+      data.id ||
+      `zernio-tpl-${Date.now()}`;
 
     return { externalId };
+  }
+
+  async checkMessageStatus(
+    waPhone: string,
+    externalId: string,
+  ): Promise<{ status: "sent" | "delivered" | "failed"; errorMessage?: string } | null> {
+    try {
+      const cleanPhone = waPhone.replace(/\D/g, "");
+      const accountId = await this.getAccountId();
+      const convId = await this.resolveConversationId(cleanPhone);
+      if (!convId) return null;
+
+      const url = `${this.baseUrl}/inbox/conversations/${convId}/messages?accountId=${accountId}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        },
+      });
+
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as {
+        messages?: Array<{
+          id?: string;
+          deliveryStatus?: string;
+          deliveryError?: { code?: number; message?: string; details?: string; title?: string };
+        }>;
+      };
+
+      const matched = (data.messages || []).find((m) => m.id === externalId);
+      if (matched) {
+        if (matched.deliveryStatus === "failed") {
+          const errDetail =
+            matched.deliveryError?.details ||
+            matched.deliveryError?.message ||
+            matched.deliveryError?.title ||
+            "Error de entrega en Meta / WhatsApp";
+          const errCode = matched.deliveryError?.code ? ` (Meta Error ${matched.deliveryError.code})` : "";
+          return { status: "failed", errorMessage: `${errDetail}${errCode}` };
+        }
+        if (matched.deliveryStatus === "delivered" || matched.deliveryStatus === "read") {
+          return { status: "delivered" };
+        }
+        return { status: "sent" };
+      }
+    } catch (err) {
+      this.logger.warn({ err, waPhone, externalId }, "Error al consultar estado de mensaje en Zernio");
+    }
+    return null;
   }
 }

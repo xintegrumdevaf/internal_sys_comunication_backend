@@ -35,6 +35,7 @@ type CampaignRow = {
   failed_count: number;
   template_name: string | null;
   template_language: string | null;
+  variable_mapping: Record<string, string>;
   created_at: Date;
   started_at: Date | null;
   completed_at: Date | null;
@@ -46,6 +47,7 @@ type RecipientRow = {
   phone: string;
   name: string | null;
   custom_body: string | null;
+  variables: Record<string, string>;
   status: RecipientStatus;
   external_id: string | null;
   error_message: string | null;
@@ -78,6 +80,7 @@ function mapCampaignRow(row: CampaignRow): Campaign {
     failedCount: Number(row.failed_count),
     templateName: row.template_name,
     templateLanguage: row.template_language,
+    variableMapping: row.variable_mapping ?? {},
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -91,6 +94,7 @@ function mapRecipientRow(row: RecipientRow): CampaignRecipient {
     phone: row.phone,
     name: row.name,
     customBody: row.custom_body,
+    variables: row.variables ?? {},
     status: row.status,
     externalId: row.external_id,
     errorMessage: row.error_message,
@@ -119,11 +123,13 @@ export class CampaignRepositoryPg implements CampaignRepositoryPort {
       ...input.contactEnrichment,
     };
 
+    const variableMapping = input.variableMapping ?? input.templateVariables ?? {};
+
     const { rows } = await this.pool.query<CampaignRow>(
       `INSERT INTO campaign (
         name, message_body, quick_mode, quick_mode_interval_seconds,
-        chat_routing, contact_enrichment, status, template_name, template_language
-      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'DRAFT', $7, $8)
+        chat_routing, contact_enrichment, status, template_name, template_language, variable_mapping
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'DRAFT', $7, $8, $9::jsonb)
       RETURNING *`,
       [
         input.name,
@@ -134,6 +140,7 @@ export class CampaignRepositoryPg implements CampaignRepositoryPort {
         JSON.stringify(defaultContactEnrichment),
         input.templateName ?? null,
         input.templateLanguage ?? "es",
+        JSON.stringify(variableMapping),
       ],
     );
 
@@ -258,14 +265,14 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
     let paramIdx = 1;
     for (const r of recipients) {
       valueTuples.push(
-        `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, 'PENDING')`,
+        `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}::jsonb, 'PENDING')`,
       );
-      values.push(campaignId, r.phone, r.name ?? null, r.customBody ?? null);
-      paramIdx += 4;
+      values.push(campaignId, r.phone, r.name ?? null, r.customBody ?? null, JSON.stringify(r.variables ?? {}));
+      paramIdx += 5;
     }
 
     const { rowCount } = await this.pool.query(
-      `INSERT INTO campaign_recipient (campaign_id, phone, name, custom_body, status)
+      `INSERT INTO campaign_recipient (campaign_id, phone, name, custom_body, variables, status)
        VALUES ${valueTuples.join(", ")}`,
       values,
     );
@@ -288,14 +295,20 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
   async updateStatus(
     id: string,
     status: RecipientStatus,
-    data?: { externalId?: string | null; errorMessage?: string | null; sentAt?: Date | null },
+    data?: {
+      externalId?: string | null;
+      errorMessage?: string | null;
+      sentAt?: Date | null;
+      customBody?: string | null;
+    },
   ): Promise<CampaignRecipient> {
     const { rows } = await this.pool.query<RecipientRow>(
       `UPDATE campaign_recipient
        SET status = $2,
            external_id = COALESCE($3, external_id),
            error_message = COALESCE($4, error_message),
-           sent_at = COALESCE($5, sent_at)
+           sent_at = COALESCE($5, sent_at),
+           custom_body = COALESCE($6, custom_body)
        WHERE id = $1
        RETURNING *`,
       [
@@ -304,6 +317,7 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
         data?.externalId ?? null,
         data?.errorMessage ?? null,
         data?.sentAt ?? null,
+        data?.customBody ?? null,
       ],
     );
 
@@ -312,6 +326,23 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
     }
 
     return mapRecipientRow(rows[0]);
+  }
+
+  async updateStatusByExternalId(
+    externalId: string,
+    status: RecipientStatus,
+    data?: { errorMessage?: string | null },
+  ): Promise<CampaignRecipient | null> {
+    const { rows } = await this.pool.query<RecipientRow>(
+      `UPDATE campaign_recipient
+       SET status = $2,
+           error_message = COALESCE($3, error_message)
+       WHERE external_id = $1
+       RETURNING *`,
+      [externalId, status, data?.errorMessage ?? null],
+    );
+
+    return rows[0] ? mapRecipientRow(rows[0]) : null;
   }
 
   async resetRecipientsToPending(campaignId: string, onlyFailed = false): Promise<number> {
@@ -398,6 +429,7 @@ export class CampaignRepositoryFake implements CampaignRepositoryPort {
       failedCount: 0,
       templateName: input.templateName ?? null,
       templateLanguage: input.templateLanguage ?? "es",
+      variableMapping: input.variableMapping ?? input.templateVariables ?? {},
       createdAt: new Date(),
       startedAt: null,
       completedAt: null,
@@ -493,6 +525,7 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
         phone: r.phone,
         name: r.name ?? null,
         customBody: r.customBody ?? null,
+        variables: r.variables ?? {},
         status: "PENDING",
         externalId: null,
         errorMessage: null,
@@ -513,7 +546,12 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
   async updateStatus(
     id: string,
     status: RecipientStatus,
-    data?: { externalId?: string | null; errorMessage?: string | null; sentAt?: Date | null },
+    data?: {
+      externalId?: string | null;
+      errorMessage?: string | null;
+      sentAt?: Date | null;
+      customBody?: string | null;
+    },
   ): Promise<CampaignRecipient> {
     const existing = this.items.get(id);
     if (!existing) throw new Error(`Destinatario fake ${id} no encontrado`);
@@ -524,10 +562,30 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
       externalId: data?.externalId !== undefined ? data.externalId : existing.externalId,
       errorMessage: data?.errorMessage !== undefined ? data.errorMessage : existing.errorMessage,
       sentAt: data?.sentAt !== undefined ? data.sentAt : existing.sentAt,
+      customBody: data?.customBody !== undefined ? data.customBody : existing.customBody,
     };
 
     this.items.set(id, updated);
     return updated;
+  }
+
+  async updateStatusByExternalId(
+    externalId: string,
+    status: RecipientStatus,
+    data?: { errorMessage?: string | null },
+  ): Promise<CampaignRecipient | null> {
+    for (const [id, item] of this.items.entries()) {
+      if (item.externalId === externalId) {
+        const updated: CampaignRecipient = {
+          ...item,
+          status,
+          errorMessage: data?.errorMessage !== undefined ? data.errorMessage : item.errorMessage,
+        };
+        this.items.set(id, updated);
+        return updated;
+      }
+    }
+    return null;
   }
 
   async resetRecipientsToPending(campaignId: string, onlyFailed = false): Promise<number> {

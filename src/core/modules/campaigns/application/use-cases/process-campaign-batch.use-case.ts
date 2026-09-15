@@ -66,28 +66,44 @@ export class ProcessCampaignBatchUseCase {
         };
       }
 
+      let finalSentBody: string | undefined;
       try {
         let result: { externalId: string };
+
         if (campaign.templateName) {
-          let params = recipient.name ? [recipient.name] : [];
+          let params: string[] = [];
+          let expectedCount = -1;
+          let templateBodyText: string | undefined;
 
           if (this.messageTemplateRepo) {
             const tpl = await this.messageTemplateRepo.findByName(campaign.templateName);
             if (tpl) {
-              const matches = (tpl.bodyText || "").match(/\{\{\s*\d+\s*\}\}/g);
-              const expectedCount = matches ? new Set(matches).size : 0;
-              if (expectedCount === 0) {
-                params = [];
-              } else if (expectedCount === 1) {
-                params = [recipient.name ?? ""];
-              } else if (expectedCount > 1) {
-                params = [recipient.name ?? "", recipient.phone];
-                while (params.length < expectedCount) {
-                  params.push("");
-                }
-                params = params.slice(0, expectedCount);
-              }
+              templateBodyText = tpl.bodyText || "";
+              const matches = templateBodyText.match(/\{\{\s*\d+\s*\}\}/g);
+              expectedCount = matches ? new Set(matches).size : 0;
             }
+          }
+
+          if (expectedCount > 0) {
+            params = this.resolveTemplateParams(campaign, recipient, expectedCount);
+          } else if (expectedCount === 0) {
+            params = [];
+          } else {
+            // expectedCount === -1 (messageTemplateRepo not provided)
+            const mapKeys = campaign.variableMapping ? Object.keys(campaign.variableMapping) : [];
+            if (mapKeys.length > 0) {
+              params = this.resolveTemplateParams(campaign, recipient, mapKeys.length);
+            } else {
+              params = recipient.name ? [recipient.name] : [];
+            }
+          }
+
+          if (templateBodyText) {
+            let interpolated = templateBodyText;
+            params.forEach((val, idx) => {
+              interpolated = interpolated.replace(new RegExp(`\\{\\{\\s*${idx + 1}\\s*\\}\\}`, "g"), val);
+            });
+            finalSentBody = interpolated;
           }
 
           result = await this.whatsAppSender.sendTemplate(
@@ -97,13 +113,14 @@ export class ProcessCampaignBatchUseCase {
             params,
           );
         } else {
-          const finalBody = this.interpolateMessage(campaign, recipient);
-          result = await this.whatsAppSender.sendText(recipient.phone, finalBody);
+          finalSentBody = this.interpolateMessage(campaign, recipient);
+          result = await this.whatsAppSender.sendText(recipient.phone, finalSentBody);
         }
 
         await this.recipientRepo.updateStatus(recipient.id, "SENT", {
           externalId: result.externalId,
           sentAt: new Date(),
+          customBody: finalSentBody ?? recipient.customBody,
         });
         await this.campaignRepo.incrementCounters(campaignId, { sent: 1 });
         this.logger.info(
@@ -114,6 +131,7 @@ export class ProcessCampaignBatchUseCase {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await this.recipientRepo.updateStatus(recipient.id, "FAILED", {
           errorMessage,
+          customBody: finalSentBody ?? recipient.customBody,
         });
         await this.campaignRepo.incrementCounters(campaignId, { failed: 1 });
         this.logger.error(
@@ -143,6 +161,110 @@ export class ProcessCampaignBatchUseCase {
     return { finished: false, processedCount };
   }
 
+  private resolveTemplateParams(
+    campaign: Campaign,
+    recipient: CampaignRecipient,
+    expectedCount: number,
+  ): string[] {
+    const params: string[] = [];
+    const mapping = campaign.variableMapping || {};
+
+    for (let i = 1; i <= expectedCount; i++) {
+      let val: string | undefined;
+
+      const mappedCol =
+        mapping[String(i)] ||
+        mapping[`{{${i}}}`] ||
+        mapping[`${i}`] ||
+        mapping[Object.keys(mapping)[i - 1] ?? ""];
+
+      if (mappedCol) {
+        const cleanCol = String(mappedCol).replace(/^columna:\s*/i, "").trim();
+        val = this.getVariableFromRecipient(recipient, cleanCol);
+      }
+
+      if (val === undefined) {
+        val =
+          this.getVariableFromRecipient(recipient, String(i)) ??
+          this.getVariableFromRecipient(recipient, `{{${i}}}`);
+      }
+
+      if (val === undefined) {
+        const customVariables = this.getCustomVariablesFromRecipient(recipient);
+        if (customVariables.length >= i) {
+          val = customVariables[i - 1]?.value;
+        }
+      }
+
+      if (val === undefined) {
+        if (i === 1) {
+          val = recipient.name ?? "";
+        } else if (i === 2) {
+          val = recipient.phone;
+        } else {
+          val = "";
+        }
+      }
+
+      params.push(val);
+    }
+
+    return params;
+  }
+
+  private getCustomVariablesFromRecipient(recipient: CampaignRecipient): Array<{ key: string; value: string }> {
+    if (!recipient.variables) return [];
+    const ignored = new Set([
+      "number",
+      "telefono",
+      "phone",
+      "celular",
+      "movil",
+      "numero",
+      "wa_phone",
+      "tel",
+      "name",
+      "nombre",
+      "contacto",
+      "cliente",
+      "body",
+      "custombody",
+      "mensaje",
+      "message",
+    ]);
+
+    const result: Array<{ key: string; value: string }> = [];
+    for (const [k, v] of Object.entries(recipient.variables)) {
+      const cleanK = k.replace(/^columna:\s*/i, "").trim().toLowerCase();
+      if (!cleanK || cleanK.startsWith("__empty") || ignored.has(cleanK)) {
+        continue;
+      }
+      result.push({ key: k, value: String(v) });
+    }
+
+    return result;
+  }
+
+  private getVariableFromRecipient(recipient: CampaignRecipient, colName: string): string | undefined {
+    if (!colName) return undefined;
+    const target = colName.trim().toLowerCase();
+
+    if (recipient.variables) {
+      for (const [k, v] of Object.entries(recipient.variables)) {
+        const cleanK = k.replace(/^columna:\s*/i, "").trim().toLowerCase();
+        if (cleanK === target || k.trim().toLowerCase() === target) {
+          return String(v);
+        }
+      }
+    }
+
+    if (target === "name" || target === "nombre") return recipient.name ?? undefined;
+    if (target === "phone" || target === "telefono" || target === "number") return recipient.phone;
+    if (target === "custombody" || target === "mensaje") return recipient.customBody ?? undefined;
+
+    return undefined;
+  }
+
   private interpolateMessage(campaign: Campaign, recipient: CampaignRecipient): string {
     if (recipient.customBody && recipient.customBody.trim().length > 0) {
       return recipient.customBody.trim();
@@ -154,6 +276,17 @@ export class ProcessCampaignBatchUseCase {
     text = text.replace(/\{\{\s*number\s*\}\}/gi, recipient.phone);
     text = text.replace(/\{\{\s*phone\s*\}\}/gi, recipient.phone);
     text = text.replace(/\{\{\s*telefono\s*\}\}/gi, recipient.phone);
+
+    if (recipient.variables) {
+      for (const [key, val] of Object.entries(recipient.variables)) {
+        const cleanKey = key.replace(/^columna:\s*/i, "").trim();
+        if (cleanKey) {
+          const escapedKey = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          text = text.replace(new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, "gi"), String(val));
+          text = text.replace(new RegExp(`\\{\\{\\s*columna:\\s*${escapedKey}\\s*\\}\\}`, "gi"), String(val));
+        }
+      }
+    }
 
     if (campaign.contactEnrichment?.additionalFields) {
       for (const [key, val] of Object.entries(campaign.contactEnrichment.additionalFields)) {

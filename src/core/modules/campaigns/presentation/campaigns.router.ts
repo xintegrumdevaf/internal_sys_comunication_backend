@@ -51,6 +51,8 @@ const createCampaignBodySchema = z.object({
     .optional(),
   templateName: z.string().nullable().optional(),
   templateLanguage: z.string().nullable().optional(),
+  variableMapping: z.record(z.string(), z.string()).optional(),
+  templateVariables: z.record(z.string(), z.string()).optional(),
 });
 
 const listFilterSchema = z.object({

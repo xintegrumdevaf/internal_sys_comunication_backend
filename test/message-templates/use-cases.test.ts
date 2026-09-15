@@ -3,6 +3,7 @@ import { CreateMessageTemplateUseCase } from "../../src/core/modules/message-tem
 import { ListMessageTemplatesUseCase } from "../../src/core/modules/message-templates/application/use-cases/list-message-templates.use-case";
 import { DeleteMessageTemplateUseCase } from "../../src/core/modules/message-templates/application/use-cases/delete-message-template.use-case";
 import { SyncTemplateStatusUseCase } from "../../src/core/modules/message-templates/application/use-cases/sync-template-status.use-case";
+import { SyncRemoteTemplatesUseCase } from "../../src/core/modules/message-templates/application/use-cases/sync-remote-templates.use-case";
 import { RealtimeBroadcaster } from "../../src/core/modules/realtime/application/realtime-broadcaster";
 import {
   MessageTemplateRepositoryFake,
@@ -208,5 +209,67 @@ describe("MessageTemplates Use Cases", () => {
     expect(updated2.status).toBe("REJECTED");
     expect(updated2.rejectedReason).toBe("INSUFFICIENT_PROMOTION_DETAILS");
     expect(publishedEvents.length).toBe(2);
+  });
+
+  it("SyncRemoteTemplatesUseCase: descarga plantillas remotas y crea las faltantes / actualiza existentes", async () => {
+    const templateRepo = new MessageTemplateRepositoryFake();
+    const metaGateway = new MetaTemplatesGatewayFake();
+    const broadcaster = new RealtimeBroadcaster();
+
+    // Mock fetchAllTemplates
+    metaGateway.fetchAllTemplates = async () => [
+      {
+        metaTemplateId: "zernio-101",
+        name: "prueba_varible",
+        category: "MARKETING",
+        language: "es_EC",
+        headerType: "NONE",
+        bodyText: "Hola {{1}}, esto es una prueba mas",
+        status: "APPROVED",
+      },
+      {
+        metaTemplateId: "zernio-102",
+        name: "prueba_test",
+        category: "MARKETING",
+        language: "es_EC",
+        headerType: "NONE",
+        bodyText: "Buenos dias esta va a ser una prueba",
+        status: "APPROVED",
+      },
+    ];
+
+    // Crear plantilla obsoleta en BD local que no está en Zernio
+    await templateRepo.create({
+      id: "tpl-stale-1",
+      name: "prueba_envio_informacion",
+      category: "MARKETING",
+      language: "es_EC",
+      headerType: "NONE",
+      headerContent: null,
+      bodyText: "Texto de plantilla obsoleta",
+      footerText: null,
+      buttons: null,
+      status: "APPROVED",
+      metaTemplateId: "stale-1",
+      rejectedReason: null,
+    });
+
+    const syncRemote = new SyncRemoteTemplatesUseCase({ templateRepo, metaGateway, broadcaster });
+
+    const result = await syncRemote.execute();
+    expect(result.syncedCount).toBe(2);
+
+    const createdVarible = await templateRepo.findByName("prueba_varible");
+    expect(createdVarible).not.toBeNull();
+    expect(createdVarible?.status).toBe("APPROVED");
+    expect(createdVarible?.language).toBe("es_EC");
+
+    const createdTest = await templateRepo.findByName("prueba_test");
+    expect(createdTest).not.toBeNull();
+    expect(createdTest?.status).toBe("APPROVED");
+
+    // Verificar que la plantilla obsoleta fue eliminada de la BD local
+    const staleTemplate = await templateRepo.findByName("prueba_envio_informacion");
+    expect(staleTemplate).toBeNull();
   });
 });

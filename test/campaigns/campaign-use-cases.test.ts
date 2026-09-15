@@ -386,4 +386,152 @@ describe("Campaign Use Cases", () => {
 
     await expect(deleteUseCase.execute(running.id)).rejects.toThrow(/solo se pueden eliminar/i);
   });
+
+  it("ProcessCampaignBatchUseCase resuelve parámetros de plantilla dinámicamente usando variableMapping y variables del Excel por destinatario", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+    const templateRepo = new MessageTemplateRepositoryFake();
+
+    await templateRepo.create({
+      id: "tpl-var-1",
+      name: "prueba_varible",
+      language: "es_EC",
+      category: "MARKETING",
+      status: "APPROVED",
+      headerType: "NONE",
+      headerContent: null,
+      bodyText: "Hola buenos dias {{1}}, un gusto saludarte",
+      footerText: null,
+      buttons: null,
+      metaTemplateId: "9876543210",
+      rejectedReason: null,
+    });
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn(),
+      sendTemplate: vi.fn().mockResolvedValue({ externalId: "wa-template-var" }),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña Mapeo CASH",
+      templateName: "prueba_varible",
+      templateLanguage: "es_EC",
+      variableMapping: { "1": "Columna: CASH" },
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      {
+        phone: "+593999183597",
+        name: "A prueba 1",
+        variables: { "Columna: CASH": "22", CASH: "22", NOMBRE: "A prueba 1" },
+      },
+      {
+        phone: "+59390948957",
+        name: "A prueba 2",
+        variables: { "Columna: CASH": "23", CASH: "23", NOMBRE: "A prueba 2" },
+      },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 2);
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+      templateRepo,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+
+    expect(result.finished).toBe(true);
+    expect(mockSender.sendTemplate).toHaveBeenNthCalledWith(
+      1,
+      "+593999183597",
+      "prueba_varible",
+      "es_EC",
+      ["22"],
+    );
+    expect(mockSender.sendTemplate).toHaveBeenNthCalledWith(
+      2,
+      "+59390948957",
+      "prueba_varible",
+      "es_EC",
+      ["23"],
+    );
+  });
+
+  it("ProcessCampaignBatchUseCase usa la columna personalizada CASH como parámetro 1 por inferencia si variableMapping viene vacío", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+    const templateRepo = new MessageTemplateRepositoryFake();
+
+    await templateRepo.create({
+      id: "tpl-var-2",
+      name: "prueba_varible",
+      language: "es_EC",
+      category: "MARKETING",
+      status: "APPROVED",
+      headerType: "NONE",
+      headerContent: null,
+      bodyText: "Hola buenos dias {{1}}, un gusto saludarte",
+      footerText: null,
+      buttons: null,
+      metaTemplateId: "9876543211",
+      rejectedReason: null,
+    });
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn(),
+      sendTemplate: vi.fn().mockResolvedValue({ externalId: "wa-template-infer" }),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña Inferida CASH",
+      templateName: "prueba_varible",
+      templateLanguage: "es_EC",
+      variableMapping: {},
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      {
+        phone: "+593999183597",
+        name: "A prueba 1",
+        variables: { CASH: "22", NAME: "A prueba 1", NUMBER: "593999183597" },
+      },
+      {
+        phone: "+59390948957",
+        name: "A prueba 2",
+        variables: { CASH: "23", NAME: "A prueba 2", NUMBER: "59390948957" },
+      },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 2);
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+      templateRepo,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+
+    expect(result.finished).toBe(true);
+    expect(mockSender.sendTemplate).toHaveBeenNthCalledWith(
+      1,
+      "+593999183597",
+      "prueba_varible",
+      "es_EC",
+      ["22"],
+    );
+    expect(mockSender.sendTemplate).toHaveBeenNthCalledWith(
+      2,
+      "+59390948957",
+      "prueba_varible",
+      "es_EC",
+      ["23"],
+    );
+  });
 });

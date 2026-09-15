@@ -6,6 +6,7 @@ import type { CreateMessageTemplateUseCase } from "../application/use-cases/crea
 import type { ListMessageTemplatesUseCase } from "../application/use-cases/list-message-templates.use-case";
 import type { DeleteMessageTemplateUseCase } from "../application/use-cases/delete-message-template.use-case";
 import type { SyncTemplateStatusUseCase } from "../application/use-cases/sync-template-status.use-case";
+import type { SyncRemoteTemplatesUseCase } from "../application/use-cases/sync-remote-templates.use-case";
 import type { MessageTemplateRepositoryPort } from "../application/ports/message-template.repository.port";
 
 export type MessageTemplatesRouterDeps = {
@@ -13,6 +14,7 @@ export type MessageTemplatesRouterDeps = {
   listTemplates: ListMessageTemplatesUseCase;
   deleteTemplate: DeleteMessageTemplateUseCase;
   syncTemplateStatus: SyncTemplateStatusUseCase;
+  syncRemoteTemplates?: SyncRemoteTemplatesUseCase;
   templateRepo: MessageTemplateRepositoryPort;
 };
 
@@ -125,16 +127,26 @@ export function createMessageTemplatesRouter(deps: MessageTemplatesRouterDeps): 
   router.post("/api/message-templates/sync-all", async (req, res, next) => {
     try {
       requireAuth(req);
-      const templatesResult = await deps.templateRepo.list({});
-      const pending = templatesResult.templates.filter((t) => t.status === "PENDING" && t.metaTemplateId);
-      const updatedList = [];
-      for (const t of pending) {
-        try {
-          const updated = await deps.syncTemplateStatus.execute({ id: t.id });
-          updatedList.push(updated);
-        } catch (_) {}
+      if (deps.syncRemoteTemplates) {
+        const result = await deps.syncRemoteTemplates.execute();
+        res.json({
+          data: result.templates,
+          syncedCount: result.syncedCount,
+          createdCount: result.createdCount,
+          updatedCount: result.updatedCount,
+        });
+      } else {
+        const templatesResult = await deps.templateRepo.list({});
+        const pending = templatesResult.templates.filter((t) => t.status === "PENDING" && t.metaTemplateId);
+        const updatedList = [];
+        for (const t of pending) {
+          try {
+            const updated = await deps.syncTemplateStatus.execute({ id: t.id });
+            updatedList.push(updated);
+          } catch (_) {}
+        }
+        res.json({ data: updatedList, syncedCount: updatedList.length });
       }
-      res.json({ data: updatedList, syncedCount: updatedList.length });
     } catch (error) {
       handleZodOrNext(error, next);
     }

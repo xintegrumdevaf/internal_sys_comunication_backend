@@ -33,6 +33,7 @@ import { CreateMessageTemplateUseCase } from "../modules/message-templates/appli
 import { ListMessageTemplatesUseCase } from "../modules/message-templates/application/use-cases/list-message-templates.use-case";
 import { DeleteMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/delete-message-template.use-case";
 import { SyncTemplateStatusUseCase } from "../modules/message-templates/application/use-cases/sync-template-status.use-case";
+import { SyncRemoteTemplatesUseCase } from "../modules/message-templates/application/use-cases/sync-remote-templates.use-case";
 import { createMessageTemplatesRouter } from "../modules/message-templates/presentation/message-templates.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
@@ -414,6 +415,11 @@ export function createContainer(): Container {
     metaGateway: metaTemplatesGateway,
     broadcaster,
   });
+  const syncRemoteTemplates = new SyncRemoteTemplatesUseCase({
+    templateRepo: messageTemplateRepo,
+    metaGateway: metaTemplatesGateway,
+    broadcaster,
+  });
 
   // --- Chat interno staff (Etapa 11) ---
   const internalThreadRepo = new PostgresInternalThreadRepository(pgPool);
@@ -691,7 +697,12 @@ export function createContainer(): Container {
   const suspendCampaign = new SuspendCampaignUseCase(campaignRepo);
   const resumeCampaign = new ResumeCampaignUseCase(campaignRepo, campaignWorker);
   const listCampaigns = new ListCampaignsUseCase(campaignRepo);
-  const getCampaign = new GetCampaignUseCase(campaignRepo, campaignRecipientRepo);
+  const getCampaign = new GetCampaignUseCase(
+    campaignRepo,
+    campaignRecipientRepo,
+    whatsappSender,
+    messageTemplateRepo,
+  );
   const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
 
   // --- Zernio Historical Sync (Worker + Use Cases) ---
@@ -730,7 +741,16 @@ export function createContainer(): Container {
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
   app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
-  app.use(createZernioWebhookRouter({ env, receiveInboundMessage, redisClient, zernioSender }));
+  app.use(
+    createZernioWebhookRouter({
+      env,
+      receiveInboundMessage,
+      redisClient,
+      zernioSender,
+      recipientRepo: campaignRecipientRepo,
+      campaignRepo,
+    }),
+  );
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
   // §1.b) — health, metrics y el webhook de WhatsApp quedan afuera a proposito (no
@@ -835,6 +855,7 @@ export function createContainer(): Container {
       listTemplates: listMessageTemplates,
       deleteTemplate: deleteMessageTemplate,
       syncTemplateStatus,
+      syncRemoteTemplates,
       templateRepo: messageTemplateRepo,
     }),
   );

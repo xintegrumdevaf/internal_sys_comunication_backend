@@ -10,4 +10,8 @@ export interface WhatsAppSenderPort {
     languageCode?: string,
     parameters?: string[],
   ): Promise<{ externalId: string }>;
+  checkMessageStatus?(
+    waPhone: string,
+    externalId: string,
+  ): Promise<{ status: "sent" | "delivered" | "failed"; errorMessage?: string } | null>;
 }

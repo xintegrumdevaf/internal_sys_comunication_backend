@@ -14,6 +14,8 @@ export type CreateCampaignInput = {
   contactEnrichment?: Partial<CampaignContactEnrichment>;
   templateName?: string | null;
   templateLanguage?: string | null;
+  variableMapping?: Record<string, string>;
+  templateVariables?: Record<string, string>;
 };
 
 export type ListCampaignsFilter = {

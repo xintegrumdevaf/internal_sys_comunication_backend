@@ -6,6 +6,7 @@ export interface CampaignRecipient {
   phone: string;
   name: string | null;
   customBody: string | null;
+  variables?: Record<string, string>;
   status: RecipientStatus;
   externalId: string | null;
   errorMessage: string | null;

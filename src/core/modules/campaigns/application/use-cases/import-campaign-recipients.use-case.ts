@@ -42,6 +42,11 @@ export class ImportCampaignRecipientsUseCase {
 
       const counts = await this.recipientRepo.countByCampaign(campaignId);
       await this.campaignRepo.updateTotalRecipients(campaignId, counts.total);
+    } else if (parseResult.errors.length > 0) {
+      const mainReason =
+        parseResult.errors[0]?.reason ||
+        "El archivo de destinatarios no contiene números de teléfono válidos.";
+      throw new Error(mainReason);
     }
 
     return {

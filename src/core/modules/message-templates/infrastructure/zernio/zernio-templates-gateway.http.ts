@@ -2,10 +2,11 @@ import { resolveHeaderMediaUrl } from "../meta/meta-media-uploader";
 import { externalServiceError, validationError } from "../../../../../shared/errors/domain-errors";
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { MessageTemplateStatus } from "../../domain/message-template.entity";
+import type { MessageTemplateCategory, MessageTemplateHeaderType, MessageTemplateStatus, TemplateButton } from "../../domain/message-template.entity";
 import type {
   FetchTemplateStatusResult,
   MetaTemplatesGatewayPort,
+  RemoteTemplateItem,
   SubmitTemplateInput,
   SubmitTemplateResult,
 } from "../../application/ports/meta-templates-gateway.port";
@@ -252,6 +253,100 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
     } catch (error) {
       this.logger.error({ err: error }, "Fallo de red al eliminar plantilla en Zernio");
       return false;
+    }
+  }
+
+  async fetchAllTemplates(): Promise<RemoteTemplateItem[]> {
+    const accountId = await this.getAccountId();
+    const url = `${this.baseUrl}/whatsapp/templates?accountId=${encodeURIComponent(accountId)}`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error({ status: response.status, body: errorText }, "Error al listar plantillas de Zernio");
+        throw externalServiceError(`Error al consultar plantillas en Zernio (${response.status}): ${errorText}`);
+      }
+
+      const data = (await response.json()) as Record<string, unknown>;
+      const rawTemplates = (Array.isArray(data)
+        ? data
+        : Array.isArray(data.templates)
+        ? data.templates
+        : Array.isArray(data.data)
+        ? data.data
+        : []) as Array<Record<string, unknown>>;
+
+      return rawTemplates.map((raw) => {
+        const rawStatus = String(raw.status || "APPROVED").toUpperCase();
+        let status: MessageTemplateStatus = "APPROVED";
+        if (rawStatus === "APPROVED") status = "APPROVED";
+        else if (rawStatus === "REJECTED") status = "REJECTED";
+        else if (rawStatus === "PENDING") status = "PENDING";
+        else if (rawStatus === "PAUSED") status = "PAUSED";
+
+        const rawCat = String(raw.category || "MARKETING").toUpperCase();
+        let category: MessageTemplateCategory = "MARKETING";
+        if (rawCat === "UTILITY") category = "UTILITY";
+        else if (rawCat === "AUTHENTICATION") category = "AUTHENTICATION";
+
+        let bodyText = "";
+        let headerType: MessageTemplateHeaderType = "NONE";
+        let headerContent: string | null = null;
+        let footerText: string | null = null;
+        let buttons: TemplateButton[] | null = null;
+
+        if (Array.isArray(raw.components)) {
+          for (const comp of raw.components as Array<Record<string, unknown>>) {
+            const type = String(comp.type || "").toLowerCase();
+            if (type === "body") {
+              bodyText = String(comp.text || "");
+            } else if (type === "header") {
+              const format = String(comp.format || "").toUpperCase();
+              if (format === "TEXT") {
+                headerType = "TEXT";
+                headerContent = String(comp.text || "");
+              } else if (format === "IMAGE") headerType = "IMAGE";
+              else if (format === "VIDEO") headerType = "VIDEO";
+              else if (format === "DOCUMENT") headerType = "DOCUMENT";
+            } else if (type === "footer") {
+              footerText = String(comp.text || "");
+            } else if (type === "buttons" && Array.isArray(comp.buttons)) {
+              buttons = (comp.buttons as Array<Record<string, unknown>>).map((b) => {
+                const bType = String(b.type || "").toUpperCase();
+                return {
+                  type: bType === "URL" ? "URL" : bType === "PHONE_NUMBER" ? "PHONE_NUMBER" : "QUICK_REPLY",
+                  text: String(b.text || ""),
+                  url: b.url ? String(b.url) : undefined,
+                  phoneNumber: b.phone_number ? String(b.phone_number) : undefined,
+                };
+              });
+            }
+          }
+        }
+
+        return {
+          metaTemplateId: String(raw.id || raw._id || raw.metaTemplateId || raw.name || ""),
+          name: String(raw.name || ""),
+          category,
+          language: String(raw.language || "es"),
+          headerType,
+          headerContent,
+          bodyText: bodyText || `Plantilla ${raw.name}`,
+          footerText,
+          buttons,
+          status,
+          rejectedReason: raw.rejected_reason ? String(raw.rejected_reason) : null,
+        };
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AppError") throw error;
+      throw externalServiceError(error instanceof Error ? error.message : "Error al obtener plantillas desde Zernio");
     }
   }
 }

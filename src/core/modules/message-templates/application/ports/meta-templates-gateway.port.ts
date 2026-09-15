@@ -27,8 +27,24 @@ export interface FetchTemplateStatusResult {
   rejectedReason?: string | null;
 }
 
+export interface RemoteTemplateItem {
+  metaTemplateId: string;
+  name: string;
+  category: MessageTemplateCategory;
+  language: string;
+  headerType: MessageTemplateHeaderType;
+  headerContent?: string | null;
+  bodyText: string;
+  footerText?: string | null;
+  buttons?: TemplateButton[] | null;
+  status: MessageTemplateStatus;
+  rejectedReason?: string | null;
+}
+
 export interface MetaTemplatesGatewayPort {
   submitTemplate(template: SubmitTemplateInput): Promise<SubmitTemplateResult>;
   fetchTemplateStatus(metaTemplateId: string): Promise<FetchTemplateStatusResult>;
   deleteTemplate(metaTemplateId: string, name: string): Promise<boolean>;
+  fetchAllTemplates?(): Promise<RemoteTemplateItem[]>;
 }
+
