@@ -144,10 +144,13 @@ CREATE TABLE message (
   caption          TEXT,
   filename         TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  edited_at        TIMESTAMPTZ,                 -- nullable: timestamp de la última edición si fue editado
+  edit_history     JSONB NOT NULL DEFAULT '[]', -- historial de ediciones [{ previousBody, editedAt }]
   UNIQUE (conversation_id, external_id)          -- idempotencia de ingesta
 );
 CREATE INDEX idx_message_conversation ON message(conversation_id, created_at);
 CREATE INDEX idx_message_agent ON message(agent_id) WHERE agent_id IS NOT NULL;
+CREATE INDEX idx_message_edited ON message(conversation_id, edited_at) WHERE edited_at IS NOT NULL;
 
 CREATE TABLE case (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

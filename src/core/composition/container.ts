@@ -51,6 +51,7 @@ import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/what
 import { ZernioSenderHttp } from "../modules/conversations/infrastructure/zernio/zernio-sender.http";
 import type { WhatsAppSenderPort } from "../modules/conversations/application/ports/whatsapp-sender.port";
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
+import { ReceiveInboundEditUseCase } from "../modules/conversations/application/use-cases/receive-inbound-edit.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
 import { ListMessagesUseCase } from "../modules/conversations/application/use-cases/list-messages.use-case";
 import { MarkConversationAsReadUseCase } from "../modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
@@ -638,6 +639,15 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
   });
+  const receiveInboundEdit = new ReceiveInboundEditUseCase({
+    conversationRepo,
+    messageRepo,
+    redisClient,
+    logger: conversationsLogger,
+    inboundBuffer,
+    broadcaster,
+    caseRepo,
+  });
   const listConversations = new ListConversationsUseCase(
     conversationRepo,
     messageRepo,
@@ -772,7 +782,7 @@ export function createContainer(): Container {
 
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
-  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
+  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus, receiveInboundEdit }));
   app.use(createZernioWebhookRouter({ env, receiveInboundMessage, redisClient, zernioSender }));
 
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md

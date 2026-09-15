@@ -268,6 +268,26 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     }
     return map;
   }
+
+  async updateMessageBodyByExternalId(
+    externalId: string,
+    newBody: string,
+  ): Promise<{ updated: boolean; message: Message | null }> {
+    const msg = this.messages.find((m) => m.externalId === externalId);
+    if (!msg) return { updated: false, message: null };
+    const prev = msg.body;
+    msg.body = newBody;
+    msg.editedAt = new Date();
+    msg.editHistory = [
+      ...(msg.editHistory || []),
+      { previousBody: prev, editedAt: new Date().toISOString() },
+    ];
+    return { updated: true, message: msg };
+  }
+
+  async findByExternalId(externalId: string): Promise<Message | null> {
+    return this.messages.find((m) => m.externalId === externalId) || null;
+  }
 }
 
 export class WhatsAppSenderFake implements WhatsAppSenderPort {

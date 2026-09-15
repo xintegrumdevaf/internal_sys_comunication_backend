@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseWhatsAppWebhookPayload } from "../../src/core/modules/conversations/infrastructure/whatsapp/parse-whatsapp-webhook";
+import {
+  parseWhatsAppWebhookPayload,
+  parseWhatsAppWebhookEdits,
+} from "../../src/core/modules/conversations/infrastructure/whatsapp/parse-whatsapp-webhook";
 
 /**
  * Payloads reales segun "messages webhook reference" de Meta
@@ -108,4 +111,104 @@ describe("parseWhatsAppWebhookPayload — contacts[].profile.name", () => {
     expect(normalized?.waProfileName).toBe("Carla");
     expect(normalized?.mediaId).toBe("media-1");
   });
+
+  it("ignora mensajes de tipo edit en parseWhatsAppWebhookPayload", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "16505551234",
+                    id: "wamid.EDIT1",
+                    type: "edit",
+                    timestamp: "1710000000",
+                    edit: {
+                      original_message_id: "wamid.ORIG1",
+                      message: { text: { body: "Texto corregido" } },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const messages = parseWhatsAppWebhookPayload(payload);
+    expect(messages).toHaveLength(0);
+  });
 });
+
+describe("parseWhatsAppWebhookEdits", () => {
+  it("extrae correctamente la edición de un mensaje con original_message_id y nuevo body", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "16505551234",
+                    id: "wamid.EDIT_EVENT_123",
+                    type: "edit",
+                    timestamp: "1710000005",
+                    edit: {
+                      original_message_id: "wamid.ORIG_MSG_001",
+                      message: {
+                        text: {
+                          body: "Mi número de cédula corregido es 12345678",
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const edits = parseWhatsAppWebhookEdits(payload);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toEqual({
+      waPhone: "16505551234",
+      originalExternalId: "wamid.ORIG_MSG_001",
+      newExternalId: "wamid.EDIT_EVENT_123",
+      newBody: "Mi número de cédula corregido es 12345678",
+      timestamp: "1710000005",
+    });
+  });
+
+  it("devuelve array vacío si no hay mensajes de tipo edit", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "16505551234",
+                    id: "wamid.NORM_1",
+                    type: "text",
+                    text: { body: "mensaje normal" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const edits = parseWhatsAppWebhookEdits(payload);
+    expect(edits).toEqual([]);
+  });
+});
+

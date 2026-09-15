@@ -13,15 +13,26 @@ type WhatsAppMediaObject = {
 
 type WhatsAppDocumentObject = WhatsAppMediaObject & { filename?: string };
 
+type WhatsAppEditObject = {
+  original_message_id: string;
+  message?: {
+    type?: string;
+    text?: { body: string };
+    context?: { id?: string };
+  };
+};
+
 type WhatsAppInboundMessage = {
   from: string;
   id: string;
   type: string;
+  timestamp?: string;
   text?: { body: string };
   image?: WhatsAppMediaObject;
   audio?: WhatsAppMediaObject;
   video?: WhatsAppMediaObject;
   document?: WhatsAppDocumentObject;
+  edit?: WhatsAppEditObject;
 };
 
 type WhatsAppContact = {
@@ -72,6 +83,14 @@ export type NormalizedInboundMessage = {
   waProfileName: string | null;
 };
 
+export type NormalizedInboundEdit = {
+  waPhone: string;
+  originalExternalId: string;
+  newExternalId: string;
+  newBody: string;
+  timestamp?: string;
+};
+
 export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInboundMessage[] {
   const typed = payload as WhatsAppWebhookPayload;
   const normalized: NormalizedInboundMessage[] = [];
@@ -86,6 +105,7 @@ export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInbound
       }
 
       for (const raw of change.value?.messages ?? []) {
+        if (raw.type === "edit") continue;
         normalized.push(normalizeMessage(raw, profileNameByWaId.get(raw.from) ?? null));
       }
     }
@@ -169,4 +189,28 @@ export function parseWhatsAppTemplateStatusUpdates(payload: unknown): Normalized
   }
 
   return updates;
+}
+
+export function parseWhatsAppWebhookEdits(payload: unknown): NormalizedInboundEdit[] {
+  const typed = payload as WhatsAppWebhookPayload;
+  const edits: NormalizedInboundEdit[] = [];
+
+  for (const entry of typed.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      for (const raw of change.value?.messages ?? []) {
+        if (raw.type === "edit" && raw.edit?.original_message_id) {
+          const newBody = raw.edit.message?.text?.body ?? raw.text?.body ?? "";
+          edits.push({
+            waPhone: raw.from,
+            originalExternalId: raw.edit.original_message_id,
+            newExternalId: raw.id,
+            newBody,
+            timestamp: raw.timestamp,
+          });
+        }
+      }
+    }
+  }
+
+  return edits;
 }
