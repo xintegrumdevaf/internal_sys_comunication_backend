@@ -71,12 +71,20 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
 
     // 1. La IA es la única fuente de verdad: determina si hay una pregunta concreta de negocio para RAG
     const hasExplicitQuestion =
-      typeof entities?.question === "string" && entities.question.trim().length > 3;
+      (typeof entities?.question === "string" && entities.question.trim().length > 3) ||
+      (typeof entities?.answer === "string" &&
+        entities.answer.trim().length > 3 &&
+        !/^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(entities.answer.trim()));
 
     // 2. Si la AI determino que es un saludo (isGreeting) o no extrajo ninguna pregunta de negocio:
+    const rawText = typeof text === "string" ? text.trim() : "";
+    const isRawGreetingOnly =
+      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(rawText);
+
     const isGreeting =
       entities?.isGreeting === true ||
       entities?.is_greeting === true ||
+      isRawGreetingOnly ||
       (!hasExplicitQuestion && !entities?.location);
 
     if (isGreeting) {
@@ -87,13 +95,16 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
         found: true,
       };
       return {
-        type: "COMPLETED",
+        type: "WAITING_USER",
+        nextState: "WAITING_USER_INQUIRY",
         context: withContext(nextData, context),
       };
     }
 
     const question = hasExplicitQuestion
-      ? (entities!.question as string).trim()
+      ? typeof entities?.question === "string" && entities.question.trim().length > 3
+        ? (entities.question as string).trim()
+        : (entities!.answer as string).trim()
       : typeof entities?.location === "string"
         ? `¿Tienen cobertura en ${entities.location}?`
         : typeof text === "string"
@@ -201,11 +212,20 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     return { type: "WAITING_USER", nextState: "WAITING_USER_SPECIALIST", context: waiting };
   };
 
+  const waitingUserInquiry: WorkflowStateHandler = async (input) => {
+    return queryKnowledgeBase(input);
+  };
+
   return {
     workflowType: "GENERAL_INQUIRY",
     initialState: "QUERY_KNOWLEDGE_BASE",
     expirationHours: 24,
     waitingSteps: {
+      WAITING_USER_INQUIRY: {
+        pendingQuestion: "{{answer}}",
+        requireAny: ["answer", "question"],
+        maxAttempts: 3,
+      },
       WAITING_USER_SPECIALIST: {
         pendingQuestion:
           "¿Te gustaría que un especialista de ventas te contacte para ayudarte con el proceso de contratación o cambio de plan?",
@@ -214,6 +234,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
       },
     },
     replyTemplates: {
+      WAITING_USER_INQUIRY: "{{answer}}",
       RESPOND_ANSWER: "{{answer}}",
       COMPLETED: "{{answer}}",
       WAITING_USER_SPECIALIST:
@@ -225,6 +246,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     states: {
       QUERY_KNOWLEDGE_BASE: queryKnowledgeBase,
       RESPOND_ANSWER: respondAnswer,
+      WAITING_USER_INQUIRY: waitingUserInquiry,
       WAITING_USER_SPECIALIST: waitingUserSpecialist,
     },
   };

@@ -4,10 +4,13 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { ClaimCaseUseCase } from "../../../escalation/application/use-cases/claim-case.use-case";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
+import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
 
 /**
  * Un agente toma control de la conversación (03_API_CONTRACT.md §C.2 take-control):
- * reclama el caso activo (o el más reciente no terminal) y deshabilita automation.
+ * reclama el caso activo (o el más reciente no terminal, o crea uno nuevo de atención directa)
+ * y deshabilita automation.
  */
 export class TakeControlUseCase {
   constructor(
@@ -17,6 +20,7 @@ export class TakeControlUseCase {
       claimCase: ClaimCaseUseCase;
       logger: Logger;
       broadcaster?: RealtimeBroadcaster;
+      agentRepo?: AgentRepositoryPort;
     },
   ) {}
 
@@ -36,12 +40,36 @@ export class TakeControlUseCase {
     if (!caseId) {
       const cases = await this.deps.caseRepo.listByConversation(conversation.id);
       const candidate = cases.find(
-        (c) => c.status === "ESCALATED" || c.status === "HUMAN_ACTIVE" || c.status === "WAITING_USER",
+        (c) =>
+          c.status === "ESCALATED" ||
+          c.status === "HUMAN_ACTIVE" ||
+          c.status === "WAITING_USER" ||
+          c.status === "NEW" ||
+          c.status === "ACTIVE",
       );
-      if (!candidate) {
-        throw businessError("No hay caso activo o reclamable en esta conversación");
+      if (candidate) {
+        caseId = candidate.id;
+      } else {
+        // Si no hay ningún caso activo o reclamable (ej: el cliente solo envió un saludo "Hola"),
+        // creamos automáticamente un caso GENERAL_INQUIRY para que el agente humano tome control.
+        let departmentId: string | null = null;
+        if (this.deps.agentRepo) {
+          const agent = await this.deps.agentRepo.findById(input.agentUserId);
+          if (agent && agent.primaryDepartmentId) {
+            departmentId = agent.primaryDepartmentId;
+          }
+        }
+
+        const newCase = await this.deps.caseRepo.create({
+          conversationId: conversation.id,
+          workflowType: "GENERAL_INQUIRY",
+          departmentId,
+          context: emptyContextFor("GENERAL_INQUIRY"),
+          initialState: "HUMAN_DIRECT",
+          expiresAt: null,
+        });
+        caseId = newCase.case.id;
       }
-      caseId = candidate.id;
     }
 
     const aggregate = await this.deps.caseRepo.findById(caseId);
@@ -79,8 +107,15 @@ export class TakeControlUseCase {
       agentUserId: input.agentUserId,
     });
     this.deps.broadcaster?.publish({
+      type: "HUMAN_ASSIGNED",
+      caseId,
+      agentUserId: input.agentUserId,
+      conversationId: conversation.id,
+    });
+    this.deps.broadcaster?.publish({
       type: "AUTOMATION_DISABLED",
       caseId,
+      conversationId: conversation.id,
     });
 
     this.deps.logger.info(

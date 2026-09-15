@@ -381,7 +381,7 @@ describe("Zernio Historical Sync Architecture", () => {
 
       const routes = router.stack.map((layer) => ({
         path: layer.route?.path,
-        methods: layer.route?.methods,
+        methods: (layer.route as any)?.methods,
       }));
 
       expect(routes.some((r) => Array.isArray(r.path) ? r.path.includes("/api/conversations/sync-history") : r.path === "/api/conversations/sync-history")).toBe(true);

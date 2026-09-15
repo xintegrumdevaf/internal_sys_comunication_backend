@@ -292,7 +292,21 @@ Orden recomendado al armar la colección:
 
 ---
 
-## 14. Qué **no** es HTTP en esta API
+## 14. Respuestas Rápidas (Quick Replies estilo Whaticket)
+
+Atajos de respuesta predefinidos con variables dinámicas (`{{nombre}}`, `{{cedula}}`, `{{agente}}`, `{{telefono}}`), alcance General vs Departamento, y control de acceso por roles.
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/quick-replies` | sesión | Lista respuestas visibles (globales + asignadas al agente). Query: `departmentId` (opcional, uuid o `null`), `search` (opcional), `category` (opcional), `activeOnly` (booleano) |
+| `GET` | `/api/quick-replies/resolve` | sesión | Resuelve un atajo con interpolación de variables de contexto. Query: `shortcut` (requerido, ej. `saludo`), `departmentId` (opcional), `conversationId` (opcional) |
+| `POST` | `/api/quick-replies` | `admin` o `manager` | Crea una respuesta rápida. Body: `{ shortcut, title, body, departmentId?, category?, mediaUrl? }`. `manager` solo puede crear para su departamento; `admin` para cualquier departamento o global (`departmentId: null`) |
+| `PUT` | `/api/quick-replies/:id` | `admin` o `manager` | Actualiza una respuesta rápida existente. `manager` solo puede modificar las de su departamento |
+| `DELETE` | `/api/quick-replies/:id` | `admin` o `manager` | Elimina una respuesta rápida |
+
+---
+
+## 15. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.
