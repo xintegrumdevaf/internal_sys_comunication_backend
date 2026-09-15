@@ -11,6 +11,7 @@ import type {
 import type {
   FetchTemplateStatusResult,
   MetaTemplatesGatewayPort,
+  RemoteTemplateItem,
   SubmitTemplateInput,
   SubmitTemplateResult,
 } from "../../src/core/modules/message-templates/application/ports/meta-templates-gateway.port";
@@ -120,6 +121,7 @@ export class MetaTemplatesGatewayFake implements MetaTemplatesGatewayPort {
     string,
     { status: MessageTemplateStatus; rejectedReason?: string | null }
   >();
+  fetchAllTemplates?: () => Promise<RemoteTemplateItem[]>;
 
   async submitTemplate(template: SubmitTemplateInput): Promise<SubmitTemplateResult> {
     this.submitted.push(template);

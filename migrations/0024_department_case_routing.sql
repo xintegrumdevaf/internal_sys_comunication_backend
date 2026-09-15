@@ -1,4 +1,4 @@
--- Migración 0023: Enrutamiento dinámico de casos y responsabilidades por departamento
+-- Migración 0024: Enrutamiento dinámico de casos y responsabilidades por departamento
 -- Permite que los departamentos definan qué casos/intenciones atienden y si van con IA o humanos directos
 
 -- 1. Agregar columna description a la tabla department si no existe

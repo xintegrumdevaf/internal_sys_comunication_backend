@@ -57,6 +57,12 @@ export type RealtimeEvent =
       rejectedReason?: string | null;
     }
   | {
+      type: "MESSAGE_TEMPLATES_SYNCED";
+      syncedCount: number;
+      createdCount: number;
+      updatedCount: number;
+    }
+  | {
       type: "INTERNAL_MESSAGE_SENT";
       threadId: string;
       messageId: string;

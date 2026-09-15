@@ -1,4 +1,4 @@
--- Migración 0024: Respuestas Rápidas (Quick Replies / Fast Replies) estilo Whaticket
+-- Migración 0026: Respuestas Rápidas (Quick Replies / Fast Replies) estilo Whaticket
 -- Permite disponer de atajos predefinidos con variables dinámicas para agentes humanos y para la IA,
 -- con alcance General (department_id IS NULL) o por Departamento.
 
