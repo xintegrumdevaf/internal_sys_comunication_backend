@@ -42,6 +42,7 @@ import { UpdateQuickReplyUseCase } from "../modules/quick-replies/application/us
 import { DeleteQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/delete-quick-reply.use-case";
 import { ListQuickRepliesUseCase } from "../modules/quick-replies/application/use-cases/list-quick-replies.use-case";
 import { ResolveQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/resolve-quick-reply.use-case";
+import { RefineQuickReplyToneUseCase } from "../modules/quick-replies/application/use-cases/refine-quick-reply-tone.use-case";
 import { createQuickRepliesRouter } from "../modules/quick-replies/presentation/quick-replies.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
@@ -352,6 +353,7 @@ export function createContainer(): Container {
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
+  const refineQuickReplyTone = new RefineQuickReplyToneUseCase({ aiProvider });
 
   // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
   const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
@@ -907,6 +909,7 @@ export function createContainer(): Container {
       deleteQuickReply,
       listQuickReplies,
       resolveQuickReply,
+      refineTone: refineQuickReplyTone,
     }),
   );
   app.use(

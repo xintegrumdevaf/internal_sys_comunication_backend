@@ -12,6 +12,8 @@ import { UpdateQuickReplyUseCase } from "../../src/core/modules/quick-replies/ap
 import { DeleteQuickReplyUseCase } from "../../src/core/modules/quick-replies/application/use-cases/delete-quick-reply.use-case";
 import { ListQuickRepliesUseCase } from "../../src/core/modules/quick-replies/application/use-cases/list-quick-replies.use-case";
 import { ResolveQuickReplyUseCase } from "../../src/core/modules/quick-replies/application/use-cases/resolve-quick-reply.use-case";
+import { RefineQuickReplyToneUseCase } from "../../src/core/modules/quick-replies/application/use-cases/refine-quick-reply-tone.use-case";
+import { FakeAIProvider } from "../../src/core/modules/ai/infrastructure/fake/fake-ai.provider";
 import { createQuickRepliesRouter } from "../../src/core/modules/quick-replies/presentation/quick-replies.router";
 import type { Agent } from "../../src/core/modules/departments/domain/agent.entity";
 import type { Logger } from "../../src/shared/logging/logger";
@@ -53,6 +55,11 @@ describe("Quick Replies Router (Integration)", () => {
       catalogService,
       conversationRepo,
     });
+    const fakeAi = new FakeAIProvider();
+    fakeAi.refineTextToneImpl = async (input) => ({
+      refinedText: `Versión empática: ${input.text}`,
+    });
+    const refineTone = new RefineQuickReplyToneUseCase({ aiProvider: fakeAi });
 
     const router = createQuickRepliesRouter({
       createQuickReply,
@@ -60,6 +67,7 @@ describe("Quick Replies Router (Integration)", () => {
       deleteQuickReply,
       listQuickReplies,
       resolveQuickReply,
+      refineTone,
     });
 
     const app = express();
@@ -252,5 +260,51 @@ describe("Quick Replies Router (Integration)", () => {
     expect(res.status).toBe(204);
     const found = await quickReplyRepo.findById(qr.id);
     expect(found).toBeNull();
+  });
+
+  describe("POST /api/quick-replies/refine-tone", () => {
+    it("retorna 403 si el actor es de rol 'agent'", async () => {
+      currentActor = {
+        id: "agent-1",
+        name: "Agente Soporte",
+        email: "agente@isp.com",
+        role: "agent",
+        primaryDepartmentId: supportDeptId,
+        departmentIds: [supportDeptId],
+        active: true,
+        autoAssignEnabled: false,
+        mustChangePassword: false,
+        createdAt: new Date(),
+        passwordHash: null,
+      };
+
+      const app = buildApp();
+      const res = await supertest(app)
+        .post("/api/quick-replies/refine-tone")
+        .send({ text: "pasa tu cedula para ver" });
+
+      expect(res.status).toBe(403);
+      expect(res.body.type).toBe("AUTHORIZATION_ERROR");
+    });
+
+    it("retorna 400 si el texto tiene menos de 5 caracteres", async () => {
+      const app = buildApp();
+      const res = await supertest(app)
+        .post("/api/quick-replies/refine-tone")
+        .send({ text: "hola" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.type).toBe("VALIDATION_ERROR");
+    });
+
+    it("retorna 200 con refinedText cuando admin o manager lo invoca", async () => {
+      const app = buildApp();
+      const res = await supertest(app)
+        .post("/api/quick-replies/refine-tone")
+        .send({ text: "pasa tu cedula para ver tu deuda" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.refinedText).toBe("Versión empática: pasa tu cedula para ver tu deuda");
+    });
   });
 });

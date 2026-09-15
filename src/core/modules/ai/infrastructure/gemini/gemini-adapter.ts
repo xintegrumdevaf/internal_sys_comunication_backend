@@ -9,10 +9,13 @@ import type {
   InterpretationType,
   QualityAnalysis,
   ReceiptData,
+  RefineTextToneInput,
+  RefineTextToneOutput,
 } from "../../application/ports/ai-provider.port";
 import { buildInterpretMessagePrompt } from "../../application/prompts/interpret-message.prompt";
 import { buildComposeReplyPrompt } from "../../application/prompts/compose-reply.prompt";
 import { buildAnalyzeAgentConversationPrompt } from "../../application/prompts/analyze-agent-conversation.prompt";
+import { buildRefineQuickReplyTonePrompt } from "../../application/prompts/refine-quick-reply-tone.prompt";
 
 export type GeminiAdapterConfig = {
   apiKey: string;
@@ -85,6 +88,14 @@ export class GeminiAdapter implements AIProviderPort {
     const payload = this.buildBasePayload(system, user, { jsonMode: false, temperature: 0.55 });
     const raw = await this.callGemini(payload, this.config.timeoutMs);
     return raw.trim().replace(/^["']|["']$/g, "");
+  }
+
+  async refineTextTone(input: RefineTextToneInput): Promise<RefineTextToneOutput> {
+    const { system, user } = buildRefineQuickReplyTonePrompt(input);
+    const payload = this.buildBasePayload(system, user, { jsonMode: false, temperature: 0.3 });
+    const raw = await this.callGemini(payload, this.config.timeoutMs);
+    const refinedText = raw.trim().replace(/^["']|["']$/g, "").trim();
+    return { refinedText };
   }
 
   async transcribeAudio(mediaUrl: string, mimeType: string): Promise<{ transcript: string }> {

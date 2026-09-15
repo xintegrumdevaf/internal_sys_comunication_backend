@@ -9,10 +9,13 @@ import type {
   InterpretationType,
   QualityAnalysis,
   ReceiptData,
+  RefineTextToneInput,
+  RefineTextToneOutput,
 } from "../../application/ports/ai-provider.port";
 import { buildInterpretMessagePrompt } from "../../application/prompts/interpret-message.prompt";
 import { buildComposeReplyPrompt } from "../../application/prompts/compose-reply.prompt";
 import { buildAnalyzeAgentConversationPrompt } from "../../application/prompts/analyze-agent-conversation.prompt";
+import { buildRefineQuickReplyTonePrompt } from "../../application/prompts/refine-quick-reply-tone.prompt";
 
 export type OllamaAdapterConfig = {
   baseUrl: string;
@@ -136,6 +139,30 @@ export class OllamaAdapter implements AIProviderPort {
           timeoutMs,
         },
         "Ollama analisis de calidad FALLO",
+      );
+      throw error;
+    }
+  }
+
+  async refineTextTone(input: RefineTextToneInput): Promise<RefineTextToneOutput> {
+    const { system, user } = buildRefineQuickReplyTonePrompt(input);
+    const started = Date.now();
+    try {
+      const raw = await this.chat(system, user, {
+        jsonMode: false,
+        temperature: 0.3,
+        numPredict: 256,
+      });
+      const refinedText = raw.trim().replace(/^["']|["']$/g, "").trim();
+      this.logger.info(
+        { durationMs: Date.now() - started, originalLength: input.text.length, refinedLength: refinedText.length },
+        "Ollama refineTextTone OK",
+      );
+      return { refinedText };
+    } catch (error) {
+      this.logger.warn(
+        { durationMs: Date.now() - started, err: error instanceof Error ? error.message : String(error) },
+        "Ollama refineTextTone FALLO",
       );
       throw error;
     }

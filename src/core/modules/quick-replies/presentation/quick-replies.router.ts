@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../../../../shared/http/require-auth";
-import { validationError } from "../../../../shared/errors/domain-errors";
+import { validationError, businessError } from "../../../../shared/errors/domain-errors";
 import type { CreateQuickReplyUseCase } from "../application/use-cases/create-quick-reply.use-case";
 import type { UpdateQuickReplyUseCase } from "../application/use-cases/update-quick-reply.use-case";
 import type { DeleteQuickReplyUseCase } from "../application/use-cases/delete-quick-reply.use-case";
 import type { ListQuickRepliesUseCase } from "../application/use-cases/list-quick-replies.use-case";
 import type { ResolveQuickReplyUseCase } from "../application/use-cases/resolve-quick-reply.use-case";
+import type { RefineQuickReplyToneUseCase } from "../application/use-cases/refine-quick-reply-tone.use-case";
 
 export interface QuickRepliesRouterDeps {
   createQuickReply: CreateQuickReplyUseCase;
@@ -14,6 +15,7 @@ export interface QuickRepliesRouterDeps {
   deleteQuickReply: DeleteQuickReplyUseCase;
   listQuickReplies: ListQuickRepliesUseCase;
   resolveQuickReply: ResolveQuickReplyUseCase;
+  refineTone?: RefineQuickReplyToneUseCase;
 }
 
 const createBodySchema = z.object({
@@ -33,6 +35,14 @@ const updateBodySchema = z.object({
   category: z.string().trim().optional().nullable(),
   mediaUrl: z.string().url().optional().nullable().or(z.literal("")),
   active: z.boolean().optional(),
+});
+
+const refineBodySchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(5, "El texto debe tener al menos 5 caracteres")
+    .max(2000, "El texto no puede superar los 2000 caracteres"),
 });
 
 export function createQuickRepliesRouter(deps: QuickRepliesRouterDeps): Router {
@@ -131,6 +141,29 @@ export function createQuickRepliesRouter(deps: QuickRepliesRouterDeps): Router {
       );
 
       res.status(201).json({ quickReply: created });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/quick-replies/refine-tone
+   * Refina el tono de un borrador de respuesta rápida hacia uno empático/cordial.
+   * Restringido a Admin y Manager.
+   */
+  router.post("/api/quick-replies/refine-tone", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin", "manager"]);
+      if (!deps.refineTone) {
+        throw businessError("Servicio de refinamiento de tono no configurado");
+      }
+      const parsed = refineBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw validationError(parsed.error.issues.map((issue) => issue.message).join(", "));
+      }
+
+      const result = await deps.refineTone.execute({ text: parsed.data.text });
+      res.json({ refinedText: result.refinedText });
     } catch (err) {
       next(err);
     }
