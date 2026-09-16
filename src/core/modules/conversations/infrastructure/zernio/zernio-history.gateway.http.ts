@@ -36,6 +36,17 @@ type RawMessage = {
     mimeType?: string;
     filename?: string;
   }>;
+  deliveryStatus?: string;
+  delivery_status?: string;
+  status?: string;
+  deliveryError?: {
+    code?: string | number;
+    title?: string;
+    message?: string;
+    details?: string;
+  };
+  error?: string | { message?: string };
+  errorMessage?: string;
 };
 
 export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {

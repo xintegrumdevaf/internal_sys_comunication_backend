@@ -138,7 +138,7 @@ export class ReceiveInboundMessageUseCase {
           type: "MESSAGE_SENT",
           conversationId: conversation.id,
           messageId: message.id,
-          author: message.author ?? "agent",
+          author: message.author !== "customer" ? message.author : "agent",
         });
       }
     }
