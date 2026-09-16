@@ -6,6 +6,8 @@ import type { DepartmentCaseRouting, DepartmentHandlingMode } from "../../domain
 import type { DepartmentRepositoryPort } from "../ports/department.repository.port";
 import type { DepartmentRoutingService } from "../services/department-routing.service";
 
+import { inferWorkflowType } from "../services/workflow-type-inference";
+
 export type UpdateDepartmentCaseItem = {
   id?: string;
   label: string;
@@ -71,13 +73,22 @@ export class UpdateDepartmentUseCase {
           .replace(/^_+|_+$/g, "");
         const rawIntent = item.intentKey?.trim() || `${slug}.${normalizedLabel}`;
 
+        const resolvedWorkflowType = inferWorkflowType(
+          slug,
+          updated.name,
+          item.label,
+          item.description,
+          rawIntent,
+          item.workflowType,
+        );
+
         if (item.id) {
           await this.deps.departmentRepo.updateRouting(item.id, {
             label: item.label,
             description: item.description,
             intentKey: rawIntent,
             handlingMode: item.handlingMode,
-            workflowType: item.workflowType,
+            workflowType: resolvedWorkflowType,
             active: item.active,
           });
         } else {
@@ -87,7 +98,7 @@ export class UpdateDepartmentUseCase {
             label: item.label,
             description: item.description,
             handlingMode: item.handlingMode ?? "ai_assisted",
-            workflowType: item.workflowType ?? "GENERAL_INQUIRY",
+            workflowType: resolvedWorkflowType,
             active: item.active ?? true,
           });
         }

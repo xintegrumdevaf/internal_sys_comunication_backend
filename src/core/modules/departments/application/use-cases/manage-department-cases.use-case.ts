@@ -2,6 +2,7 @@ import { validationError } from "../../../../../shared/errors/domain-errors";
 import type { DepartmentCaseRouting, DepartmentHandlingMode } from "../../domain/department-case-routing.entity";
 import type { DepartmentRepositoryPort } from "../ports/department.repository.port";
 import type { DepartmentRoutingService } from "../services/department-routing.service";
+import { inferWorkflowType } from "../services/workflow-type-inference";
 
 export type AddDepartmentCaseInput = {
   departmentId: string;
@@ -39,7 +40,14 @@ export class AddDepartmentCaseUseCase {
       label: input.label.trim(),
       description: input.description.trim(),
       handlingMode: input.handlingMode ?? "ai_assisted",
-      workflowType: input.workflowType?.trim() || "GENERAL_INQUIRY",
+      workflowType: inferWorkflowType(
+        dept.slug,
+        dept.name,
+        input.label,
+        input.description,
+        rawIntent,
+        input.workflowType,
+      ),
       active: true,
     });
 

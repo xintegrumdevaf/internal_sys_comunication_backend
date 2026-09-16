@@ -92,22 +92,63 @@ export class DepartmentRoutingService {
       return matchedRouting.departmentId;
     }
 
-    // 2. Fallback estándar por slug conocido de departamento
-    const standardSlugMap: Record<string, string> = {
-      SUPPORT_INTERNET: "support",
-      BILLING_BALANCE: "billing",
-      SALES_PACKAGES: "sales",
-      GENERAL_INQUIRY: "general",
-      support: "support",
-      billing: "billing",
-      sales: "sales",
-      general: "general",
+    // 2. Fallback por lista de candidatos de slugs comunes por tipo de flujo
+    const candidateSlugsMap: Record<string, string[]> = {
+      BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos", "cuentas"],
+      SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico", "averias"],
+      SALES_PACKAGES: ["sales", "ventas", "comercial", "planes"],
+      GENERAL_INQUIRY: ["general", "atencion", "atencion-al-cliente", "recepcion"],
+      billing: ["cartera", "billing", "facturacion", "cobros", "pagos"],
+      support: ["support", "soporte", "soporte-tecnico", "tecnico"],
+      sales: ["sales", "ventas", "comercial"],
+      general: ["general", "atencion", "atencion-al-cliente"],
     };
 
-    const targetSlug = standardSlugMap[workflowType];
-    if (targetSlug) {
-      const dept = await this.departmentRepo.findBySlug(targetSlug);
-      return dept?.id ?? null;
+    const candidateSlugs =
+      candidateSlugsMap[workflowType.toUpperCase()] ??
+      candidateSlugsMap[workflowType] ??
+      candidateSlugsMap[workflowType.toLowerCase()];
+
+    if (candidateSlugs) {
+      for (const targetSlug of candidateSlugs) {
+        const dept = await this.departmentRepo.findBySlug(targetSlug);
+        if (dept && dept.active !== false) {
+          return dept.id;
+        }
+      }
+    }
+
+    // 3. Fallback por coincidencia de palabras clave en el slug o nombre de departamentos activos
+    try {
+      const allDepts = await this.departmentRepo.list();
+      const activeDepts = allDepts.filter((d) => d.active !== false);
+
+      const keywordsMap: Record<string, string[]> = {
+        BILLING_BALANCE: ["cartera", "factura", "cobro", "pago", "billing", "saldo", "deuda"],
+        SUPPORT_INTERNET: ["soporte", "tecnico", "support", "internet", "averia"],
+        SALES_PACKAGES: ["venta", "comercial", "sales", "plan"],
+        GENERAL_INQUIRY: ["general", "atencion", "recepcion"],
+      };
+
+      const keywords =
+        keywordsMap[workflowType.toUpperCase()] ?? keywordsMap[workflowType];
+
+      if (keywords && activeDepts.length > 0) {
+        const matched = activeDepts.find((d) => {
+          const normSlug = d.slug.toLowerCase();
+          const normName = d.name.toLowerCase();
+          return keywords.some((kw) => normSlug.includes(kw) || normName.includes(kw));
+        });
+        if (matched) {
+          return matched.id;
+        }
+      }
+
+      if (activeDepts.length > 0) {
+        return activeDepts[0]!.id;
+      }
+    } catch {
+      // Ignorar error de lista si ocurre en fakes incompletos
     }
 
     return null;

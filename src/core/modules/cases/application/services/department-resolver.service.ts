@@ -23,22 +23,45 @@ export class DepartmentResolverService {
       return this.routingService.resolveDepartmentId(workflowType);
     }
 
-    const standardSlugMap: Record<string, string> = {
-      SUPPORT_INTERNET: "support",
-      BILLING_BALANCE: "billing",
-      SALES_PACKAGES: "sales",
-      GENERAL_INQUIRY: "general",
-      support: "support",
-      billing: "billing",
-      sales: "sales",
-      general: "general",
+    const candidateSlugsMap: Record<string, string[]> = {
+      BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos"],
+      SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico"],
+      SALES_PACKAGES: ["sales", "ventas", "comercial"],
+      GENERAL_INQUIRY: ["general", "atencion", "atencion-al-cliente"],
+      billing: ["cartera", "billing", "facturacion", "cobros", "pagos"],
+      support: ["support", "soporte", "soporte-tecnico", "tecnico"],
+      sales: ["sales", "ventas", "comercial"],
+      general: ["general", "atencion", "atencion-al-cliente"],
     };
 
-    const slug = standardSlugMap[workflowType];
-    if (!slug) {
-      return null;
+    const candidateSlugs =
+      candidateSlugsMap[workflowType.toUpperCase()] ??
+      candidateSlugsMap[workflowType] ??
+      candidateSlugsMap[workflowType.toLowerCase()];
+
+    if (candidateSlugs) {
+      for (const slug of candidateSlugs) {
+        const department = await this.departmentRepo.findBySlug(slug);
+        if (department) {
+          return department.id;
+        }
+      }
     }
-    const department = await this.departmentRepo.findBySlug(slug);
-    return department?.id ?? null;
+
+    try {
+      const allDepts = await this.departmentRepo.list();
+      const activeDepts = allDepts.filter((d) => d.active !== false);
+      if (activeDepts.length > 0) {
+        return activeDepts[0]!.id;
+      }
+    } catch {
+      // Ignorar
+    }
+
+    return null;
+  }
+
+  getDepartmentSlug(departmentId: string): string | null {
+    return this.routingService?.getDepartmentSlug(departmentId) ?? null;
   }
 }

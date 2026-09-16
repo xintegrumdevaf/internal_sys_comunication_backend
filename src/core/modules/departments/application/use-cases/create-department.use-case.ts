@@ -6,6 +6,8 @@ import type { DepartmentCaseRouting, DepartmentHandlingMode } from "../../domain
 import type { DepartmentRepositoryPort } from "../ports/department.repository.port";
 import type { DepartmentRoutingService } from "../services/department-routing.service";
 
+import { inferWorkflowType } from "../services/workflow-type-inference";
+
 export type CreateDepartmentCaseItem = {
   label: string;
   description: string;
@@ -74,7 +76,14 @@ export class CreateDepartmentUseCase {
           label: item.label.trim(),
           description: item.description.trim(),
           handlingMode: item.handlingMode ?? "ai_assisted",
-          workflowType: item.workflowType?.trim() || "GENERAL_INQUIRY",
+          workflowType: inferWorkflowType(
+            slug,
+            name,
+            item.label,
+            item.description,
+            rawIntent,
+            item.workflowType,
+          ),
           active: true,
         });
         createdCases.push(createdRouting);

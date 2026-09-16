@@ -128,6 +128,35 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
       const resolved = await resolver.resolveDepartmentId("SUPPORT_INTERNET");
       expect(resolved).toBe(supportDeptId);
     });
+
+    it("resuelve el departamento de cartera cuando no existe billing pero existe cartera", async () => {
+      const carteraDept = departmentRepo.seed({
+        slug: "cartera",
+        name: "Cartera",
+        description: "Recibir los casos de pagos y procesarlos",
+      });
+
+      const resolver = new DepartmentResolverService(departmentRepo, routingService);
+      const resolved = await resolver.resolveDepartmentId("BILLING_BALANCE");
+      expect(resolved).toBe(carteraDept.id);
+    });
+
+    it("infiere automáticamente BILLING_BALANCE al agregar un caso en el área Cartera sin workflowType explícito", async () => {
+      const carteraDept = departmentRepo.seed({
+        slug: "cartera",
+        name: "Cartera",
+        description: "Recibir los casos de pagos y procesarlos",
+      });
+
+      const addCase = new AddDepartmentCaseUseCase(departmentRepo, routingService);
+      const createdCase = await addCase.execute({
+        departmentId: carteraDept.id,
+        label: "Recepcion de pagos",
+        description: "Las personas envian una imagen con los pagos para la verificacion",
+      });
+
+      expect(createdCase.workflowType).toBe("BILLING_BALANCE");
+    });
   });
 
   describe("CaseArbitrationService con intents dinámicos", () => {

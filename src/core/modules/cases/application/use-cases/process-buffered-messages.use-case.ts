@@ -134,8 +134,12 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       if (hasDocumentAttachment || (messages.some(m => m.type === "image") && (prevHasDebt || Object.keys(receiptEntities).length === 0))) {
-        log.info("Comprobante o archivo recibido (documento/imagen): derivando a Facturación");
         const billingDeptId = await this.deps.departmentResolver.resolveDepartmentId("BILLING_BALANCE");
+        const billingDeptSlug = billingDeptId ? this.deps.departmentResolver.getDepartmentSlug(billingDeptId) : null;
+        log.info(
+          { departmentId: billingDeptId, departmentSlug: billingDeptSlug },
+          `Comprobante o archivo recibido (documento/imagen): derivando a departamento de cartera/pagos (ID: ${billingDeptId ?? "desconocido"})`,
+        );
         let targetCaseId: string;
 
         const rawBalance = inheritedContext.balance as Record<string, unknown> | undefined;
