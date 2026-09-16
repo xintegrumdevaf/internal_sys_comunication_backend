@@ -1,5 +1,6 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
+import type { MessageStatus } from "../../domain/message.entity";
 import type {
   ZernioHistoricalConversation,
   ZernioHistoricalMessage,
@@ -208,6 +209,30 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
 
       const pageItems = body.messages || [];
       for (const item of pageItems) {
+        let status: MessageStatus = "sent";
+        let errorMessage: string | null = null;
+
+        const rawStatus = (item.deliveryStatus || item.delivery_status || item.status || "").toLowerCase();
+        const hasError = Boolean(item.deliveryError || item.error || item.errorMessage);
+
+        if (rawStatus.includes("fail") || rawStatus.includes("undeliver") || rawStatus.includes("reject") || hasError) {
+          status = "failed";
+          const errObj = item.deliveryError;
+          const errDetail =
+            errObj?.details ||
+            errObj?.message ||
+            errObj?.title ||
+            (typeof item.error === "string" ? item.error : item.error?.message) ||
+            item.errorMessage ||
+            "Error de entrega en Meta / WhatsApp (Zernio)";
+          const errCode = errObj?.code ? ` (Meta Error ${errObj.code})` : "";
+          errorMessage = `${errDetail}${errCode}`;
+        } else if (rawStatus.includes("read")) {
+          status = "read";
+        } else if (rawStatus.includes("deliver")) {
+          status = "delivered";
+        }
+
         messages.push({
           id: item.id,
           conversationId: zernioConversationId,
@@ -218,6 +243,8 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
           senderPhoneNumber: item.senderPhoneNumber || null,
           createdAt: item.createdAt || item.sentAt || new Date().toISOString(),
           sentVia: item.sentVia || item.metadata?.sentVia || null,
+          status,
+          errorMessage,
           attachments: item.attachments || [],
         });
       }

@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { Message, MessageAuthor } from "../../domain/message.entity";
+import type { Message, MessageAuthor, MessageStatus } from "../../domain/message.entity";
 import type {
   InsertHistoricalMessageInput,
   InsertInboundMessageInput,
@@ -21,6 +21,8 @@ type MessageRow = {
   mime_type: string | null;
   caption: string | null;
   filename: string | null;
+  status: MessageStatus;
+  error_message: string | null;
   created_at: Date;
 };
 
@@ -39,6 +41,8 @@ function mapRow(row: MessageRow): Message {
     mimeType: row.mime_type,
     caption: row.caption,
     filename: row.filename,
+    status: row.status ?? "sent",
+    errorMessage: row.error_message ?? null,
     createdAt: row.created_at,
   };
 }
@@ -48,14 +52,22 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
 
   async insertInbound(
     input: InsertInboundMessageInput,
-  ): Promise<{ message: Message; isDuplicate: boolean }> {
-    const inserted = await this.pool.query<MessageRow>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename)
-       VALUES ($1, 'inbound', 'customer', $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (conversation_id, external_id) DO NOTHING
-       RETURNING *`,
+  ): Promise<{ message: Message; isDuplicate: boolean; isEdited?: boolean }> {
+    const direction = input.direction ?? "inbound";
+    const author = input.author ?? (direction === "outbound" ? "agent" : "customer");
+
+    const inserted = await this.pool.query<MessageRow & { was_updated?: boolean }>(
+      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename, status, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (conversation_id, external_id) DO UPDATE SET
+         body = EXCLUDED.body,
+         caption = COALESCE(EXCLUDED.caption, message.caption)
+       WHERE message.body IS DISTINCT FROM EXCLUDED.body OR message.caption IS DISTINCT FROM EXCLUDED.caption
+       RETURNING *, (xmax != 0) AS was_updated`,
       [
         input.conversationId,
+        direction,
+        author,
         input.externalId,
         input.body,
         input.type,
@@ -63,25 +75,28 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.mimeType ?? null,
         input.caption ?? null,
         input.filename ?? null,
+        input.status ?? (direction === "outbound" ? "sent" : "delivered"),
+        input.errorMessage ?? null,
       ],
     );
 
     if (inserted.rows[0]) {
-      return { message: mapRow(inserted.rows[0]), isDuplicate: false };
+      const isEdited = Boolean(inserted.rows[0].was_updated);
+      return { message: mapRow(inserted.rows[0]), isDuplicate: false, isEdited };
     }
 
-    // UNIQUE(conversation_id, external_id) — el mensaje ya existia (reintento de Meta).
+    // UNIQUE(conversation_id, external_id) — el mensaje ya existia con exactamente el mismo contenido (reintento o duplicado sin edicion).
     const existing = await this.pool.query<MessageRow>(
       `SELECT * FROM message WHERE conversation_id = $1 AND external_id = $2`,
       [input.conversationId, input.externalId],
     );
-    return { message: mapRow(existing.rows[0]!), isDuplicate: true };
+    return { message: mapRow(existing.rows[0]!), isDuplicate: true, isEdited: false };
   }
 
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
     const { rows } = await this.pool.query<MessageRow>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, agent_id, case_id)
-       VALUES ($1, 'outbound', $2, $3, $4, 'text', $5, $6)
+      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, agent_id, case_id, status, error_message)
+       VALUES ($1, 'outbound', $2, $3, $4, 'text', $5, $6, $7, $8)
        RETURNING *`,
       [
         input.conversationId,
@@ -90,6 +105,8 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.body,
         input.agentId ?? null,
         input.caseId ?? null,
+        input.status ?? "sent",
+        input.errorMessage ?? null,
       ],
     );
     return mapRow(rows[0]!);
@@ -101,10 +118,13 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     const inserted = await this.pool.query<MessageRow>(
       `INSERT INTO message (
         conversation_id, direction, author, external_id, body, type,
-        media_id, mime_type, caption, filename, created_at
+        media_id, mime_type, caption, filename, status, error_message, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (conversation_id, external_id) DO NOTHING
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      ON CONFLICT (conversation_id, external_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        error_message = COALESCE(EXCLUDED.error_message, message.error_message)
+      WHERE EXCLUDED.status != 'sent' OR message.status = 'sent'
       RETURNING *`,
       [
         input.conversationId,
@@ -117,6 +137,8 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.mimeType ?? null,
         input.caption ?? null,
         input.filename ?? null,
+        input.status ?? "sent",
+        input.errorMessage ?? null,
         input.createdAt,
       ],
     );
@@ -131,6 +153,22 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     );
     return { message: mapRow(existing.rows[0]!), isDuplicate: true };
   }
+
+  async updateStatusByExternalId(
+    externalId: string,
+    status: MessageStatus,
+    errorMessage?: string | null,
+  ): Promise<Message | null> {
+    const { rows } = await this.pool.query<MessageRow>(
+      `UPDATE message
+       SET status = $2, error_message = $3
+       WHERE external_id = $1
+       RETURNING *`,
+      [externalId, status, errorMessage ?? null],
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
+  }
+
 
   async listByConversation(
     conversationId: string,

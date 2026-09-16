@@ -29,6 +29,7 @@ type ZernioConversationItem = {
 export class ZernioSenderHttp implements WhatsAppSenderPort {
   private resolvedAccountId: string | null = null;
   private readonly conversationIdCache = new Map<string, string>();
+  private readonly phoneByConversationIdCache = new Map<string, string>();
   private readonly baseUrl: string;
 
   constructor(
@@ -41,15 +42,67 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
   }
 
+  public isBusinessAccount(phone: string): boolean {
+    const clean = phone.replace(/\D/g, "");
+    if (!clean) return false;
+    if (clean.length > 14 && (clean.startsWith("1042") || clean.startsWith("1348") || clean.startsWith("3223"))) {
+      return true;
+    }
+    if (this.env.WHATSAPP_PHONE_NUMBER_ID && clean === this.env.WHATSAPP_PHONE_NUMBER_ID.trim()) {
+      return true;
+    }
+    if (this.env.ZERNIO_ACCOUNT_ID && clean === this.env.ZERNIO_ACCOUNT_ID.trim()) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Guarda o actualiza la asociación de un teléfono con su ID de conversación en Zernio.
    * Utilizado también desde el webhook entrante para enriquecer el cache.
    */
   public registerConversation(waPhone: string, conversationId: string): void {
     const cleanPhone = waPhone.replace(/\D/g, "");
-    if (cleanPhone && conversationId) {
+    if (cleanPhone && conversationId && !this.isBusinessAccount(cleanPhone)) {
       this.conversationIdCache.set(cleanPhone, conversationId);
+      this.phoneByConversationIdCache.set(conversationId, cleanPhone);
     }
+  }
+
+  public getPhoneByConversationId(conversationId: string): string | null {
+    return this.phoneByConversationIdCache.get(conversationId) || null;
+  }
+
+  public async resolvePhoneByConversationId(conversationId: string): Promise<string | null> {
+    if (!conversationId) return null;
+    const existing = this.phoneByConversationIdCache.get(conversationId);
+    if (existing) {
+      return existing;
+    }
+
+    try {
+      const url = `${this.baseUrl}/inbox/conversations?platform=whatsapp`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { data?: ZernioConversationItem[] };
+        for (const item of data.data || []) {
+          const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
+          if (participant && !this.isBusinessAccount(participant)) {
+            this.conversationIdCache.set(participant, item.id);
+            this.phoneByConversationIdCache.set(item.id, participant);
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn({ err }, "No se pudo resolver el teléfono desde Zernio por conversationId");
+    }
+
+    return this.phoneByConversationIdCache.get(conversationId) || null;
   }
 
   private async getAccountId(): Promise<string> {

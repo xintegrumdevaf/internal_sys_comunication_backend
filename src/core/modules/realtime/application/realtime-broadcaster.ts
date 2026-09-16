@@ -17,6 +17,19 @@ export type RealtimeEvent =
       author: "ai" | "agent" | "system";
     }
   | {
+      type: "MESSAGE_UPDATED";
+      conversationId: string;
+      messageId: string;
+      body?: string;
+    }
+  | {
+      type: "MESSAGE_STATUS_UPDATED";
+      conversationId: string;
+      messageId: string;
+      status: "sent" | "delivered" | "read" | "failed";
+      errorMessage?: string | null;
+    }
+  | {
       type: "CASE_ESCALATED";
       caseId: string;
       conversationId: string;

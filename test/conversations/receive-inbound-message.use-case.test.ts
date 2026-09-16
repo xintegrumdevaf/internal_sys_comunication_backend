@@ -144,4 +144,35 @@ describe("ReceiveInboundMessageUseCase", () => {
     );
     expect(Number(messageRows[0].count)).toBe(5);
   });
+
+  it("actualiza el cuerpo de un mensaje cuando el usuario lo edita en WhatsApp", async () => {
+    const waPhone = uniquePhone();
+    const externalId = randomUUID();
+
+    const original = await useCase.execute({
+      waPhone,
+      externalId,
+      body: "ok gracias",
+      type: "text",
+    });
+
+    expect(original.isDuplicate).toBe(false);
+    expect(original.isEdited).toBe(false);
+    expect(original.message.body).toBe("ok gracias");
+
+    const edited = await useCase.execute({
+      waPhone,
+      externalId,
+      body: "ok gracias es una prueba",
+      type: "text",
+    });
+
+    expect(edited.isDuplicate).toBe(false);
+    expect(edited.isEdited).toBe(true);
+    expect(edited.message.id).toBe(original.message.id);
+    expect(edited.message.body).toBe("ok gracias es una prueba");
+
+    const { rows } = await pool.query("SELECT body FROM message WHERE id = $1", [original.message.id]);
+    expect(rows[0].body).toBe("ok gracias es una prueba");
+  });
 });

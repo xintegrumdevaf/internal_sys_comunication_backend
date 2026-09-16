@@ -9,6 +9,9 @@ import type { ZernioSenderHttp } from "../infrastructure/zernio/zernio-sender.ht
 
 import type { CampaignRecipientRepositoryPort } from "../../campaigns/application/ports/campaign-recipient.repository.port";
 import type { CampaignRepositoryPort } from "../../campaigns/application/ports/campaign.repository.port";
+import type { MessageRepositoryPort } from "../application/ports/message.repository.port";
+import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
+import type { MessageStatus } from "../domain/message.entity";
 
 export type ZernioWebhookRouterDeps = {
   env: Env;
@@ -17,6 +20,8 @@ export type ZernioWebhookRouterDeps = {
   zernioSender?: ZernioSenderHttp;
   recipientRepo?: CampaignRecipientRepositoryPort;
   campaignRepo?: CampaignRepositoryPort;
+  messageRepo?: MessageRepositoryPort;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 /**
@@ -26,7 +31,16 @@ export type ZernioWebhookRouterDeps = {
  */
 export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router {
   const router = Router();
-  const { env, receiveInboundMessage, redisClient, zernioSender, recipientRepo, campaignRepo } = deps;
+  const {
+    env,
+    receiveInboundMessage,
+    redisClient,
+    zernioSender,
+    recipientRepo,
+    campaignRepo,
+    messageRepo,
+    broadcaster,
+  } = deps;
 
   router.get("/api/webhooks/zernio", (_req, res) => {
     res.status(200).json({
@@ -58,55 +72,116 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
 
       // Si el payload incluye el conversationId de Zernio, enriquecemos el cache del sender
       const convId = req.body?.message?.conversationId;
-      const rawSender = req.body?.message?.sender?.id || req.body?.message?.participantId;
-      if (convId && rawSender && zernioSender) {
-        zernioSender.registerConversation(String(rawSender), String(convId));
+      const msgObj = req.body?.message;
+      const isOutboundMsg = msgObj?.direction === "outgoing" || msgObj?.fromMe === true;
+      const rawParticipant = isOutboundMsg
+        ? msgObj?.recipient?.id || msgObj?.recipient?.username || msgObj?.participantId
+        : msgObj?.sender?.id || msgObj?.sender?.username || msgObj?.participantId;
+
+      if (convId && rawParticipant && zernioSender) {
+        zernioSender.registerConversation(String(rawParticipant), String(convId));
       }
 
-      // Procesar eventos de estado de entrega de mensajes (failures / undelivered)
+      // Procesar eventos de estado de entrega de mensajes (failures / undelivered / delivered / read)
       const eventName = String(req.body?.event || "").toLowerCase();
       const messageObj = req.body?.message ?? req.body?.data ?? req.body;
-      const statusRaw = String(messageObj?.status || req.body?.status || "").toLowerCase();
+      const statusRaw = String(
+        messageObj?.deliveryStatus ||
+          messageObj?.delivery_status ||
+          messageObj?.status ||
+          req.body?.deliveryStatus ||
+          req.body?.status ||
+          "",
+      ).toLowerCase();
 
       const isFailureEvent =
         statusRaw.includes("fail") ||
         statusRaw.includes("undeliver") ||
         statusRaw.includes("reject") ||
         eventName.includes("failed") ||
-        eventName.includes("rejected");
+        eventName.includes("rejected") ||
+        Boolean(messageObj?.deliveryError || messageObj?.error || req.body?.deliveryError || req.body?.error);
 
-      if (isFailureEvent && recipientRepo && campaignRepo) {
-        const platformMessageId =
-          messageObj?.platformMessageId ||
-          messageObj?.id ||
-          req.body?.platformMessageId ||
-          req.body?.messageId ||
-          req.body?.id;
+      const platformMessageId =
+        messageObj?.platformMessageId ||
+        messageObj?.id ||
+        req.body?.platformMessageId ||
+        req.body?.messageId ||
+        req.body?.id;
 
+      if (isFailureEvent && recipientRepo && campaignRepo && platformMessageId) {
         const errorMessage =
           messageObj?.error?.message ||
           messageObj?.errorMessage ||
           req.body?.error ||
           "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)";
 
-        if (platformMessageId) {
-          const updatedRecipient = await recipientRepo.updateStatusByExternalId(
+        const updatedRecipient = await recipientRepo.updateStatusByExternalId(
+          String(platformMessageId),
+          "FAILED",
+          { errorMessage: String(errorMessage) },
+        );
+
+        if (updatedRecipient) {
+          await campaignRepo.incrementCounters(updatedRecipient.campaignId, { sent: -1, failed: 1 });
+          req.log?.info(
+            { platformMessageId, campaignId: updatedRecipient.campaignId, phone: updatedRecipient.phone },
+            "Destinatario de campaña actualizado a FAILED desde webhook de Zernio",
+          );
+        }
+      }
+
+      // Actualizar estado en la tabla de mensajes de conversación
+      if (platformMessageId && messageRepo) {
+        let newStatus: MessageStatus = "sent";
+        let errorMessage: string | null = null;
+
+        if (isFailureEvent) {
+          newStatus = "failed";
+          errorMessage =
+            messageObj?.error?.message ||
+            messageObj?.errorMessage ||
+            req.body?.error ||
+            "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)";
+        } else if (statusRaw.includes("read") || eventName.includes("read")) {
+          newStatus = "read";
+        } else if (
+          statusRaw.includes("deliver") ||
+          eventName.includes("delivered") ||
+          statusRaw === "sent"
+        ) {
+          newStatus = statusRaw.includes("deliver") || eventName.includes("delivered")
+            ? "delivered"
+            : "sent";
+        }
+
+        if (isFailureEvent || newStatus !== "sent") {
+          const updatedMsg = await messageRepo.updateStatusByExternalId(
             String(platformMessageId),
-            "FAILED",
-            { errorMessage: String(errorMessage) },
+            newStatus,
+            errorMessage,
           );
 
-          if (updatedRecipient) {
-            await campaignRepo.incrementCounters(updatedRecipient.campaignId, { sent: -1, failed: 1 });
+          if (updatedMsg) {
             req.log?.info(
-              { platformMessageId, campaignId: updatedRecipient.campaignId, phone: updatedRecipient.phone },
-              "Destinatario de campaña actualizado a FAILED desde webhook de Zernio",
+              { platformMessageId, messageId: updatedMsg.id, status: newStatus },
+              "Estado de mensaje de conversación actualizado desde webhook de Zernio",
             );
+
+            if (broadcaster) {
+              broadcaster.publish({
+                type: "MESSAGE_STATUS_UPDATED",
+                conversationId: updatedMsg.conversationId,
+                messageId: updatedMsg.id,
+                status: newStatus,
+                errorMessage,
+              });
+            }
           }
         }
       }
 
-      const normalizedMessages = parseZernioWebhookPayload(req.body);
+      const normalizedMessages = await parseZernioWebhookPayload(req.body, { zernioSender });
       req.log?.info({ messageCount: normalizedMessages.length }, "payload de zernio normalizado");
 
       for (const normalized of normalizedMessages) {
@@ -115,7 +190,7 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
           correlationId: req.correlationId,
         });
 
-        if (!isDuplicate) {
+        if (!isDuplicate && normalized.direction !== "outbound") {
           await enqueueConversationJob(redisClient, conversation.id, {
             type: "MESSAGE_RECEIVED",
             conversationId: conversation.id,

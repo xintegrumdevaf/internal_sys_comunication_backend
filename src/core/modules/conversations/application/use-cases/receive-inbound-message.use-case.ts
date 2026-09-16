@@ -21,12 +21,15 @@ export type ReceiveInboundMessageInput = {
   waProfileName?: string | null;
   /** correlationId de la request HTTP que origino el mensaje (trazabilidad, AGENTS.md). */
   correlationId?: string;
+  direction?: "inbound" | "outbound";
+  author?: import("../../domain/message.entity").MessageAuthor;
 };
 
 export type ReceiveInboundMessageResult = {
   conversation: Conversation;
   message: Message;
   isDuplicate: boolean;
+  isEdited?: boolean;
 };
 
 export type ReceiveInboundMessageDeps = {
@@ -40,11 +43,11 @@ export type ReceiveInboundMessageDeps = {
 };
 
 /**
- * Ingesta de mensaje inbound (docs/spec/05_BUILD_PLAN.md Etapa 1).
+ * Ingesta de mensaje inbound o saliente enviado desde WhatsApp movil (docs/spec/05_BUILD_PLAN.md Etapa 1).
  * Unico caso de uso que crea/reutiliza una Conversation y persiste el
  * mensaje crudo de forma idempotente, serializado por wa_phone via Redis.
  * Tras persistir, empuja el mensaje al buffer/debounce por conversacion
- * (docs/spec/02_STATE_MACHINE.md §12, Etapa 2) — nunca para un duplicado.
+ * (docs/spec/02_STATE_MACHINE.md §12, Etapa 2) — nunca para un duplicado o saliente.
  */
 export class ReceiveInboundMessageUseCase {
   constructor(private readonly deps: ReceiveInboundMessageDeps) {}
@@ -55,18 +58,20 @@ export class ReceiveInboundMessageUseCase {
       ? logger.child({ correlationId: input.correlationId })
       : logger;
 
+    const isOutbound = input.direction === "outbound";
+
     let conversation = await withConversationLock(redisClient, input.waPhone, () =>
       conversationRepo.findOrCreateByWaPhone(input.waPhone),
     );
 
     // Se actualiza en cada mensaje que lo traiga (la persona puede cambiar su
     // nombre de WhatsApp); nunca se pisa un nombre ya conocido con uno vacio.
-    if (input.waProfileName && input.waProfileName !== conversation.waProfileName) {
+    if (!isOutbound && input.waProfileName && input.waProfileName !== conversation.waProfileName) {
       await conversationRepo.setWaProfileName(conversation.id, input.waProfileName);
       conversation = { ...conversation, waProfileName: input.waProfileName };
     }
 
-    const { message, isDuplicate } = await messageRepo.insertInbound({
+    const { message, isDuplicate, isEdited } = await messageRepo.insertInbound({
       conversationId: conversation.id,
       externalId: input.externalId,
       body: input.body,
@@ -75,6 +80,8 @@ export class ReceiveInboundMessageUseCase {
       mimeType: input.mimeType ?? null,
       caption: input.caption ?? null,
       filename: input.filename ?? null,
+      direction: input.direction,
+      author: input.author,
     });
 
     log.info(
@@ -85,33 +92,58 @@ export class ReceiveInboundMessageUseCase {
         waPhone: input.waPhone,
         type: input.type,
         body: input.body,
+        direction: input.direction ?? "inbound",
         isDuplicate,
+        isEdited: Boolean(isEdited),
       },
-      isDuplicate ? "mensaje inbound duplicado, se descarta" : "mensaje inbound recibido y persistido",
+      isDuplicate
+        ? "mensaje webhook duplicado, se descarta"
+        : isEdited
+        ? "mensaje editado y actualizado en DB"
+        : "mensaje webhook recibido y persistido",
     );
 
-    if (!isDuplicate) {
-      if (conversation.status === "resolved" || conversation.status === "closed") {
-        if (!isPoliteClosingMessage(input.body, input.type)) {
-          log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
-          await conversationRepo.setStatus(conversation.id, "open");
-          conversation = { ...conversation, status: "open" };
-        }
-      }
-
-      await conversationRepo.incrementUnreadCount(conversation.id);
-      await conversationRepo.touchLastActivity(conversation.id);
-      await inboundBuffer?.push(conversation.id, message.id);
+    if (isEdited) {
       this.deps.broadcaster?.publish({
-        type: "MESSAGE_RECEIVED",
+        type: "MESSAGE_UPDATED",
         conversationId: conversation.id,
         messageId: message.id,
-        bodyPreview: input.body.substring(0, 100) || (input.type === "document" ? "📄 Documento" : input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
-        authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
+        body: message.body,
       });
     }
 
-    return { conversation, message, isDuplicate };
+    if (!isDuplicate) {
+      if (!isOutbound) {
+        if (conversation.status === "resolved" || conversation.status === "closed") {
+          if (!isPoliteClosingMessage(input.body, input.type)) {
+            log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
+            await conversationRepo.setStatus(conversation.id, "open");
+            conversation = { ...conversation, status: "open" };
+          }
+        }
+
+        await conversationRepo.incrementUnreadCount(conversation.id);
+        await conversationRepo.touchLastActivity(conversation.id);
+        await inboundBuffer?.push(conversation.id, message.id);
+        this.deps.broadcaster?.publish({
+          type: "MESSAGE_RECEIVED",
+          conversationId: conversation.id,
+          messageId: message.id,
+          bodyPreview: input.body.substring(0, 100) || (input.type === "document" ? "📄 Documento" : input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
+          authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
+        });
+      } else {
+        await conversationRepo.touchLastActivity(conversation.id);
+        this.deps.broadcaster?.publish({
+          type: "MESSAGE_SENT",
+          conversationId: conversation.id,
+          messageId: message.id,
+          author: message.author ?? "agent",
+        });
+      }
+    }
+
+    return { conversation, message, isDuplicate, isEdited: Boolean(isEdited) };
   }
 }
 

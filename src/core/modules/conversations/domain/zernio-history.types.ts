@@ -1,3 +1,5 @@
+import type { MessageStatus } from "./message.entity";
+
 export interface ZernioHistoricalConversation {
   id: string;
   participantId: string;
@@ -24,6 +26,8 @@ export interface ZernioHistoricalMessage {
   senderPhoneNumber?: string | null;
   createdAt: string;
   sentVia?: string | null;
+  status?: MessageStatus;
+  errorMessage?: string | null;
   attachments?: ZernioHistoricalMessageAttachment[];
 }
 

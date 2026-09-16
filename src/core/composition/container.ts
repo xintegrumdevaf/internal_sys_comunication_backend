@@ -790,6 +790,8 @@ export function createContainer(): Container {
       zernioSender,
       recipientRepo: campaignRecipientRepo,
       campaignRepo,
+      messageRepo,
+      broadcaster,
     }),
   );
 

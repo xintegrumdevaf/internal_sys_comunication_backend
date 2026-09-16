@@ -1,5 +1,6 @@
 export type MessageDirection = "inbound" | "outbound";
 export type MessageAuthor = "customer" | "ai" | "agent" | "system";
+export type MessageStatus = "sent" | "delivered" | "read" | "failed";
 
 export interface Message {
   id: string;
@@ -16,5 +17,8 @@ export interface Message {
   mimeType: string | null;
   caption: string | null;
   filename: string | null;
+  status: MessageStatus;
+  errorMessage: string | null;
   createdAt: Date;
 }
+

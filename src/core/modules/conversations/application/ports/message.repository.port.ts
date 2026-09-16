@@ -1,4 +1,4 @@
-import type { Message, MessageAuthor } from "../../domain/message.entity";
+import type { Message, MessageAuthor, MessageStatus } from "../../domain/message.entity";
 
 export type InsertInboundMessageInput = {
   conversationId: string;
@@ -9,6 +9,10 @@ export type InsertInboundMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  status?: MessageStatus;
+  errorMessage?: string | null;
+  direction?: "inbound" | "outbound";
+  author?: MessageAuthor;
 };
 
 export type InsertOutboundMessageInput = {
@@ -20,6 +24,8 @@ export type InsertOutboundMessageInput = {
   agentId?: string | null;
   /** Caso activo de la conversacion al momento del reply, si existe. */
   caseId?: string | null;
+  status?: MessageStatus;
+  errorMessage?: string | null;
 };
 
 export type InsertHistoricalMessageInput = {
@@ -33,6 +39,8 @@ export type InsertHistoricalMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  status?: MessageStatus;
+  errorMessage?: string | null;
   createdAt: Date;
 };
 
@@ -45,14 +53,20 @@ export type ListMessagesOptions = {
 export interface MessageRepositoryPort {
   /**
    * Idempotente por UNIQUE(conversation_id, external_id) — docs/spec/01_DATA_MODEL.md §3.
-   * Si el mensaje ya existia, devuelve el registro existente con isDuplicate=true
-   * en vez de lanzar o duplicar.
+   * Si el mensaje ya existia con exactamente el mismo contenido, devuelve isDuplicate=true.
+   * Si el mensaje existia pero el contenido cambio (mensaje editado en WhatsApp), actualiza el body y devuelve isEdited=true.
    */
-  insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
+  insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean; isEdited?: boolean }>;
   insertOutbound(input: InsertOutboundMessageInput): Promise<Message>;
   /** Inserción histórica con timestamp explícito y soporte para inbound u outbound. */
   insertHistorical(input: InsertHistoricalMessageInput): Promise<{ message: Message; isDuplicate: boolean }>;
   listByConversation(conversationId: string, options?: ListMessagesOptions): Promise<Message[]>;
+  /** Actualiza el estado de entrega y mensaje de error de un mensaje según su ID externo de WhatsApp / Zernio. */
+  updateStatusByExternalId(
+    externalId: string,
+    status: MessageStatus,
+    errorMessage?: string | null,
+  ): Promise<Message | null>;
   /** Usado por el buffer/debounce (docs/spec/02_STATE_MACHINE.md §12) para recuperar la unidad de trabajo agrupada. */
   findByIds(ids: string[]): Promise<Message[]>;
   /** Último mensaje por conversación (01_DATA_MODEL.md §6 lastMessagePreview). */
@@ -70,4 +84,5 @@ export interface MessageRepositoryPort {
    */
   listDistinctAgentIdsByCase(caseId: string): Promise<string[]>;
 }
+
 

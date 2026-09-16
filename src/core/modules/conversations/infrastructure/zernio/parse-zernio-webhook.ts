@@ -27,7 +27,16 @@ export type ZernioWebhookMessage = {
     name?: string;
     username?: string;
   };
+  recipient?: {
+    id?: string;
+    name?: string;
+    username?: string;
+    phone?: string;
+  };
+  recipientId?: string;
   participantId?: string;
+  participantUsername?: string;
+  to?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -41,39 +50,79 @@ export type ZernioWebhookPayload = {
   };
 };
 
+function isBusinessAccount(phone: string): boolean {
+  const clean = phone.replace(/\D/g, "");
+  if (!clean) return false;
+  if (clean.length > 14 && (clean.startsWith("1042") || clean.startsWith("1348") || clean.startsWith("3223"))) {
+    return true;
+  }
+  return false;
+}
+
 /**
- * Anti-Corruption Layer: traduce el payload de Zernio (evento message.received)
+ * Anti-Corruption Layer: traduce el payload de Zernio (evento message.received / message.sent)
  * al formato canónico NormalizedInboundMessage que consume ReceiveInboundMessageUseCase.
  */
-export function parseZernioWebhookPayload(payload: unknown): NormalizedInboundMessage[] {
+export async function parseZernioWebhookPayload(
+  payload: unknown,
+  options?: { zernioSender?: import("./zernio-sender.http").ZernioSenderHttp },
+): Promise<NormalizedInboundMessage[]> {
   if (!payload || typeof payload !== "object") {
     return [];
   }
 
   const typed = payload as ZernioWebhookPayload;
 
-  // Solo procesamos eventos de mensaje entrante
-  if (typed.event !== "message.received" || !typed.message) {
+  const statusOnlyEvents = ["message.delivered", "message.read", "message.failed", "message.deleted", "message.status", "message.status_update"];
+  const event = String(typed.event || "").toLowerCase();
+  if (!typed.message || !event.startsWith("message.") || statusOnlyEvents.includes(event)) {
     return [];
   }
 
   const msg = typed.message;
+  const isOutbound = msg.direction === "outgoing" || msg.fromMe === true;
 
-  // Descartar mensajes salientes producidos por el bot o la plataforma para evitar loops
-  if (msg.direction === "outgoing" || msg.fromMe === true) {
-    return [];
+  // Extraer el teléfono del participante/destinatario (normalizado sin caracteres especiales)
+  let rawPhoneSource = "";
+
+  if (isOutbound) {
+    rawPhoneSource =
+      msg.recipient?.id ||
+      msg.recipient?.username ||
+      msg.recipient?.phone ||
+      msg.recipientId ||
+      msg.participantId ||
+      msg.participantUsername ||
+      msg.to ||
+      (typeof msg.metadata?.to === "string" ? msg.metadata.to : "") ||
+      (typeof msg.metadata?.phone === "string" ? msg.metadata.phone : "") ||
+      (typeof msg.metadata?.recipient === "string" ? msg.metadata.recipient : "");
+  } else {
+    rawPhoneSource =
+      msg.sender?.id ||
+      msg.sender?.username ||
+      msg.participantId ||
+      msg.participantUsername ||
+      "";
   }
 
-  // Extraer el teléfono del remitente (normalizado sin caracteres especiales)
-  const rawSender = msg.sender?.id || msg.sender?.username || msg.participantId || "";
-  const waPhone = rawSender.replace(/\D/g, "");
+  let waPhone = rawPhoneSource.replace(/\D/g, "");
 
-  if (!waPhone) {
+  // Si no se encontró teléfono o es una cuenta comercial en mensaje saliente, intentar resolver por el caché o la API de Zernio
+  if ((!waPhone || isBusinessAccount(waPhone)) && msg.conversationId && options?.zernioSender) {
+    const resolvedPhone = await options.zernioSender.resolvePhoneByConversationId(msg.conversationId);
+    if (resolvedPhone) {
+      waPhone = resolvedPhone;
+    }
+  }
+
+  // Si no hay teléfono válido o si coincide con un ID de canal comercial (ej. 1042377638962976), descartar para no crear chats provisionales
+  if (!waPhone || isBusinessAccount(waPhone)) {
     return [];
   }
 
   const externalId = msg.platformMessageId || msg.id;
-  const waProfileName = msg.sender?.name?.trim() || null;
+  const waProfileName = isOutbound ? null : msg.sender?.name?.trim() || null;
 
   const firstAttachment = msg.attachments && msg.attachments.length > 0 ? msg.attachments[0] : null;
 
@@ -105,6 +154,8 @@ export function parseZernioWebhookPayload(payload: unknown): NormalizedInboundMe
       caption,
       filename,
       waProfileName,
+      direction: isOutbound ? "outbound" : "inbound",
+      author: isOutbound ? "agent" : "customer",
     },
   ];
 }

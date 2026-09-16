@@ -152,11 +152,18 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
     return message;
   }
 
-  async insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean }> {
+  async insertInbound(input: InsertInboundMessageInput): Promise<{ message: Message; isDuplicate: boolean; isEdited?: boolean }> {
     const existing = this.messages.find(
       (m) => m.conversationId === input.conversationId && m.externalId === input.externalId,
     );
-    if (existing) return { message: existing, isDuplicate: true };
+    if (existing) {
+      if (existing.body !== input.body || existing.caption !== (input.caption ?? null)) {
+        existing.body = input.body;
+        existing.caption = input.caption ?? null;
+        return { message: existing, isDuplicate: false, isEdited: true };
+      }
+      return { message: existing, isDuplicate: true, isEdited: false };
+    }
     const message = this.seedText(input.conversationId, input.body, {
       externalId: input.externalId,
       type: input.type,
@@ -165,7 +172,7 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       caption: input.caption ?? null,
       filename: input.filename ?? null,
     });
-    return { message, isDuplicate: false };
+    return { message, isDuplicate: false, isEdited: false };
   }
 
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {

@@ -212,6 +212,8 @@ export class ZernioHistorySyncWorker {
         mediaId: firstAttachment?.url ?? null,
         mimeType: firstAttachment?.mimeType ?? null,
         filename: firstAttachment?.filename ?? null,
+        status: msg.status,
+        errorMessage: msg.errorMessage,
         createdAt: msgDate,
       });
 

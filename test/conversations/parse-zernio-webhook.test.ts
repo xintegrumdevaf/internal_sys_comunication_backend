@@ -4,7 +4,7 @@ import { verifyZernioSignature } from "../../src/shared/http/zernio-signature";
 import { createHmac } from "node:crypto";
 
 describe("parseZernioWebhookPayload", () => {
-  it("extrae correctamente un mensaje entrante de texto", () => {
+  it("extrae correctamente un mensaje entrante de texto", async () => {
     const payload = {
       id: "evt_12345",
       event: "message.received",
@@ -23,7 +23,7 @@ describe("parseZernioWebhookPayload", () => {
       },
     };
 
-    const [normalized] = parseZernioWebhookPayload(payload);
+    const [normalized] = await parseZernioWebhookPayload(payload);
     expect(normalized).toBeDefined();
     expect(normalized!.waPhone).toBe("593993546974");
     expect(normalized!.externalId).toBe("wamid.HBg12345");
@@ -33,7 +33,7 @@ describe("parseZernioWebhookPayload", () => {
     expect(normalized!.mediaId).toBeNull();
   });
 
-  it("extrae adjunto cuando viene en attachments", () => {
+  it("extrae adjunto cuando viene en attachments", async () => {
     const payload = {
       id: "evt_img",
       event: "message.received",
@@ -59,7 +59,7 @@ describe("parseZernioWebhookPayload", () => {
       },
     };
 
-    const [normalized] = parseZernioWebhookPayload(payload);
+    const [normalized] = await parseZernioWebhookPayload(payload);
     expect(normalized).toBeDefined();
     expect(normalized!.waPhone).toBe("593981170640");
     expect(normalized!.externalId).toBe("wamid.IMG999");
@@ -69,24 +69,29 @@ describe("parseZernioWebhookPayload", () => {
     expect(normalized!.body).toBe("Comprobante de pago adjunto");
   });
 
-  it("descarta mensajes salientes (direction === 'outgoing' o fromMe === true)", () => {
+  it("normaliza correctamente mensajes salientes (direction === 'outgoing' o fromMe === true)", async () => {
     const payload = {
       id: "evt_out",
-      event: "message.received",
+      event: "message.sent",
       message: {
         id: "msg_out_1",
         conversationId: "conv_xyz",
+        participantId: "+593 99 354 6974",
         direction: "outgoing",
         fromMe: true,
-        text: "Mensaje enviado por el operador",
+        text: "Mensaje enviado por el vendedor desde WhatsApp movil",
       },
     };
 
-    const messages = parseZernioWebhookPayload(payload);
-    expect(messages).toHaveLength(0);
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.waPhone).toBe("593993546974");
+    expect(normalized!.direction).toBe("outbound");
+    expect(normalized!.author).toBe("agent");
+    expect(normalized!.body).toBe("Mensaje enviado por el vendedor desde WhatsApp movil");
   });
 
-  it("descarta eventos que no sean message.received", () => {
+  it("descarta eventos que no sean message.received", async () => {
     const payload = {
       id: "evt_other",
       event: "message.delivered",
@@ -95,7 +100,7 @@ describe("parseZernioWebhookPayload", () => {
       },
     };
 
-    const messages = parseZernioWebhookPayload(payload);
+    const messages = await parseZernioWebhookPayload(payload);
     expect(messages).toHaveLength(0);
   });
 });

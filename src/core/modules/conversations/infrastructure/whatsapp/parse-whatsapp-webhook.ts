@@ -70,6 +70,8 @@ export type NormalizedInboundMessage = {
    * pasar en producción, pero el parser nunca asume que siempre está).
    */
   waProfileName: string | null;
+  direction?: "inbound" | "outbound";
+  author?: import("../../domain/message.entity").MessageAuthor;
 };
 
 export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInboundMessage[] {
