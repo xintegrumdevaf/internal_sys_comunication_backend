@@ -301,6 +301,7 @@ Atajos de respuesta predefinidos con variables dinámicas (`{{nombre}}`, `{{cedu
 | `GET` | `/api/quick-replies` | sesión | Lista respuestas visibles (globales + asignadas al agente). Query: `departmentId` (opcional, uuid o `null`), `search` (opcional), `category` (opcional), `activeOnly` (booleano) |
 | `GET` | `/api/quick-replies/resolve` | sesión | Resuelve un atajo con interpolación de variables de contexto. Query: `shortcut` (requerido, ej. `saludo`), `departmentId` (opcional), `conversationId` (opcional) |
 | `POST` | `/api/quick-replies` | `admin` o `manager` | Crea una respuesta rápida. Body: `{ shortcut, title, body, departmentId?, category?, mediaUrl? }`. `manager` solo puede crear para su departamento; `admin` para cualquier departamento o global (`departmentId: null`) |
+| `POST` | `/api/quick-replies/refine-tone` | `admin` o `manager` | Refina el tono de un borrador de respuesta rápida hacia uno empático y profesional con IA on-demand. Body: `{ text: string }`. Responde: `{ refinedText: string }` |
 | `PUT` | `/api/quick-replies/:id` | `admin` o `manager` | Actualiza una respuesta rápida existente. `manager` solo puede modificar las de su departamento |
 | `DELETE` | `/api/quick-replies/:id` | `admin` o `manager` | Elimina una respuesta rápida |
 

@@ -28,6 +28,11 @@ export type RealtimeEvent =
       messageId: string;
       status: "sent" | "delivered" | "read" | "failed";
       errorMessage?: string | null;
+      type: "MESSAGE_EDITED";
+      conversationId: string;
+      messageId: string;
+      newBody: string;
+      editedAt: string;
     }
   | {
       type: "CASE_ESCALATED";

@@ -2,6 +2,11 @@ export type MessageDirection = "inbound" | "outbound";
 export type MessageAuthor = "customer" | "ai" | "agent" | "system";
 export type MessageStatus = "sent" | "delivered" | "read" | "failed";
 
+export interface MessageEditHistoryEntry {
+  previousBody: string;
+  editedAt: string;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -19,6 +24,8 @@ export interface Message {
   filename: string | null;
   status: MessageStatus;
   errorMessage: string | null;
+  editedAt?: Date | null;
+  editHistory?: MessageEditHistoryEntry[];
   createdAt: Date;
 }
 

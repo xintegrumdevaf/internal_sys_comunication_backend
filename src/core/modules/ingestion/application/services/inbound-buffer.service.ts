@@ -41,6 +41,26 @@ export class InboundBufferService {
     this.reschedule(conversationId);
   }
 
+  /**
+   * Verifica si la conversación tiene un debounce timer activo.
+   */
+  hasActiveBuffer(conversationId: string): boolean {
+    return this.timers.has(conversationId);
+  }
+
+  /**
+   * Resetea el timer de debounce si está activo (edición recibida pre-flush).
+   * Retorna true si el debounce estaba activo y fue reprogramado; false si ya se procesó.
+   */
+  touch(conversationId: string): boolean {
+    if (this.timers.has(conversationId)) {
+      this.logger.info({ conversationId }, "edicion recibida durante debounce: timer reseteado");
+      this.reschedule(conversationId);
+      return true;
+    }
+    return false;
+  }
+
   /** Fuerza el flush inmediato de una conversacion (util en tests). */
   async flushNow(conversationId: string): Promise<void> {
     const existing = this.timers.get(conversationId);

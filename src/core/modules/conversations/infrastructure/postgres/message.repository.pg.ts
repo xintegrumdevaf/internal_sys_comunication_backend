@@ -23,10 +23,23 @@ type MessageRow = {
   filename: string | null;
   status: MessageStatus;
   error_message: string | null;
+  edited_at?: Date | null;
+  edit_history?: import("../../domain/message.entity").MessageEditHistoryEntry[] | string;
   created_at: Date;
 };
 
 function mapRow(row: MessageRow): Message {
+  let editHistory: import("../../domain/message.entity").MessageEditHistoryEntry[] = [];
+  if (Array.isArray(row.edit_history)) {
+    editHistory = row.edit_history;
+  } else if (typeof row.edit_history === "string") {
+    try {
+      editHistory = JSON.parse(row.edit_history);
+    } catch {
+      editHistory = [];
+    }
+  }
+
   return {
     id: row.id,
     conversationId: row.conversation_id,
@@ -43,6 +56,8 @@ function mapRow(row: MessageRow): Message {
     filename: row.filename,
     status: row.status ?? "sent",
     errorMessage: row.error_message ?? null,
+    editedAt: row.edited_at ?? null,
+    editHistory,
     createdAt: row.created_at,
   };
 }
@@ -240,5 +255,49 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       [caseId],
     );
     return rows.map((r) => r.agent_id);
+  }
+
+  async updateMessageBodyByExternalId(
+    externalId: string,
+    newBody: string,
+  ): Promise<{ updated: boolean; message: Message | null }> {
+    const existing = await this.pool.query<MessageRow>(
+      `SELECT * FROM message WHERE external_id = $1 LIMIT 1`,
+      [externalId],
+    );
+    const current = existing.rows[0];
+    if (!current) {
+      return { updated: false, message: null };
+    }
+    const previousBody = current.body;
+
+    const result = await this.pool.query<MessageRow>(
+      `UPDATE message
+       SET body = $1,
+           edited_at = now(),
+           edit_history = edit_history || jsonb_build_array(
+             jsonb_build_object('previousBody', $2::text, 'editedAt', now())
+           )
+       WHERE id = $3
+       RETURNING *`,
+      [newBody, previousBody, current.id],
+    );
+
+    const updatedRow = result.rows[0];
+    if (!updatedRow) {
+      return { updated: false, message: null };
+    }
+
+    return { updated: true, message: mapRow(updatedRow) };
+  }
+
+  async findByExternalId(externalId: string): Promise<Message | null> {
+    const { rows } = await this.pool.query<MessageRow>(
+      `SELECT * FROM message WHERE external_id = $1 LIMIT 1`,
+      [externalId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return mapRow(row);
   }
 }

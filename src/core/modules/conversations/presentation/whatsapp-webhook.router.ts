@@ -7,14 +7,17 @@ import type { SyncTemplateStatusUseCase } from "../../message-templates/applicat
 import {
   parseWhatsAppWebhookPayload,
   parseWhatsAppTemplateStatusUpdates,
+  parseWhatsAppWebhookEdits,
 } from "../infrastructure/whatsapp/parse-whatsapp-webhook";
 import type { ReceiveInboundMessageUseCase } from "../application/use-cases/receive-inbound-message.use-case";
+import type { ReceiveInboundEditUseCase } from "../application/use-cases/receive-inbound-edit.use-case";
 
 export type WhatsAppWebhookRouterDeps = {
   env: Env;
   receiveInboundMessage: ReceiveInboundMessageUseCase;
   redisClient: Redis;
   syncTemplateStatus?: SyncTemplateStatusUseCase;
+  receiveInboundEdit?: ReceiveInboundEditUseCase;
 };
 
 /**
@@ -24,7 +27,7 @@ export type WhatsAppWebhookRouterDeps = {
  */
 export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Router {
   const router = Router();
-  const { env, receiveInboundMessage, redisClient, syncTemplateStatus } = deps;
+  const { env, receiveInboundMessage, redisClient, syncTemplateStatus, receiveInboundEdit } = deps;
 
   router.get("/api/webhooks/whatsapp", (req, res) => {
     const mode = req.query["hub.mode"];
@@ -80,6 +83,17 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
             type: "MESSAGE_RECEIVED",
             conversationId: conversation.id,
             messageId: message.id,
+          });
+        }
+      }
+
+      const normalizedEdits = parseWhatsAppWebhookEdits(req.body);
+      if (normalizedEdits.length > 0 && receiveInboundEdit) {
+        req.log?.info({ editCount: normalizedEdits.length }, "ediciones de mensaje de whatsapp recibidas");
+        for (const edit of normalizedEdits) {
+          await receiveInboundEdit.execute({
+            ...edit,
+            correlationId: req.correlationId,
           });
         }
       }

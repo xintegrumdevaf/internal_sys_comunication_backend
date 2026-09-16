@@ -84,6 +84,15 @@ export type QualityAnalysis = {
   findings: QualityAnalysisFinding[];
 };
 
+export type RefineTextToneInput = {
+  text: string;
+  targetTone?: "empathetic_customer_service";
+};
+
+export type RefineTextToneOutput = {
+  refinedText: string;
+};
+
 export interface AIProviderPort {
   interpretMessage(input: InterpretMessageInput): Promise<Interpretation>;
   composeReply(input: ComposeReplyInput): Promise<string>;
@@ -91,4 +100,6 @@ export interface AIProviderPort {
   extractReceiptData(mediaUrl: string, mimeType: string): Promise<ReceiptData>;
   /** Evaluación de calidad de atención humana (07_QUALITY_SUPERVISION.md). */
   analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis>;
+  /** Refina el tono de un texto para atención al cliente (on-demand en respuestas rápidas). */
+  refineTextTone(input: RefineTextToneInput): Promise<RefineTextToneOutput>;
 }

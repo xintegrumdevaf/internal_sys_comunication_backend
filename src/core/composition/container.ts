@@ -43,6 +43,7 @@ import { UpdateQuickReplyUseCase } from "../modules/quick-replies/application/us
 import { DeleteQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/delete-quick-reply.use-case";
 import { ListQuickRepliesUseCase } from "../modules/quick-replies/application/use-cases/list-quick-replies.use-case";
 import { ResolveQuickReplyUseCase } from "../modules/quick-replies/application/use-cases/resolve-quick-reply.use-case";
+import { RefineQuickReplyToneUseCase } from "../modules/quick-replies/application/use-cases/refine-quick-reply-tone.use-case";
 import { createQuickRepliesRouter } from "../modules/quick-replies/presentation/quick-replies.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
@@ -51,6 +52,7 @@ import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/what
 import { ZernioSenderHttp } from "../modules/conversations/infrastructure/zernio/zernio-sender.http";
 import type { WhatsAppSenderPort } from "../modules/conversations/application/ports/whatsapp-sender.port";
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
+import { ReceiveInboundEditUseCase } from "../modules/conversations/application/use-cases/receive-inbound-edit.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
 import { ListMessagesUseCase } from "../modules/conversations/application/use-cases/list-messages.use-case";
 import { MarkConversationAsReadUseCase } from "../modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
@@ -353,6 +355,7 @@ export function createContainer(): Container {
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
+  const refineQuickReplyTone = new RefineQuickReplyToneUseCase({ aiProvider });
 
   // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
   const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
@@ -642,6 +645,15 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
   });
+  const receiveInboundEdit = new ReceiveInboundEditUseCase({
+    conversationRepo,
+    messageRepo,
+    redisClient,
+    logger: conversationsLogger,
+    inboundBuffer,
+    broadcaster,
+    caseRepo,
+  });
   const listConversations = new ListConversationsUseCase(
     conversationRepo,
     messageRepo,
@@ -930,6 +942,7 @@ export function createContainer(): Container {
       deleteQuickReply,
       listQuickReplies,
       resolveQuickReply,
+      refineTone: refineQuickReplyTone,
     }),
   );
   app.use(

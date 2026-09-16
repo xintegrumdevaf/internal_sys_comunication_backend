@@ -226,6 +226,7 @@ Toda escritura queda en `audit_event`.
 
 ```json
 { "type": "MESSAGE_RECEIVED", "conversationId": "conv_456", "messageId": "msg_789" }
+{ "type": "MESSAGE_EDITED", "conversationId": "conv_456", "messageId": "msg_789", "newBody": "...", "editedAt": "..." }
 { "type": "MESSAGE_SENT", "conversationId": "conv_456", "messageId": "msg_790", "author": "ai" }
 { "type": "CASE_ESCALATED", "caseId": "case_123", "conversationId": "conv_456", "departmentId": "dept_support", "at": "..." }
 { "type": "CASE_CLAIMED", "caseId": "case_123", "agentUserId": "user_1" }
@@ -235,7 +236,7 @@ Toda escritura queda en `audit_event`.
 { "type": "INTERNAL_THREAD_READ", "threadId": "th_123", "agentId": "ag_2", "readAt": "..." }
 ```
 
-`MESSAGE_RECEIVED` = mensaje entrante del cliente ya persistido. `MESSAGE_SENT` = mensaje saliente ya persistido y (si aplica) ya enviado a WhatsApp — `author` distingue `"ai"` de `"agent"` para que el frontend pueda, por ejemplo, mostrar distinto quién respondió. Ambos eventos solo llevan el `messageId`; el frontend pide el contenido vía `GET /api/conversations/:id/messages` (o mantiene su propio cache local) — el evento es una notificación de "hay algo nuevo", no el mensaje completo, para no duplicar la fuente de verdad. `INTERNAL_MESSAGE_SENT` notifica a los participantes del hilo con un preview ligero para actualizar la bandeja y el feed sin polling.
+`MESSAGE_RECEIVED` = mensaje entrante del cliente ya persistido. `MESSAGE_EDITED` = mensaje editado en WhatsApp (por el cliente o via coexistencia en app móvil), actualiza en caliente el contenido persistido con `newBody` y `editedAt`. `MESSAGE_SENT` = mensaje saliente ya persistido y (si aplica) ya enviado a WhatsApp — `author` distingue `"ai"` de `"agent"` para que el frontend pueda, por ejemplo, mostrar distinto quién respondió. Ambos eventos solo llevan el `messageId`; el frontend pide el contenido vía `GET /api/conversations/:id/messages` (o mantiene su propio cache local) — el evento es una notificación de "hay algo nuevo", no el mensaje completo, para no duplicar la fuente de verdad. `INTERNAL_MESSAGE_SENT` notifica a los participantes del hilo con un preview ligero para actualizar la bandeja y el feed sin polling.
 
 ### C.4 DTOs de referencia
 

@@ -34,6 +34,11 @@ export class FakeAIProvider implements AIProviderPort {
     findings: [],
   });
 
+  refineTextToneImpl: (input: { text: string; targetTone?: "empathetic_customer_service" }) => Promise<{ refinedText: string }> =
+    async (input) => ({
+      refinedText: `Refinado: ${input.text}`,
+    });
+
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
     return this.interpretImpl(input);
   }
@@ -52,5 +57,9 @@ export class FakeAIProvider implements AIProviderPort {
 
   async analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis> {
     return this.analyzeImpl(input);
+  }
+
+  async refineTextTone(input: { text: string; targetTone?: "empathetic_customer_service" }): Promise<{ refinedText: string }> {
+    return this.refineTextToneImpl(input);
   }
 }

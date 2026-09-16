@@ -83,6 +83,18 @@ export interface MessageRepositoryPort {
    * Agentes distintos que enviaron mensajes en el caso (para análisis de calidad multi-agente).
    */
   listDistinctAgentIdsByCase(caseId: string): Promise<string[]>;
+  /**
+   * Actualiza el cuerpo de un mensaje inbound cuando el cliente lo edita en WhatsApp.
+   * Preserva el historial en edit_history y actualiza edited_at.
+   */
+  updateMessageBodyByExternalId(
+    externalId: string,
+    newBody: string,
+  ): Promise<{ updated: boolean; message: Message | null }>;
+  /**
+   * Busca un mensaje por su externalId de WhatsApp (wamid).
+   */
+  findByExternalId(externalId: string): Promise<Message | null>;
 }
 
 
