@@ -22,6 +22,7 @@ export type ZernioWebhookRouterDeps = {
   campaignRepo?: CampaignRepositoryPort;
   messageRepo?: MessageRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
+  conversationRepo?: import("../application/ports/conversation.repository.port").ConversationRepositoryPort;
 };
 
 /**
@@ -40,6 +41,7 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
     campaignRepo,
     messageRepo,
     broadcaster,
+    conversationRepo,
   } = deps;
 
   router.get("/api/webhooks/zernio", (_req, res) => {
@@ -156,11 +158,40 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
         }
 
         if (isFailureEvent || newStatus !== "sent") {
-          const updatedMsg = await messageRepo.updateStatusByExternalId(
+          let updatedMsg = await messageRepo.updateStatusByExternalId(
             String(platformMessageId),
             newStatus,
             errorMessage,
           );
+
+          if (!updatedMsg && messageObj?.id && String(messageObj.id) !== String(platformMessageId)) {
+            updatedMsg = await messageRepo.updateStatusByExternalId(
+              String(messageObj.id),
+              newStatus,
+              errorMessage,
+            );
+          }
+
+          if (!updatedMsg && rawParticipant && conversationRepo) {
+            const conv = await conversationRepo.findByWaPhone(String(rawParticipant));
+            if (conv) {
+              const matchedOutbound = await messageRepo.findRecentOutbound(conv.id, {
+                externalId: String(platformMessageId),
+                body: messageObj?.text,
+                maxAgeSeconds: 120,
+              });
+              if (matchedOutbound) {
+                if (platformMessageId && matchedOutbound.externalId !== String(platformMessageId)) {
+                  await messageRepo.updateExternalId(matchedOutbound.id, String(platformMessageId));
+                }
+                updatedMsg = await messageRepo.updateStatusByExternalId(
+                  String(platformMessageId),
+                  newStatus,
+                  errorMessage,
+                );
+              }
+            }
+          }
 
           if (updatedMsg) {
             req.log?.info(
@@ -181,10 +212,58 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
         }
       }
 
+      // Si el evento fue estrictamente una notificación de estado / entrega de un mensaje saliente,
+      // no debemos proceder a insertarlo como un mensaje nuevo en la conversación.
+      const isDeliveryReceiptEvent =
+        eventName === "message.delivered" ||
+        eventName === "message.read" ||
+        eventName.startsWith("message.delivery");
+
+      if (isDeliveryReceiptEvent) {
+        req.log?.info({ event: eventName, platformMessageId }, "evento de recibo de entrega procesado sin re-insertar");
+        res.status(200).json({ ok: true, status: "delivery_receipt_handled" });
+        return;
+      }
+
       const normalizedMessages = await parseZernioWebhookPayload(req.body, { zernioSender });
       req.log?.info({ messageCount: normalizedMessages.length }, "payload de zernio normalizado");
 
       for (const normalized of normalizedMessages) {
+        if (normalized.direction === "outbound") {
+          // Desduplicación de ecos salientes generados por nuestra propia API o IA
+          const existingConv = conversationRepo
+            ? await conversationRepo.findByWaPhone(normalized.waPhone)
+            : null;
+          if (existingConv && messageRepo) {
+            const matchedOutbound = await messageRepo.findRecentOutbound(existingConv.id, {
+              externalId: normalized.externalId,
+              body: normalized.body,
+              maxAgeSeconds: 60,
+            });
+
+            if (matchedOutbound) {
+              req.log?.info(
+                { conversationId: existingConv.id, messageId: matchedOutbound.id, externalId: normalized.externalId },
+                "eco saliente de Zernio reconocido como mensaje local existente; correlacionando sin duplicar",
+              );
+
+              if (normalized.externalId && matchedOutbound.externalId !== normalized.externalId) {
+                await messageRepo.updateExternalId(matchedOutbound.id, normalized.externalId);
+              }
+              await messageRepo.updateStatusByExternalId(normalized.externalId, "delivered");
+              if (broadcaster) {
+                broadcaster.publish({
+                  type: "MESSAGE_STATUS_UPDATED",
+                  conversationId: existingConv.id,
+                  messageId: matchedOutbound.id,
+                  status: "delivered",
+                });
+              }
+              continue; // Evita crear fila duplicada en la base de datos
+            }
+          }
+        }
+
         const { conversation, message, isDuplicate } = await receiveInboundMessage.execute({
           ...normalized,
           correlationId: req.correlationId,

@@ -114,7 +114,16 @@ function mapWorkflowInstanceRow(row: WorkflowInstanceRow): WorkflowInstance {
   };
 }
 
-function mapAutomationStateRow(row: AutomationStateRow): AutomationState {
+function mapAutomationStateRow(row?: AutomationStateRow | null): AutomationState {
+  if (!row) {
+    return {
+      caseId: "",
+      enabled: true,
+      disabledReason: null,
+      changedAt: new Date(),
+      changedBy: null,
+    };
+  }
   return {
     caseId: row.case_id,
     enabled: row.enabled,
@@ -282,13 +291,23 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
     options: { reason?: string | null; changedBy?: string | null },
   ): Promise<AutomationState> {
     const { rows } = await this.pool.query<AutomationStateRow>(
-      `UPDATE automation_state
-       SET enabled = $2, disabled_reason = $3, changed_at = now(), changed_by = $4
-       WHERE case_id = $1
+      `INSERT INTO automation_state (case_id, enabled, disabled_reason, changed_at, changed_by)
+       VALUES ($1, $2, $3, now(), $4)
+       ON CONFLICT (case_id) DO UPDATE
+       SET enabled = EXCLUDED.enabled,
+           disabled_reason = EXCLUDED.disabled_reason,
+           changed_at = EXCLUDED.changed_at,
+           changed_by = EXCLUDED.changed_by
        RETURNING *`,
       [caseId, enabled, options.reason ?? null, options.changedBy ?? null],
     );
-    return mapAutomationStateRow(rows[0]!);
+    return mapAutomationStateRow(rows[0] ?? {
+      case_id: caseId,
+      enabled,
+      disabled_reason: options.reason ?? null,
+      changed_at: new Date(),
+      changed_by: options.changedBy ?? null,
+    });
   }
 
   async appendEvent(caseId: string, type: string, payload: Record<string, unknown>): Promise<void> {

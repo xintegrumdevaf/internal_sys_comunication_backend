@@ -13,6 +13,7 @@ export type InsertInboundMessageInput = {
   errorMessage?: string | null;
   direction?: "inbound" | "outbound";
   author?: MessageAuthor;
+  createdAt?: Date;
 };
 
 export type InsertOutboundMessageInput = {
@@ -92,9 +93,16 @@ export interface MessageRepositoryPort {
     newBody: string,
   ): Promise<{ updated: boolean; message: Message | null }>;
   /**
-   * Busca un mensaje por su externalId de WhatsApp (wamid).
+   * Busca un mensaje saliente reciente en la conversación (para correlación y desduplicación de ecos de webhook).
    */
-  findByExternalId(externalId: string): Promise<Message | null>;
+  findRecentOutbound(
+    conversationId: string,
+    options: { externalId?: string | null; body?: string; maxAgeSeconds?: number },
+  ): Promise<Message | null>;
+  /**
+   * Actualiza el externalId de un mensaje existente (ej. para enriquecerlo con el platformMessageId de Meta).
+   */
+  updateExternalId(messageId: string, externalId: string): Promise<void>;
 }
 
 

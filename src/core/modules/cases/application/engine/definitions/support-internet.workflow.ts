@@ -107,10 +107,10 @@ export function normalizeDiagnosticResult(raw: Record<string, unknown>): Diagnos
 }
 
 function requireSupportInternetContext(context: CaseContext): SupportInternetContext {
-  if (context.workflowType !== "SUPPORT_INTERNET") {
+  if (context?.workflowType && context.workflowType !== "SUPPORT_INTERNET") {
     throw new Error(`Contexto invalido para SUPPORT_INTERNET: workflowType='${context.workflowType}'`);
   }
-  return context.data;
+  return context?.data ?? (context as unknown as SupportInternetContext) ?? {};
 }
 
 function withContext(data: SupportInternetContext, base?: CaseContext): CaseContext {
@@ -231,15 +231,21 @@ const validateClient: WorkflowStateHandler = async ({
   };
 
   if (output.contracts.length > 1) {
-    const pendingContracts = output.contracts.map((c) => ({
-      id: c.id,
-      name: c.name,
-      address: c.address,
-      sector: c.router.sector,
-      oltName: c.router.olt_name,
-      pon: c.router.pon,
-      serial: c.router.serial,
-    }));
+    const pendingContracts = output.contracts.map((c) => {
+      const extra = c as unknown as { contractCode?: string; label?: string };
+      return {
+        id: c.id,
+        contractCode: extra.contractCode,
+        name: c.name,
+        address: c.address,
+        label: extra.label || c.address || `Contrato #${c.id}`,
+        sector: c.router.sector,
+        oltName: c.router.olt_name,
+        pon: c.router.pon,
+        serial: c.router.serial,
+        ip: c.ip,
+      };
+    });
     const nextData: SupportInternetContext = { ...data, pendingContracts };
     const waiting = resetWaitingAttempts(
       withContext(nextData, context),
@@ -283,6 +289,7 @@ const validateClient: WorkflowStateHandler = async ({
 const disambiguateContract: WorkflowStateHandler = async ({
   conversationId,
   context,
+  text,
   entities,
   identity,
 }) => {
@@ -296,20 +303,72 @@ const disambiguateContract: WorkflowStateHandler = async ({
     };
   }
 
-  const address =
-    typeof entities?.address === "string" ? entities.address.trim().toLowerCase() : "";
-  const fullName =
-    typeof entities?.fullName === "string" ? entities.fullName.trim().toLowerCase() : "";
+  let matched: (typeof pending)[number] | undefined;
 
-  const matched = pending.find((c) => {
-    if (fullName && c.name.toLowerCase().includes(fullName)) return true;
-    if (address && (c.address ?? "").toLowerCase().includes(address)) return true;
-    return false;
-  });
+  // 1. Coincidencia por número / opción ordinal (1, 2, 3...)
+  const rawOption = entities?.selectedOption;
+  let selectedIndex = -1;
+  if (typeof rawOption === "number" && Number.isInteger(rawOption)) {
+    selectedIndex = rawOption - 1;
+  } else if (typeof rawOption === "string") {
+    const parsed = parseInt(rawOption.trim(), 10);
+    if (!Number.isNaN(parsed)) selectedIndex = parsed - 1;
+  }
+
+  if (selectedIndex < 0 && text) {
+    const trimmed = text.trim().toLowerCase();
+    const digitMatch = trimmed.match(/^(?:opci[oó]n|el|la|n[uú]mero|contrato)?\s*#?\s*([1-9]\d*)$/i);
+    if (digitMatch && digitMatch[1]) {
+      selectedIndex = parseInt(digitMatch[1], 10) - 1;
+    } else if (trimmed === "primero" || trimmed === "primera" || trimmed === "el primero" || trimmed === "la primera") {
+      selectedIndex = 0;
+    } else if (trimmed === "segundo" || trimmed === "segunda" || trimmed === "el segundo" || trimmed === "la segunda") {
+      selectedIndex = 1;
+    } else if (trimmed === "tercero" || trimmed === "tercera" || trimmed === "el tercero" || trimmed === "la tercera") {
+      selectedIndex = 2;
+    }
+  }
+
+  if (selectedIndex >= 0 && selectedIndex < pending.length) {
+    matched = pending[selectedIndex];
+  }
+
+  // 2. Coincidencia por código de contrato o id
+  if (!matched) {
+    const code =
+      typeof entities?.contractCode === "string"
+        ? entities.contractCode.trim().toLowerCase()
+        : typeof entities?.contractId === "string"
+          ? entities.contractId.trim().toLowerCase()
+          : "";
+    if (code) {
+      matched = pending.find(
+        (c) =>
+          c.id.toLowerCase() === code ||
+          (c.contractCode && c.contractCode.toLowerCase() === code) ||
+          c.id.toLowerCase().includes(code),
+      );
+    }
+  }
+
+  // 3. Coincidencia por dirección o nombre
+  if (!matched) {
+    const address =
+      typeof entities?.address === "string" ? entities.address.trim().toLowerCase() : "";
+    const fullName =
+      typeof entities?.fullName === "string" ? entities.fullName.trim().toLowerCase() : "";
+    const rawText = (text || "").toLowerCase();
+
+    matched = pending.find((c) => {
+      if (fullName && c.name.toLowerCase().includes(fullName)) return true;
+      if (address && (c.address ?? "").toLowerCase().includes(address)) return true;
+      if (c.contractCode && rawText.includes(c.contractCode.toLowerCase())) return true;
+      if (c.address && rawText.length >= 4 && c.address.toLowerCase().includes(rawText)) return true;
+      return false;
+    });
+  }
 
   if (!matched) {
-    // Sin match: el evaluator §13 ya debio haber pedido reintento; si llegamos
-    // aqui con entities incompletas, re-preguntar.
     const waiting = resetWaitingAttempts(context, "WAITING_USER_DISAMBIGUATE");
     return { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context: waiting };
   }
@@ -577,11 +636,16 @@ export const supportInternetWorkflow: WorkflowDefinition = {
       requireAll: ["nationalId"],
       maxAttempts: 3,
     },
+    WAITING_NATIONAL_ID: {
+      pendingQuestion: "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
+      requireAll: ["nationalId"],
+      maxAttempts: 3,
+    },
     WAITING_USER_DISAMBIGUATE: {
       pendingQuestion:
-        "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
-      requireAny: ["address", "fullName"],
-      maxAttempts: 2,
+        "Encontré más de un contrato asociado a tu cédula. Por favor indícame con cuál de ellos tienes inconvenientes (puedes responder con el número de opción o la dirección):",
+      requireAny: ["selectedOption", "contractCode", "address", "fullName"],
+      maxAttempts: 3,
     },
     WAITING_USER_DIAGNOSTIC: {
       pendingQuestion: "{{question}}",
@@ -597,8 +661,10 @@ export const supportInternetWorkflow: WorkflowDefinition = {
   replyTemplates: {
     WAITING_USER_CLIENT:
       "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
+    WAITING_NATIONAL_ID:
+      "Para ayudarte con el servicio de internet, ¿me confirmas el número de cédula del titular del servicio?",
     WAITING_USER_DISAMBIGUATE:
-      "Encontré más de un contrato a tu nombre, ¿me confirmas tu dirección o el nombre completo del titular?",
+      "Encontré más de un contrato asociado a tu cédula. Por favor indícame cuál de ellos presenta problemas (responde con el número de opción o la dirección).",
     WAITING_USER_DIAGNOSTIC: "{{question}}",
     WAITING_USER_PAYMENT:
       "Detectamos un saldo pendiente de {{debt}} en tu cuenta. Cuando regularices el pago podemos continuar con el soporte técnico.",
@@ -613,6 +679,7 @@ export const supportInternetWorkflow: WorkflowDefinition = {
   states: {
     VALIDATE_CLIENT: validateClient,
     WAITING_USER_CLIENT: validateClient,
+    WAITING_NATIONAL_ID: validateClient,
     WAITING_USER_DISAMBIGUATE: disambiguateContract,
     CHECK_CLIENT_STATUS: checkClientStatus,
     CHECK_BALANCE: checkBalance,

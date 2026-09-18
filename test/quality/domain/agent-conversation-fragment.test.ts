@@ -22,6 +22,8 @@ function makeMessage(
     mimeType: null,
     caption: null,
     filename: null,
+    status: "delivered",
+    errorMessage: null,
     createdAt: new Date(),
   };
 }

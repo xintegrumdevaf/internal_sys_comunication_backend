@@ -23,6 +23,7 @@ export type ReceiveInboundMessageInput = {
   correlationId?: string;
   direction?: "inbound" | "outbound";
   author?: import("../../domain/message.entity").MessageAuthor;
+  createdAt?: Date;
 };
 
 export type ReceiveInboundMessageResult = {
@@ -82,6 +83,7 @@ export class ReceiveInboundMessageUseCase {
       filename: input.filename ?? null,
       direction: input.direction,
       author: input.author,
+      createdAt: input.createdAt,
     });
 
     log.info(

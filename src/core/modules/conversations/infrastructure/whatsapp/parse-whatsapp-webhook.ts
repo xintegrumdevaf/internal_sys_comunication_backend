@@ -22,6 +22,12 @@ type WhatsAppEditObject = {
   };
 };
 
+type WhatsAppInteractiveReply = {
+  type?: string;
+  button_reply?: { id: string; title: string };
+  list_reply?: { id: string; title: string; description?: string };
+};
+
 type WhatsAppInboundMessage = {
   from: string;
   id: string;
@@ -32,6 +38,7 @@ type WhatsAppInboundMessage = {
   audio?: WhatsAppMediaObject;
   video?: WhatsAppMediaObject;
   document?: WhatsAppDocumentObject;
+  interactive?: WhatsAppInteractiveReply;
   edit?: WhatsAppEditObject;
 };
 
@@ -83,6 +90,7 @@ export type NormalizedInboundMessage = {
   waProfileName: string | null;
   direction?: "inbound" | "outbound";
   author?: import("../../domain/message.entity").MessageAuthor;
+  createdAt?: Date;
 };
 
 export type NormalizedInboundEdit = {
@@ -117,7 +125,8 @@ export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInbound
 }
 
 function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | null): NormalizedInboundMessage {
-  const base = { waPhone: raw.from, externalId: raw.id, type: raw.type, waProfileName };
+  const createdAt = raw.timestamp ? new Date(Number(raw.timestamp) * 1000) : undefined;
+  const base = { waPhone: raw.from, externalId: raw.id, type: raw.type, waProfileName, createdAt };
 
   switch (raw.type) {
     case "text":
@@ -137,6 +146,21 @@ function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | n
         caption: raw.document?.caption ?? null,
         filename: raw.document?.filename ?? null,
       };
+    case "interactive": {
+      const btn = raw.interactive?.button_reply;
+      const list = raw.interactive?.list_reply;
+      const replyTitle = btn?.title || list?.title || "";
+      const replyId = btn?.id || list?.id || "";
+      const replyBody = replyTitle || replyId || raw.text?.body || "";
+      return {
+        ...base,
+        body: replyBody,
+        mediaId: null,
+        mimeType: null,
+        caption: null,
+        filename: null,
+      };
+    }
     default:
       return { ...base, body: "", mediaId: null, mimeType: null, caption: null, filename: null };
   }
