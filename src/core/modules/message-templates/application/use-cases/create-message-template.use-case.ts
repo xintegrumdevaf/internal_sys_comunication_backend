@@ -9,6 +9,8 @@ import type {
 import type { MessageTemplateRepositoryPort } from "../ports/message-template.repository.port";
 import type { MetaTemplatesGatewayPort } from "../ports/meta-templates-gateway.port";
 
+import { TemplatePolicyValidator } from "../../domain/template-policy-validator";
+
 export interface CreateMessageTemplateInput {
   name: string;
   category: MessageTemplateCategory;
@@ -30,18 +32,9 @@ export class CreateMessageTemplateUseCase {
 
   async execute(input: CreateMessageTemplateInput): Promise<MessageTemplate> {
     const name = input.name ? input.name.trim() : "";
-    if (!name || !/^[a-z0-9_]+$/.test(name)) {
-      throw validationError(
-        "El nombre de la plantilla solo debe contener letras minúsculas, números y guiones bajos (^[a-z0-9_]+$)",
-      );
-    }
-
     const bodyText = input.bodyText ? input.bodyText.trim() : "";
     if (!bodyText) {
       throw validationError("El texto del cuerpo (bodyText) es requerido");
-    }
-    if (bodyText.length > 1024) {
-      throw validationError("El texto del cuerpo (bodyText) no puede superar los 1024 caracteres");
     }
 
     const language = input.language?.trim() || "es";
@@ -49,6 +42,18 @@ export class CreateMessageTemplateUseCase {
     const headerContent = input.headerContent ? input.headerContent.trim() : null;
     const footerText = input.footerText ?? null;
     const buttons = input.buttons ?? null;
+
+    // Ejecutar todas las validaciones de políticas Meta (sintaxis nombre, variables 1..N, límites y acortadores)
+    TemplatePolicyValidator.validateAll({
+      name,
+      category: input.category,
+      language,
+      headerType,
+      headerContent,
+      bodyText,
+      footerText,
+      buttons,
+    });
 
     if (
       (headerType === "IMAGE" || headerType === "VIDEO" || headerType === "DOCUMENT") &&

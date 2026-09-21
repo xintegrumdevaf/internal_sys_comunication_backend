@@ -262,7 +262,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     };
 
     if (parameters.length > 0) {
-      payload.templateParams = parameters;
+      // Meta prohíbe saltos de línea dentro de los valores de los parámetros de plantilla
+      const sanitizedParams = parameters.map((p) =>
+        String(p ?? "")
+          .replace(/[\r\n]+/g, " ")
+          .trim(),
+      );
+      payload.templateParams = sanitizedParams;
     }
 
     this.logger.info({ waPhone: cleanPhone, templateName }, "Enviando plantilla via Zernio");

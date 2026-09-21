@@ -23,7 +23,7 @@ describe("MessageTemplates Use Cases", () => {
         category: "UTILITY",
         bodyText: "Hola {{1}}",
       }),
-    ).rejects.toThrow("^[a-z0-9_]+$");
+    ).rejects.toThrow("^[a-z][a-z0-9_]*$");
 
     // 2. Body invalido (>1024 caracteres)
     const longBody = "a".repeat(1025);
@@ -63,7 +63,7 @@ describe("MessageTemplates Use Cases", () => {
         name: "promo_imagen_sin_url",
         category: "MARKETING",
         headerType: "IMAGE",
-        bodyText: "Mira esta oferta {{1}}",
+        bodyText: "Mira esta oferta {{1}} en nuestra tienda.",
       }),
     ).rejects.toThrow("headerContent");
 
@@ -72,7 +72,7 @@ describe("MessageTemplates Use Cases", () => {
       category: "MARKETING",
       headerType: "IMAGE",
       headerContent: "https://example.com/imagen.jpg",
-      bodyText: "Mira esta oferta {{1}}",
+      bodyText: "Mira esta oferta {{1}} en nuestra tienda.",
     });
 
     expect(created.headerType).toBe("IMAGE");

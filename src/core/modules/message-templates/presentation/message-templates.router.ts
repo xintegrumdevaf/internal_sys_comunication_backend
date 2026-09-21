@@ -22,8 +22,8 @@ const createTemplateBodySchema = z.object({
   name: z
     .string()
     .regex(
-      /^[a-z0-9_]+$/,
-      "El nombre de la plantilla solo debe contener letras minúsculas, números y guiones bajos (^[a-z0-9_]+$)",
+      /^[a-z][a-z0-9_]*$/,
+      "El nombre de la plantilla debe empezar con una letra minúscula y solo contener letras minúsculas, números y guiones bajos (^[a-z][a-z0-9_]*$)",
     ),
   category: z.enum(["MARKETING", "UTILITY", "AUTHENTICATION"]),
   language: z.string().optional(),
