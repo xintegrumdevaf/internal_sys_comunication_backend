@@ -72,8 +72,8 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     const author = input.author ?? (direction === "outbound" ? "agent" : "customer");
 
     const inserted = await this.pool.query<MessageRow & { was_updated?: boolean }>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename, status, error_message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename, status, error_message, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()))
        ON CONFLICT (conversation_id, external_id) DO UPDATE SET
          body = EXCLUDED.body,
          caption = COALESCE(EXCLUDED.caption, message.caption)
@@ -92,6 +92,7 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.filename ?? null,
         input.status ?? (direction === "outbound" ? "sent" : "delivered"),
         input.errorMessage ?? null,
+        input.createdAt ?? null,
       ],
     );
 
@@ -299,5 +300,50 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     const row = rows[0];
     if (!row) return null;
     return mapRow(row);
+  }
+
+  async findRecentOutbound(
+    conversationId: string,
+    options: { externalId?: string | null; body?: string; maxAgeSeconds?: number },
+  ): Promise<Message | null> {
+    const maxAge = options.maxAgeSeconds ?? 60;
+    const since = new Date(Date.now() - maxAge * 1000);
+
+    if (options.externalId) {
+      const { rows } = await this.pool.query<MessageRow>(
+        `SELECT * FROM message
+         WHERE conversation_id = $1 AND direction = 'outbound' AND external_id = $2
+         LIMIT 1`,
+        [conversationId, options.externalId],
+      );
+      if (rows[0]) return mapRow(rows[0]);
+    }
+
+    if (options.body && options.body.trim()) {
+      const cleanBody = options.body.trim();
+      const { rows } = await this.pool.query<MessageRow>(
+        `SELECT * FROM message
+         WHERE conversation_id = $1 AND direction = 'outbound' AND created_at >= $2
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [conversationId, since],
+      );
+      const match = rows.find(
+        (r) =>
+          r.body.trim() === cleanBody ||
+          r.body.trim().startsWith(cleanBody.slice(0, 40)) ||
+          cleanBody.startsWith(r.body.trim().slice(0, 40)),
+      );
+      if (match) return mapRow(match);
+    }
+
+    return null;
+  }
+
+  async updateExternalId(messageId: string, externalId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE message SET external_id = $1 WHERE id = $2 AND (external_id IS NULL OR external_id = '')`,
+      [externalId, messageId],
+    );
   }
 }

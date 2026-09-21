@@ -212,3 +212,78 @@ describe("parseWhatsAppWebhookEdits", () => {
   });
 });
 
+describe("parseWhatsAppWebhookPayload — interactive messages", () => {
+  it("extrae el título y el id de un botón interactivo (button_reply)", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                contacts: [{ profile: { name: "Carlos" }, wa_id: "593999999999" }],
+                messages: [
+                  {
+                    from: "593999999999",
+                    id: "wamid.BTN_REPLY",
+                    type: "interactive",
+                    interactive: {
+                      type: "button_reply",
+                      button_reply: {
+                        id: "option_1",
+                        title: "Piso 1 - Casa",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized?.body).toBe("Piso 1 - Casa");
+    expect(normalized?.type).toBe("interactive");
+    expect(normalized?.waProfileName).toBe("Carlos");
+  });
+
+  it("extrae el título y descripción de una lista interactiva (list_reply)", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                contacts: [{ profile: { name: "Maria" }, wa_id: "593888888888" }],
+                messages: [
+                  {
+                    from: "593888888888",
+                    id: "wamid.LIST_REPLY",
+                    type: "interactive",
+                    interactive: {
+                      type: "list_reply",
+                      list_reply: {
+                        id: "option_2",
+                        title: "Piso 2",
+                        description: "Av. Amazonas y Colón",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized?.body).toBe("Piso 2");
+    expect(normalized?.type).toBe("interactive");
+  });
+});
+
+

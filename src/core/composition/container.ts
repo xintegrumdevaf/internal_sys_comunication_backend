@@ -241,16 +241,17 @@ export function createContainer(): Container {
     customerRepo,
     contractRepo,
   );
+  const metaSender = new WhatsAppSenderHttp(env, conversationsLogger);
   let whatsappSender: WhatsAppSenderPort;
   let zernioSender: ZernioSenderHttp | undefined;
 
   if (env.WHATSAPP_PROVIDER === "zernio") {
-    conversationsLogger.info("Configurando proveedor de WhatsApp: Zernio");
-    zernioSender = new ZernioSenderHttp(env, conversationsLogger);
+    conversationsLogger.info("Configurando proveedor de WhatsApp: Zernio (con fallback Meta Cloud API)");
+    zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender);
     whatsappSender = zernioSender;
   } else {
     conversationsLogger.info("Configurando proveedor de WhatsApp: Meta Cloud API directo");
-    whatsappSender = new WhatsAppSenderHttp(env, conversationsLogger);
+    whatsappSender = metaSender;
   }
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const departmentRoutingService = new DepartmentRoutingService(
@@ -804,6 +805,7 @@ export function createContainer(): Container {
       campaignRepo,
       messageRepo,
       broadcaster,
+      conversationRepo,
     }),
   );
 

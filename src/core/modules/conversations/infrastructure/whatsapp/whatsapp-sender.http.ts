@@ -113,4 +113,115 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
 
     return { externalId };
   }
+
+  async sendInteractiveButtons(
+    waPhone: string,
+    bodyText: string,
+    buttons: import("../../application/ports/whatsapp-sender.port").WhatsAppInteractiveButton[],
+    headerText?: string,
+    footerText?: string,
+  ): Promise<{ externalId: string }> {
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const cleanPhone = waPhone.replace(/\D/g, "");
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: cleanPhone,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        ...(headerText ? { header: { type: "text", text: headerText } } : {}),
+        body: { text: bodyText },
+        ...(footerText ? { footer: { text: footerText } } : {}),
+        action: {
+          buttons: buttons.slice(0, 3).map((b) => ({
+            type: "reply",
+            reply: {
+              id: b.id.slice(0, 256),
+              title: b.title.slice(0, 20),
+            },
+          })),
+        },
+      },
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      this.logger.error({ status: response.status, body: errorBody }, "whatsapp Graph API rechazo el envio de botones interactivos");
+      throw new Error(`WhatsApp sendInteractiveButtons fallo (${response.status}): ${errorBody}`);
+    }
+
+    const data = (await response.json()) as WhatsAppSendResponse;
+    const externalId = data.messages?.[0]?.id;
+    if (!externalId) {
+      throw new Error("Respuesta de WhatsApp sin id de mensaje");
+    }
+    return { externalId };
+  }
+
+  async sendInteractiveList(
+    waPhone: string,
+    bodyText: string,
+    buttonText: string,
+    sections: import("../../application/ports/whatsapp-sender.port").WhatsAppInteractiveListSection[],
+    headerText?: string,
+    footerText?: string,
+  ): Promise<{ externalId: string }> {
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const cleanPhone = waPhone.replace(/\D/g, "");
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: cleanPhone,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        ...(headerText ? { header: { type: "text", text: headerText } } : {}),
+        body: { text: bodyText },
+        ...(footerText ? { footer: { text: footerText } } : {}),
+        action: {
+          button: buttonText.slice(0, 20),
+          sections: sections.map((s) => ({
+            title: (s.title || "Opciones").slice(0, 24),
+            rows: s.rows.slice(0, 10).map((r) => ({
+              id: r.id.slice(0, 200),
+              title: r.title.slice(0, 24),
+              ...(r.description ? { description: r.description.slice(0, 72) } : {}),
+            })),
+          })),
+        },
+      },
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      this.logger.error({ status: response.status, body: errorBody }, "whatsapp Graph API rechazo el envio de lista interactiva");
+      throw new Error(`WhatsApp sendInteractiveList fallo (${response.status}): ${errorBody}`);
+    }
+
+    const data = (await response.json()) as WhatsAppSendResponse;
+    const externalId = data.messages?.[0]?.id;
+    if (!externalId) {
+      throw new Error("Respuesta de WhatsApp sin id de mensaje");
+    }
+    return { externalId };
+  }
 }

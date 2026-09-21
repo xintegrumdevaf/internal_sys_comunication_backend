@@ -77,13 +77,36 @@ export function resolveReplyTemplate(input: {
       CLARIFY_TEMPLATE;
     const friendlyMissingFields = missingFields?.map(f => {
       if (f === "nationalId") return "el número de cédula del titular del servicio";
+      if (f === "selectedOption") return "que nos indiques el número de la opción";
+      if (f === "contractCode") return "el código o número de contrato";
       if (f === "address") return "la dirección del servicio";
       if (f === "fullName") return "el nombre completo del titular";
       if (f === "answer") return "una respuesta clara";
       return f;
     });
 
-    if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
+    if (
+      outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
+      Array.isArray(contextData.pendingContracts) &&
+      contextData.pendingContracts.length > 0
+    ) {
+      const contracts = contextData.pendingContracts as Array<{
+        id: string;
+        contractCode?: string;
+        name: string;
+        address?: string;
+        label?: string;
+        sector?: string;
+      }>;
+      const listFormatted = contracts
+        .map((c, idx) => {
+          const num = idx + 1;
+          const label = c.label || c.address || (c.sector ? `Sector ${c.sector}` : `Contrato #${c.contractCode || c.id}`);
+          return `${num}️⃣ ${label}`;
+        })
+        .join("\n");
+      templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\nPor favor indícame cuál de ellos presenta el inconveniente (responde con el número 1, 2... o selecciónalo).`;
+    } else if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
       templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
     } else if (friendlyMissingFields && friendlyMissingFields.length > 0) {
       templateHint = `Aún necesitamos ${friendlyMissingFields.join(" y ")}. ${templateHint}`;

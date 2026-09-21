@@ -439,6 +439,12 @@ export class ProcessBufferedMessagesUseCase {
 
       await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
 
+      this.deps.broadcaster?.publish({
+        type: "AUTOMATION_ENABLED",
+        caseId: targetCaseId,
+        conversationId,
+      });
+
       // Si el caso está configurado en modo human_direct, se escala de inmediato sin avance de IA
       if (!decision.resumeCaseId && this.deps.routingService) {
         const routing = await this.deps.routingService.resolveByIntent(interpretation.intent);
@@ -590,12 +596,16 @@ export class ProcessBufferedMessagesUseCase {
       return;
     }
     let externalId: string | null = null;
+    let sendFailed = false;
+    let errorMessage: string | null = null;
     try {
       const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, input.body);
       externalId = sent.externalId;
     } catch (error) {
+      sendFailed = true;
+      errorMessage = error instanceof Error ? error.message : String(error);
       input.log.error(
-        { err: error instanceof Error ? error.message : String(error) },
+        { err: errorMessage },
         "fallo al enviar reply fijo por WhatsApp",
       );
     }
@@ -604,13 +614,25 @@ export class ProcessBufferedMessagesUseCase {
       author: "ai",
       body: input.body,
       externalId,
+      status: sendFailed ? "failed" : "sent",
+      errorMessage: sendFailed ? errorMessage : undefined,
     });
-    this.deps.broadcaster?.publish({
-      type: "MESSAGE_SENT",
-      conversationId: input.conversationId,
-      messageId: outbound.id,
-      author: "ai",
-    });
+    if (sendFailed) {
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_STATUS_UPDATED",
+        conversationId: input.conversationId,
+        messageId: outbound.id,
+        status: "failed",
+        errorMessage,
+      });
+    } else {
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_SENT",
+        conversationId: input.conversationId,
+        messageId: outbound.id,
+        author: "ai",
+      });
+    }
   }
 
   private async sendCustomerReply(input: {
@@ -650,12 +672,65 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     let externalId: string | null = null;
+    let sendFailed = false;
+    let errorMessage: string | null = null;
+    const contextData = input.context && "data" in input.context ? (input.context.data as Record<string, unknown>) : {};
+    const pendingContracts = Array.isArray(contextData.pendingContracts)
+      ? (contextData.pendingContracts as Array<{ id: string; label?: string; address?: string; sector?: string; contractCode?: string }>)
+      : [];
+
     try {
-      const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
-      externalId = sent.externalId;
+      if (
+        input.outcome?.type === "WAITING_USER" &&
+        input.outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
+        pendingContracts.length > 1
+      ) {
+        if (this.deps.whatsappSender.sendInteractiveList && pendingContracts.length > 3) {
+          const rows = pendingContracts.slice(0, 10).map((c, idx) => {
+            const num = idx + 1;
+            const title = (c.label || c.address || `Opción ${num}`).slice(0, 24);
+            const desc = (c.address || c.sector || `Contrato #${c.contractCode || c.id}`).slice(0, 72);
+            return {
+              id: `option_${num}`,
+              title,
+              description: desc !== title ? desc : undefined,
+            };
+          });
+          const sent = await this.deps.whatsappSender.sendInteractiveList(
+            conversation.waPhone,
+            body,
+            "Ver opciones",
+            [{ title: "Servicios disponibles", rows }],
+          );
+          externalId = sent.externalId;
+        } else if (this.deps.whatsappSender.sendInteractiveButtons && pendingContracts.length <= 3) {
+          const buttons = pendingContracts.map((c, idx) => {
+            const num = idx + 1;
+            const title = (c.label || c.address || `Opción ${num}`).slice(0, 20);
+            return {
+              id: `option_${num}`,
+              title,
+            };
+          });
+          const sent = await this.deps.whatsappSender.sendInteractiveButtons(
+            conversation.waPhone,
+            body,
+            buttons,
+          );
+          externalId = sent.externalId;
+        } else {
+          const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
+          externalId = sent.externalId;
+        }
+      } else {
+        const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
+        externalId = sent.externalId;
+      }
     } catch (error) {
+      sendFailed = true;
+      errorMessage = error instanceof Error ? error.message : String(error);
       input.log.error(
-        { err: error instanceof Error ? error.message : String(error) },
+        { err: errorMessage },
         "fallo al enviar reply de IA por WhatsApp; se persiste igual",
       );
     }
@@ -665,13 +740,25 @@ export class ProcessBufferedMessagesUseCase {
       author: "ai",
       body,
       externalId,
+      status: sendFailed ? "failed" : "sent",
+      errorMessage: sendFailed ? errorMessage : undefined,
     });
-    this.deps.broadcaster?.publish({
-      type: "MESSAGE_SENT",
-      conversationId: input.conversationId,
-      messageId: outbound.id,
-      author: "ai",
-    });
+    if (sendFailed) {
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_STATUS_UPDATED",
+        conversationId: input.conversationId,
+        messageId: outbound.id,
+        status: "failed",
+        errorMessage,
+      });
+    } else {
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_SENT",
+        conversationId: input.conversationId,
+        messageId: outbound.id,
+        author: "ai",
+      });
+    }
     input.log.info({ bodyPreview: body.slice(0, 80) }, "respuesta de IA enviada al cliente");
   }
 

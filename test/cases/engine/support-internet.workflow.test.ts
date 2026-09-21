@@ -396,6 +396,143 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     expect(outcome.context.data.contract?.oltName).toBe("olt1");
   });
 
+  it("WAITING_USER_DISAMBIGUATE selecciona contrato por selectedOption numerico", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({});
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        pendingContracts: [
+          {
+            id: "CNT-1",
+            contractCode: "101",
+            name: "Juan Perez",
+            address: "Av. Amazonas - Piso 1",
+            sector: "pomasqui",
+            oltName: "olt1",
+            pon: "1",
+            serial: "S1",
+          },
+          {
+            id: "CNT-2",
+            contractCode: "102",
+            name: "Juan Perez",
+            address: "Av. Amazonas - Piso 2",
+            sector: "pomasqui",
+            oltName: "olt2",
+            pon: "2",
+            serial: "S2",
+          },
+        ],
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      entities: { selectedOption: 2 },
+    });
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.contract?.id).toBe("CNT-2");
+    expect(outcome.context.data.contract?.oltName).toBe("olt2");
+  });
+
+  it("WAITING_USER_DISAMBIGUATE selecciona contrato por texto plano '2' o 'el primero'", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({});
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        pendingContracts: [
+          {
+            id: "CNT-1",
+            name: "Juan Perez",
+            address: "Piso 1",
+            sector: "pomasqui",
+            oltName: "olt1",
+            pon: "1",
+            serial: "S1",
+          },
+          {
+            id: "CNT-2",
+            name: "Juan Perez",
+            address: "Piso 2",
+            sector: "pomasqui",
+            oltName: "olt2",
+            pon: "2",
+            serial: "S2",
+          },
+        ],
+      },
+    };
+
+    const outcomeText2 = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "2",
+    });
+    expect(outcomeText2).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcomeText2.type === "CONTINUE" && outcomeText2.context.workflowType === "SUPPORT_INTERNET") {
+      expect(outcomeText2.context.data.contract?.id).toBe("CNT-2");
+    }
+
+    const outcomeTextPrimero = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "el primero",
+    });
+    expect(outcomeTextPrimero).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcomeTextPrimero.type === "CONTINUE" && outcomeTextPrimero.context.workflowType === "SUPPORT_INTERNET") {
+      expect(outcomeTextPrimero.context.data.contract?.id).toBe("CNT-1");
+    }
+  });
+
+  it("WAITING_USER_DISAMBIGUATE selecciona contrato por contractCode exacto", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({});
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        pendingContracts: [
+          {
+            id: "1723456789-1",
+            contractCode: "COD-9988",
+            name: "Juan Perez",
+            address: "Casa",
+            sector: "pomasqui",
+            oltName: "olt1",
+            pon: "1",
+            serial: "S1",
+          },
+          {
+            id: "1723456789-2",
+            contractCode: "COD-7766",
+            name: "Juan Perez",
+            address: "Oficina",
+            sector: "calacali",
+            oltName: "olt2",
+            pon: "2",
+            serial: "S2",
+          },
+        ],
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      entities: { contractCode: "COD-7766" },
+    });
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.contract?.id).toBe("1723456789-2");
+    expect(outcome.context.data.contract?.sector).toBe("calacali");
+  });
+
   it("VALIDATE_CLIENT autocompleta con 0 si la cédula viene con 9 dígitos", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     let calledId = "";

@@ -5,6 +5,9 @@ import { env } from "../src/shared/config/env";
 
 export default function setup() {
   return async function teardown() {
+    if (process.env.WIPE_TEST_DATA !== "true") {
+      return;
+    }
     const pool = new Pool({ connectionString: env.DATABASE_URL });
     try {
       const sql = readFileSync(join(__dirname, "..", "scripts", "wipe-conversation-test-data.sql"), "utf8");

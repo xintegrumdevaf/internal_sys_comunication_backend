@@ -37,6 +37,8 @@ export type ZernioWebhookMessage = {
   participantId?: string;
   participantUsername?: string;
   to?: string;
+  sentAt?: string;
+  createdAt?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -143,6 +145,18 @@ export async function parseZernioWebhookPayload(
   const rawText = (msg.text ?? "").trim();
   const body = rawText.length > 0 ? rawText : (caption ?? "").trim();
 
+  let createdAt: Date | undefined;
+  if (msg.sentAt) {
+    const d = new Date(msg.sentAt);
+    if (!Number.isNaN(d.getTime())) createdAt = d;
+  } else if (msg.createdAt) {
+    const d = new Date(msg.createdAt);
+    if (!Number.isNaN(d.getTime())) createdAt = d;
+  } else if (msg.metadata?.timestamp) {
+    const d = new Date(Number(msg.metadata.timestamp) * 1000);
+    if (!Number.isNaN(d.getTime())) createdAt = d;
+  }
+
   return [
     {
       waPhone,
@@ -156,6 +170,7 @@ export async function parseZernioWebhookPayload(
       waProfileName,
       direction: isOutbound ? "outbound" : "inbound",
       author: isOutbound ? "agent" : "customer",
+      createdAt,
     },
   ];
 }

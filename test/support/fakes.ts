@@ -4,7 +4,7 @@ import type {
   ConversationRepositoryPort,
   ListConversationsFilter,
 } from "../../src/core/modules/conversations/application/ports/conversation.repository.port";
-import type { Message } from "../../src/core/modules/conversations/domain/message.entity";
+import type { Message, MessageStatus } from "../../src/core/modules/conversations/domain/message.entity";
 import type {
   InsertHistoricalMessageInput,
   InsertInboundMessageInput,
@@ -145,6 +145,8 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       mimeType: null,
       caption: null,
       filename: null,
+      status: overrides.status ?? "delivered",
+      errorMessage: overrides.errorMessage ?? null,
       createdAt: new Date(),
       ...overrides,
     };
@@ -171,6 +173,9 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       mimeType: input.mimeType ?? null,
       caption: input.caption ?? null,
       filename: input.filename ?? null,
+      status: input.status ?? "delivered",
+      errorMessage: input.errorMessage ?? null,
+      createdAt: input.createdAt ?? new Date(),
     });
     return { message, isDuplicate: false, isEdited: false };
   }
@@ -190,6 +195,8 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       mimeType: null,
       caption: null,
       filename: null,
+      status: input.status ?? "sent",
+      errorMessage: input.errorMessage ?? null,
       createdAt: new Date(),
     };
     this.messages.push(message);
@@ -215,10 +222,24 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       mimeType: input.mimeType ?? null,
       caption: input.caption ?? null,
       filename: input.filename ?? null,
+      status: input.status ?? (input.direction === "inbound" ? "delivered" : "sent"),
+      errorMessage: input.errorMessage ?? null,
       createdAt: input.createdAt,
     };
     this.messages.push(message);
     return { message, isDuplicate: false };
+  }
+
+  async updateStatusByExternalId(
+    externalId: string,
+    status: MessageStatus,
+    errorMessage?: string | null,
+  ): Promise<Message | null> {
+    const msg = this.messages.find((m) => m.externalId === externalId);
+    if (!msg) return null;
+    msg.status = status;
+    msg.errorMessage = errorMessage ?? null;
+    return msg;
   }
 
   async listByCaseAuthors(
@@ -295,6 +316,46 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
   async findByExternalId(externalId: string): Promise<Message | null> {
     return this.messages.find((m) => m.externalId === externalId) || null;
   }
+
+  async findRecentOutbound(
+    conversationId: string,
+    options: { externalId?: string | null; body?: string; maxAgeSeconds?: number },
+  ): Promise<Message | null> {
+    const maxAge = options.maxAgeSeconds ?? 60;
+    const since = new Date(Date.now() - maxAge * 1000);
+    const outbounds = this.messages.filter(
+      (m) => m.conversationId === conversationId && m.direction === "outbound",
+    );
+    if (options.externalId) {
+      const found = outbounds.find((m) => m.externalId === options.externalId);
+      if (found) return found;
+    }
+    if (options.body) {
+      const cleanBody = options.body.trim();
+      const found = outbounds
+        .filter((m) => m.createdAt >= since)
+        .reverse()
+        .find(
+          (m) =>
+            m.body.trim() === cleanBody ||
+            m.body.trim().startsWith(cleanBody.slice(0, 40)) ||
+            cleanBody.startsWith(rTrim(m.body.trim(), 40)),
+        );
+      if (found) return found;
+    }
+    return null;
+  }
+
+  async updateExternalId(messageId: string, externalId: string): Promise<void> {
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (msg && (!msg.externalId || msg.externalId === "")) {
+      msg.externalId = externalId;
+    }
+  }
+}
+
+function rTrim(s: string, len: number): string {
+  return s.slice(0, len);
 }
 
 export class WhatsAppSenderFake implements WhatsAppSenderPort {
@@ -304,6 +365,17 @@ export class WhatsAppSenderFake implements WhatsAppSenderPort {
     templateName: string;
     languageCode?: string;
     parameters?: string[];
+  }> = [];
+  readonly sentButtons: Array<{
+    waPhone: string;
+    bodyText: string;
+    buttons: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").WhatsAppInteractiveButton[];
+  }> = [];
+  readonly sentLists: Array<{
+    waPhone: string;
+    bodyText: string;
+    buttonText: string;
+    sections: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").WhatsAppInteractiveListSection[];
   }> = [];
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
@@ -319,6 +391,25 @@ export class WhatsAppSenderFake implements WhatsAppSenderPort {
   ): Promise<{ externalId: string }> {
     this.sentTemplates.push({ waPhone, templateName, languageCode, parameters });
     return { externalId: `wamid.template.${randomUUID()}` };
+  }
+
+  async sendInteractiveButtons(
+    waPhone: string,
+    bodyText: string,
+    buttons: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").WhatsAppInteractiveButton[],
+  ): Promise<{ externalId: string }> {
+    this.sentButtons.push({ waPhone, bodyText, buttons });
+    return { externalId: `wamid.buttons.${randomUUID()}` };
+  }
+
+  async sendInteractiveList(
+    waPhone: string,
+    bodyText: string,
+    buttonText: string,
+    sections: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").WhatsAppInteractiveListSection[],
+  ): Promise<{ externalId: string }> {
+    this.sentLists.push({ waPhone, bodyText, buttonText, sections });
+    return { externalId: `wamid.list.${randomUUID()}` };
   }
 }
 

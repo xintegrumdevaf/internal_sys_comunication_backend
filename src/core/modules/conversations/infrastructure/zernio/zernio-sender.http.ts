@@ -35,9 +35,10 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
   constructor(
     private readonly env: Env,
     private readonly logger: Logger,
+    private readonly fallbackSender?: WhatsAppSenderPort,
   ) {
     this.baseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
-    if (this.env.ZERNIO_ACCOUNT_ID && /^[a-f\d]{24}$/i.test(this.env.ZERNIO_ACCOUNT_ID.trim())) {
+    if (this.env.ZERNIO_ACCOUNT_ID?.trim()) {
       this.resolvedAccountId = this.env.ZERNIO_ACCOUNT_ID.trim();
     }
   }
@@ -105,8 +106,8 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     return this.phoneByConversationIdCache.get(conversationId) || null;
   }
 
-  private async getAccountId(): Promise<string> {
-    if (this.resolvedAccountId) {
+  private async getAccountId(forceRefresh = false): Promise<string> {
+    if (this.resolvedAccountId && !forceRefresh) {
       return this.resolvedAccountId;
     }
 
@@ -206,7 +207,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
     this.logger.info({ waPhone: cleanPhone, hasExistingConv: !!existingConversationId }, "Enviando texto via Zernio");
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -217,8 +218,85 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de mensaje");
-      throw new Error(`Zernio sendText fallo (${response.status}): ${errorBody}`);
+      if (
+        response.status === 404 &&
+        (errorBody.toLowerCase().includes("conversation not found") || errorBody.toLowerCase().includes("conversation_not_found"))
+      ) {
+        this.logger.warn(
+          { existingConversationId, cleanPhone, errorBody },
+          "Conversación de Zernio no encontrada en inbox, reintentando creando conversación con participantId...",
+        );
+        this.conversationIdCache.delete(cleanPhone);
+        if (existingConversationId) {
+          this.phoneByConversationIdCache.delete(existingConversationId);
+        }
+        url = `${this.baseUrl}/inbox/conversations`;
+        payload = {
+          accountId,
+          participantId: cleanPhone,
+          message: body,
+        };
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const secondErr = await response.text();
+          if (this.fallbackSender) {
+            this.logger.warn(
+              { cleanPhone, secondErr },
+              "Zernio no pudo abrir conversación; entregando directamente vía Meta Cloud API...",
+            );
+            return this.fallbackSender.sendText(waPhone, body);
+          }
+          this.logger.error({ status: response.status, body: secondErr }, "Zernio API rechazo el envio tras reintento de conversacion");
+          throw new Error(`Zernio sendText fallo (${response.status}): ${secondErr}`);
+        }
+      } else if (
+        response.status === 404 &&
+        (errorBody.toLowerCase().includes("account not found") || errorBody.toLowerCase().includes("account_not_found"))
+      ) {
+        this.logger.warn(
+          { accountId, errorBody },
+          "Cuenta de Zernio no valida o desactualizada, reintentando con resolucion dinamica...",
+        );
+        const refreshedAccountId = await this.getAccountId(true);
+        payload.accountId = refreshedAccountId;
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const secondErr = await response.text();
+          if (this.fallbackSender) {
+            this.logger.warn(
+              { cleanPhone, secondErr },
+              "Zernio fallo tras refrescar cuenta; entregando directamente vía Meta Cloud API...",
+            );
+            return this.fallbackSender.sendText(waPhone, body);
+          }
+          this.logger.error({ status: response.status, body: secondErr }, "Zernio API rechazo el envio tras reintento");
+          throw new Error(`Zernio sendText fallo (${response.status}): ${secondErr}`);
+        }
+      } else {
+        if (this.fallbackSender) {
+          this.logger.warn(
+            { cleanPhone, status: response.status, errorBody },
+            "Zernio API rechazó el envío (ej. TEMPLATE_REQUIRED); entregando directamente vía Meta Cloud API...",
+          );
+          return this.fallbackSender.sendText(waPhone, body);
+        }
+        this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de mensaje");
+        throw new Error(`Zernio sendText fallo (${response.status}): ${errorBody}`);
+      }
     }
 
     const data = (await response.json()) as ZernioMessageResponse & {
@@ -273,7 +351,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
     this.logger.info({ waPhone: cleanPhone, templateName }, "Enviando plantilla via Zernio");
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -284,8 +362,47 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de plantilla");
-      throw new Error(`Zernio sendTemplate fallo (${response.status}): ${errorBody}`);
+      if (
+        response.status === 404 &&
+        (errorBody.toLowerCase().includes("account not found") || errorBody.toLowerCase().includes("account_not_found"))
+      ) {
+        this.logger.warn(
+          { accountId, errorBody },
+          "Cuenta de Zernio no valida o desactualizada en template, reintentando con resolucion dinamica...",
+        );
+        const refreshedAccountId = await this.getAccountId(true);
+        payload.accountId = refreshedAccountId;
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const secondErr = await response.text();
+          if (this.fallbackSender) {
+            this.logger.warn(
+              { cleanPhone, templateName, secondErr },
+              "Zernio falló plantilla tras refrescar cuenta; entregando vía Meta Cloud API...",
+            );
+            return this.fallbackSender.sendTemplate(waPhone, templateName, languageCode, parameters);
+          }
+          this.logger.error({ status: response.status, body: secondErr }, "Zernio API rechazo el envio de plantilla tras reintento");
+          throw new Error(`Zernio sendTemplate fallo (${response.status}): ${secondErr}`);
+        }
+      } else {
+        if (this.fallbackSender) {
+          this.logger.warn(
+            { cleanPhone, templateName, status: response.status, errorBody },
+            "Zernio API rechazó la plantilla; entregando vía Meta Cloud API...",
+          );
+          return this.fallbackSender.sendTemplate(waPhone, templateName, languageCode, parameters);
+        }
+        this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de plantilla");
+        throw new Error(`Zernio sendTemplate fallo (${response.status}): ${errorBody}`);
+      }
     }
 
     const data = (await response.json()) as ZernioMessageResponse;
@@ -346,5 +463,55 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       this.logger.warn({ err, waPhone, externalId }, "Error al consultar estado de mensaje en Zernio");
     }
     return null;
+  }
+
+  async sendInteractiveButtons(
+    waPhone: string,
+    bodyText: string,
+    buttons: import("../../application/ports/whatsapp-sender.port").WhatsAppInteractiveButton[],
+    headerText?: string,
+    footerText?: string,
+  ): Promise<{ externalId: string }> {
+    const listFormatted = buttons.map((b, idx) => `${idx + 1}️⃣ ${b.title}`).join("\n");
+    const fullText = [
+      headerText ? `*${headerText}*\n` : "",
+      bodyText,
+      "\n" + listFormatted,
+      "\n_Responde con el número de tu opción (1, 2...)._",
+      footerText ? `\n_${footerText}_` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return this.sendText(waPhone, fullText.trim());
+  }
+
+  async sendInteractiveList(
+    waPhone: string,
+    bodyText: string,
+    buttonText: string,
+    sections: import("../../application/ports/whatsapp-sender.port").WhatsAppInteractiveListSection[],
+    headerText?: string,
+    footerText?: string,
+  ): Promise<{ externalId: string }> {
+    const lines: string[] = [];
+    if (headerText) lines.push(`*${headerText}*`);
+    lines.push(bodyText);
+    lines.push("");
+
+    let globalIndex = 1;
+    for (const section of sections) {
+      if (section.title) lines.push(`*${section.title}*`);
+      for (const row of section.rows) {
+        const desc = row.description ? ` - ${row.description}` : "";
+        lines.push(`${globalIndex}️⃣ ${row.title}${desc}`);
+        globalIndex++;
+      }
+    }
+
+    lines.push(`\n_Por favor responde con el número de la opción (1-${globalIndex - 1}) o selecciónalo._`);
+    if (footerText) lines.push(`_${footerText}_`);
+
+    return this.sendText(waPhone, lines.join("\n").trim());
   }
 }

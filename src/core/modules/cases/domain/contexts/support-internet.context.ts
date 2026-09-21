@@ -6,8 +6,10 @@
  */
 export type SupportInternetPendingContract = {
   id: string;
+  contractCode?: string;
   name: string;
   address?: string;
+  label?: string;
   sector: string;
   oltName: string;
   pon: string;
