@@ -36,7 +36,9 @@ export class TemplatePolicyValidator {
     let match: RegExpExecArray | null;
 
     while ((match = varRegex.exec(text)) !== null) {
-      matches.push(parseInt(match[1], 10));
+      if (match[1]) {
+        matches.push(parseInt(match[1], 10));
+      }
     }
 
     if (matches.length > 0) {
