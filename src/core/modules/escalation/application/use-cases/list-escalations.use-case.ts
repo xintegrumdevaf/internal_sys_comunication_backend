@@ -23,10 +23,7 @@ export class GetCaseSummaryUseCase {
     const aggregate = await this.deps.caseRepo.findById(caseId);
     if (!aggregate) throw notFound(`Caso ${caseId} no encontrado`);
 
-    const status = aggregate.case.status;
-    if (status !== "ESCALATED" && status !== "HUMAN_ACTIVE") {
-      throw authorizationError("El resumen solo está disponible para casos escalados o HUMAN_ACTIVE");
-    }
+        // Permite que agentes humanos y supervisores consulten el resumen técnico y avance del caso en cualquier estado (incluso WAITING_USER o ACTIVE)
 
     const escalation = await this.deps.escalationRepo.findByCaseId(caseId);
     const executions = await this.deps.workflowExecutionRepo.listByCase(caseId);

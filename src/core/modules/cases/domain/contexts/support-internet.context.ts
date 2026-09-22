@@ -80,6 +80,7 @@ export type SupportInternetContext = {
     lastQuestion?: string;
     result?: string;
     answer?: string;
+    rounds?: number;
     /** Ultima lectura tecnica conocida de la ONU (si el microservicio la devolvio). */
     technical?: SupportInternetDiagnosticTechnical;
   };

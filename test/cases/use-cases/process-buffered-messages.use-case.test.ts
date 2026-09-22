@@ -429,4 +429,69 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       "¡Recibido, gracias! 🙌 Estamos verificando tu pago de $20,53 y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!"
     );
   });
+
+  it("no silencia el bot si el caso escalado previo ya expiro por inactividad (>24h) y atiende la nueva interaccion", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    // Crear un caso escalado de hace 4 días (como en la BD real)
+    const oldCase = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    const storedCase = (await caseRepo.findById(oldCase.case.id))!.case;
+    storedCase.status = "ESCALATED";
+    storedCase.lastActivityAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "NEW_INTENT", intent: "support.internet", entities: {}, confidence: 0.95 },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const newMsg = messageRepo.seedText(conversation.id, "Hola");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-expired-escalation",
+      messages: [newMsg],
+    });
+
+    // El bot no fue silenciado: atendió el mensaje y envió respuesta
+    expect(whatsappSender.sent.length).toBeGreaterThan(0);
+    // Y el caso viejo quedó en EXPIRED
+    const refreshedOldCase = await caseRepo.findById(oldCase.case.id);
+    expect(refreshedOldCase?.case.status).toBe("EXPIRED");
+  });
 });

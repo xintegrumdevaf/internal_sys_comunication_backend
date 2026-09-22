@@ -24,8 +24,8 @@ export function buildInterpretMessagePrompt(
     ? Array.from(new Set([...dynamicIntents.map((d) => d.intent), "general.inquiry", "unknown"])).join(" | ")
     : defaultIntents;
 
-  const active = input.conversationSnapshot.activeCase;
-  const recentMessages = input.conversationSnapshot.recentMessages;
+  const active = input.conversationSnapshot?.activeCase;
+  const recentMessages = input.conversationSnapshot?.recentMessages ?? [];
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
     ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n")
@@ -71,6 +71,12 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   → Clasifica SIEMPRE como type="ANSWER" con el intent del caso activo (ej: intent="support.internet").
   → Extrae en \`entities\`: \`selectedOption\` (número como 1, 2...), \`address\` o \`contractCode\` según lo indicado por el cliente.
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC ni UNCLEAR.
+- RESPUESTAS A PREGUNTAS TÉCNICAS O ESTADO DE EQUIPOS (luces del router, colores, cables, estado del servicio):
+  Si el caso activo es de soporte técnico (SUPPORT_INTERNET) y está esperando respuesta del usuario sobre su equipo o conexión (ej: pregunta sobre luces del router, colores verde/rojo, estado encendido/apagado, reinicio, cables):
+  Cualquier respuesta descriptiva o corta del cliente (ej: "Son verdes", "Verdes!!!", "Están rojas", "Luz roja", "Prendidas", "Apagadas", "Parpadea en rojo", "Ya lo reinicié", "Todo conectado"):
+  → Clasifica SIEMPRE como type="ANSWER" con intent="support.internet".
+  → Extrae en \`entities\`: \`answer\`: "<texto o descripción del cliente>".
+  → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC, UNCLEAR ni CANCEL.
 
 ## Catálogo de "intent" y reglas de clasificación
 ${dynamicCatalogSection}
@@ -135,7 +141,10 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
    → {"type":"ANSWER","intent":"support.internet","entities":{"selectedOption":1},"confidence":0.95}
 
 13. Mensaje: "la de mi casa, piso 2" cuando el caso activo espera desambiguación de contratos
-   → {"type":"ANSWER","intent":"support.internet","entities":{"address":"piso 2"},"confidence":0.90}`;
+   → {"type":"ANSWER","intent":"support.internet","entities":{"address":"piso 2"},"confidence":0.90}
+
+14. Mensaje: "Son verdes" (o "Verdes!!!", "Están rojas", "Prendidas") cuando el caso activo espera diagnóstico técnico (luces del router)
+   → {"type":"ANSWER","intent":"support.internet","entities":{"answer":"Son verdes"},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

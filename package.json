@@ -12,9 +12,12 @@
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
     "seed:quality": "tsx scripts/seed-quality-samples.ts",
-    "clean:conversations": "node scratch/run-wipe.js",
+    "clean:conversations": "tsx scripts/clean-database.ts",
+    "clean:db": "tsx scripts/clean-database.ts",
     "sync:zernio-history": "tsx scripts/sync-zernio-history.ts",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:watch": "vitest"
   },
   "keywords": [],

@@ -570,6 +570,7 @@ export function createContainer(): Container {
     logger: casesLogger,
     escalationService,
     broadcaster,
+    expirationService,
   });
   const cancelCase = new CancelCaseUseCase({
     caseRepo,

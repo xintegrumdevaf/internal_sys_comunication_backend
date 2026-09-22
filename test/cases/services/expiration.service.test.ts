@@ -93,4 +93,51 @@ describe("ExpirationService (docs/spec/02_STATE_MACHINE.md §8)", () => {
     const all = await caseRepo.listByConversation("conv-1");
     expect(all).toHaveLength(2);
   });
+
+  it("mueve a EXPIRED un caso sin expires_at inactivo por mas de 24 horas (ej. caso escalado abandonado)", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const { case: created } = await caseRepo.create({
+      conversationId: "conv-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    // Simular que el caso quedó en ESCALATED hace 48 horas
+    const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const storedCase = (await caseRepo.findById(created.id))!.case;
+    storedCase.status = "ESCALATED";
+    storedCase.lastActivityAt = fortyEightHoursAgo;
+
+    const service = new ExpirationService(caseRepo, silentLogger);
+    expect(service.isExpired(storedCase)).toBe(true);
+
+    const expired = await service.expireDueCases();
+    expect(expired).toHaveLength(1);
+    expect(expired[0]!.status).toBe("EXPIRED");
+
+    const refreshed = await caseRepo.findById(created.id);
+    expect(refreshed?.case.status).toBe("EXPIRED");
+  });
+
+  it("expireCase expira perezosamente un caso puntual vencido por inactividad", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const { case: created } = await caseRepo.create({
+      conversationId: "conv-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    const storedCase = (await caseRepo.findById(created.id))!.case;
+    storedCase.lastActivityAt = new Date(Date.now() - 30 * 60 * 60 * 1000);
+
+    const service = new ExpirationService(caseRepo, silentLogger);
+    const expiredCase = await service.expireCase(created.id);
+
+    expect(expiredCase).not.toBeNull();
+    expect(expiredCase?.status).toBe("EXPIRED");
+  });
 });

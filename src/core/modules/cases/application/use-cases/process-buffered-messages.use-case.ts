@@ -21,6 +21,7 @@ import { WorkflowEngine } from "../engine/workflow-engine";
 import { AdvanceCaseUseCase } from "./advance-case.use-case";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+import { ExpirationService } from "../services/expiration.service";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -39,6 +40,7 @@ export type ProcessBufferedMessagesDeps = {
   logger: Logger;
   escalationService?: EscalationService;
   broadcaster?: RealtimeBroadcaster;
+  expirationService?: ExpirationService;
 };
 
 export type ProcessBufferedMessagesInput = {
@@ -69,10 +71,34 @@ export class ProcessBufferedMessagesUseCase {
       }
       if (!targetCase) {
         const cases = await this.deps.caseRepo.listByConversation(conversationId);
+        const recentCases = [...cases].reverse();
         targetCase =
-          cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
-          cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          recentCases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+          recentCases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
           null;
+      }
+
+      if (targetCase) {
+        // docs/spec/02_STATE_MACHINE.md §8: Expiración perezosa.
+        // Si el caso candidato ya venció por inactividad (>24h), no bloquea abrir un caso nuevo ni silencia el bot.
+        const isCaseExpired = this.deps.expirationService
+          ? this.deps.expirationService.isExpired(targetCase)
+          : (targetCase.expiresAt !== null && targetCase.expiresAt.getTime() <= Date.now()) ||
+            (targetCase.expiresAt === null && Date.now() - targetCase.lastActivityAt.getTime() >= 24 * 60 * 60 * 1000);
+
+        if (isCaseExpired) {
+          log.info(
+            { caseId: targetCase.id, status: targetCase.status, lastActivityAt: targetCase.lastActivityAt },
+            "Caso previo vencido por inactividad: descartado para permitir nueva atención",
+          );
+          const expService =
+            this.deps.expirationService ??
+            new ExpirationService(this.deps.caseRepo, this.deps.logger);
+          await expService.expireCase(targetCase.id).catch((err) => {
+            log.warn({ err, caseId: targetCase?.id }, "fallo al expirar caso perezosamente");
+          });
+          targetCase = null;
+        }
       }
 
       if (targetCase) {

@@ -27,6 +27,7 @@ export type InboundBufferOptions = {
  */
 export class InboundBufferService {
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly processingConversations = new Set<string>();
 
   constructor(
     private readonly redisClient: Redis,
@@ -94,6 +95,18 @@ export class InboundBufferService {
 
   private async drain(conversationId: string): Promise<void> {
     this.timers.delete(conversationId);
+
+    // Evitar flushes paralelos para la misma conversación (race condition):
+    // Si ya se está procesando un lote previo, reprogramar para esperar que finalice.
+    if (this.processingConversations.has(conversationId)) {
+      this.logger.info(
+        { conversationId },
+        "procesamiento previo aún en curso; postergando nuevo flush hasta que finalice",
+      );
+      this.reschedule(conversationId);
+      return;
+    }
+
     const key = this.bufferKey(conversationId);
     const messageIds = (await this.redisClient.eval(DRAIN_BUFFER_SCRIPT, 1, key)) as string[];
     if (messageIds.length === 0) {
@@ -103,7 +116,18 @@ export class InboundBufferService {
       { conversationId, messageCount: messageIds.length, messageIds },
       "debounce vencido, entregando unidad de trabajo acumulada",
     );
-    await this.onFlush(conversationId, messageIds);
+
+    this.processingConversations.add(conversationId);
+    try {
+      await this.onFlush(conversationId, messageIds);
+    } finally {
+      this.processingConversations.delete(conversationId);
+      // Si llegaron nuevos mensajes durante la ejecución de onFlush, reprogramar para procesarlos ordenadamente
+      const remaining = await this.redisClient.llen(key);
+      if (remaining > 0 && !this.timers.has(conversationId)) {
+        this.reschedule(conversationId);
+      }
+    }
   }
 
   private bufferKey(conversationId: string): string {
