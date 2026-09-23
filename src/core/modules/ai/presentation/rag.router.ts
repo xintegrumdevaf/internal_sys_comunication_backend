@@ -16,10 +16,11 @@ export type RagRouterDeps = {
 export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   const router = Router();
 
-  // GET /api/rag/documents - Listar todos los documentos de RAG
-  router.get("/api/rag/documents", async (_req, res, next) => {
+  // GET /api/rag/documents - Listar todos los documentos de RAG (opcionalmente filtrados por departamento)
+  router.get("/api/rag/documents", async (req, res, next) => {
     try {
-      const documents = await ragService.listDocuments();
+      const departmentId = typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
+      const documents = await ragService.listDocuments(departmentId ? { departmentId } : undefined);
       res.json({ data: documents });
     } catch (error) {
       next(error);
@@ -32,6 +33,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
       const uploadedFile = req.file || (req.files && Array.isArray(req.files) ? req.files[0] : undefined);
       const name = uploadedFile?.originalname || req.body.name || "Documento_Sin_Nombre.pdf";
       const category = req.body.category || "General";
+      const departmentId = req.body.departmentId || null;
+      const isGlobal = req.body.isGlobal === "true" || req.body.isGlobal === true;
       const mimeType = uploadedFile?.mimetype || req.body.mimeType || "application/pdf";
       const sizeBytes = uploadedFile?.size || Number(req.body.sizeBytes) || 1000000;
       const uploadedBy = req.body.uploadedBy || "Admin Sistema";
@@ -43,6 +46,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
           id,
           name,
           category,
+          departmentId,
+          isGlobal,
           mimeType,
           sizeBytes,
           uploadedBy,
@@ -57,6 +62,8 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
         id,
         name,
         category,
+        departmentId,
+        isGlobal,
         mimeType: "text/plain",
         sizeBytes: (req.body.content || "").length,
         uploadedBy,
@@ -92,10 +99,11 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
     }
   });
 
-  // GET /api/rag/faqs - Listar FAQs
-  router.get("/api/rag/faqs", async (_req, res, next) => {
+  // GET /api/rag/faqs - Listar FAQs (opcionalmente por departamento)
+  router.get("/api/rag/faqs", async (req, res, next) => {
     try {
-      const faqs = await ragService.listFaqs();
+      const departmentId = typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
+      const faqs = await ragService.listFaqs(departmentId ? { departmentId } : undefined);
       res.json({ data: faqs });
     } catch (error) {
       next(error);
@@ -105,9 +113,28 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   // POST /api/rag/faqs - Crear FAQ
   router.post("/api/rag/faqs", async (req, res, next) => {
     try {
-      const { category, question, answer, tags = [], variations = [], priority = 5 } = req.body;
+      const {
+        category,
+        departmentId = null,
+        isGlobal = false,
+        question,
+        answer,
+        tags = [],
+        variations = [],
+        priority = 5,
+      } = req.body;
       const id = `faq-${Date.now()}`;
-      const faq = await ragService.createFaq({ id, category, question, answer, tags, variations, priority });
+      const faq = await ragService.createFaq({
+        id,
+        category,
+        departmentId,
+        isGlobal: isGlobal === "true" || isGlobal === true,
+        question,
+        answer,
+        tags,
+        variations,
+        priority,
+      });
       res.status(201).json({ data: faq });
     } catch (error) {
       next(error);
@@ -118,8 +145,28 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   router.put("/api/rag/faqs/:id", async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { category, question, answer, tags, variations, priority, active } = req.body;
-      const updated = await ragService.updateFaq(id, { category, question, answer, tags, variations, priority, active });
+      const {
+        category,
+        departmentId,
+        isGlobal,
+        question,
+        answer,
+        tags,
+        variations,
+        priority,
+        active,
+      } = req.body;
+      const updated = await ragService.updateFaq(id, {
+        category,
+        departmentId,
+        isGlobal: isGlobal !== undefined ? (isGlobal === "true" || isGlobal === true) : undefined,
+        question,
+        answer,
+        tags,
+        variations,
+        priority,
+        active,
+      });
       if (!updated) {
         res.status(404).json({ error: "FAQ no encontrada" });
         return;
@@ -144,14 +191,14 @@ export function createRagRouter({ ragService, logger }: RagRouterDeps): Router {
   // POST /api/rag/query - Consultar RAG Nativo
   router.post("/api/rag/query", async (req, res, next) => {
     try {
-      const { question } = req.body;
+      const { question, departmentId } = req.body;
       const q = (question || "").trim();
       if (!q) {
         res.status(400).json({ error: "La pregunta no puede estar vacía" });
         return;
       }
 
-      const result = await ragService.query(q, 4);
+      const result = await ragService.query(q, 4, departmentId);
       res.json(result);
     } catch (error) {
       next(error);

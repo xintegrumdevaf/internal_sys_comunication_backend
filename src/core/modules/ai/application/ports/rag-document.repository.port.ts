@@ -4,6 +4,8 @@ export interface CreateRagDocumentInput {
   id: string;
   name: string;
   category: string;
+  departmentId?: string | null;
+  isGlobal?: boolean;
   mimeType: string;
   sizeBytes: number;
   chunksCount: number;
@@ -14,6 +16,8 @@ export interface CreateRagDocumentInput {
 export interface CreateRagFaqInput {
   id: string;
   category: string;
+  departmentId?: string | null;
+  isGlobal?: boolean;
   question: string;
   answer: string;
   tags?: string[];
@@ -23,6 +27,8 @@ export interface CreateRagFaqInput {
 
 export interface UpdateRagFaqInput {
   category?: string;
+  departmentId?: string | null;
+  isGlobal?: boolean;
   question?: string;
   answer?: string;
   tags?: string[];
@@ -32,16 +38,16 @@ export interface UpdateRagFaqInput {
 }
 
 export interface RagDocumentRepositoryPort {
-  listDocuments(): Promise<RagDocument[]>;
+  listDocuments(filter?: { departmentId?: string }): Promise<RagDocument[]>;
   createDocument(input: CreateRagDocumentInput): Promise<RagDocument>;
   findDocumentById(id: string): Promise<RagDocument | null>;
   deleteDocument(id: string): Promise<boolean>;
 
-  listFaqs(): Promise<RagFaq[]>;
+  listFaqs(filter?: { departmentId?: string }): Promise<RagFaq[]>;
   createFaq(input: CreateRagFaqInput): Promise<RagFaq>;
   updateFaq(id: string, input: UpdateRagFaqInput): Promise<RagFaq | null>;
   deleteFaq(id: string): Promise<boolean>;
-  findActiveFaqs(): Promise<RagFaq[]>;
+  findActiveFaqs(filter?: { departmentId?: string }): Promise<RagFaq[]>;
 
   getStats(): Promise<RagStats>;
 }

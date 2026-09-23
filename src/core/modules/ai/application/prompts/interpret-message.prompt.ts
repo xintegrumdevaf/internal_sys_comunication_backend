@@ -78,8 +78,20 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   → Extrae en \`entities\`: \`answer\`: "<texto o descripción del cliente>".
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC, UNCLEAR ni CANCEL.
 
+- CANCELACIÓN / BAJA DEFINITIVA DE SERVICIO / DEVOLUCIÓN DE EQUIPOS:
+  Si el cliente manifiesta que quiere cancelar el servicio, dar de baja, rescindir contrato, que le corten definitivamente el servicio o devolver los equipos (ej: "quiero cancelar el servicio", "denme de baja", "ya no quiero el servicio", "vengan a retirar el router", "cancélenme el contrato"):
+  → Clasifica SIEMPRE como intent="support.service_cancellation" (o intent="support.equipment_return") con type="NEW_INTENT" o type="REQUEST_HUMAN".
+  → NUNCA clasificar como support.internet. El cliente NO está pidiendo soporte técnico ni pruebas de conexión; está solicitando la baja y debe ser atendido por un asesor humano.
+- RECLAMOS DE FACTURACIÓN O DISPUTAS DE COBRO:
+  Si el cliente reclama por valores cobrados incorrectamente, disputas de facturas o cobros indebidos:
+  → Clasifica SIEMPRE como intent="billing.dispute".
+
 ## Catálogo de "intent" y reglas de clasificación
 ${dynamicCatalogSection}
+- support.service_cancellation: solicitud de cancelación, baja definitiva o rescisión de contrato.
+- support.equipment_return: entrega o retiro de equipos/módem.
+- billing.dispute: reclamo o disputa por factura errónea o cobro indebido.
+- general.complaint: queja formal o reclamo por mala atención o servicio deficiente.
 - unknown: no se puede determinar.
 
 Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, valida mi problema de internet" → \`support.internet\`, no \`billing.balance\`).
@@ -144,7 +156,13 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
    → {"type":"ANSWER","intent":"support.internet","entities":{"address":"piso 2"},"confidence":0.90}
 
 14. Mensaje: "Son verdes" (o "Verdes!!!", "Están rojas", "Prendidas") cuando el caso activo espera diagnóstico técnico (luces del router)
-   → {"type":"ANSWER","intent":"support.internet","entities":{"answer":"Son verdes"},"confidence":0.95}`;
+   → {"type":"ANSWER","intent":"support.internet","entities":{"answer":"Son verdes"},"confidence":0.95}
+
+15. Mensaje: "quiero cancelar el servicio" (o "ya no quiero el servicio", "denme de baja")
+   → {"type":"NEW_INTENT","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}
+
+16. Mensaje: "Es la octava vez que me cortan el servicio, quiero cancelar ya"
+   → {"type":"REQUEST_HUMAN","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

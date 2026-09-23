@@ -22,6 +22,7 @@ import { AdvanceCaseUseCase } from "./advance-case.use-case";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import { ExpirationService } from "../services/expiration.service";
+import { checkCustomerGuardrails } from "../../domain/guardrails";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -343,6 +344,21 @@ export class ProcessBufferedMessagesUseCase {
       }
       if (interpretation.entities?.nationalId) {
         interpretation.entities.nationalId = normalizeNationalId(interpretation.entities.nationalId);
+      }
+
+      // Guardrail anti-hostilidad y lenguaje inapropiado
+      const guardrail = checkCustomerGuardrails(text);
+      if (guardrail.isHostile) {
+        log.warn(
+          { reason: guardrail.reason, textPreview: text.slice(0, 80) },
+          "Guardrail: hostilidad detectada en mensaje del cliente; forzando REQUEST_HUMAN",
+        );
+        interpretation = {
+          type: "REQUEST_HUMAN",
+          intent: interpretation.intent || "general.inquiry",
+          entities: { ...interpretation.entities, isHostile: true, guardrailReason: guardrail.reason },
+          confidence: 1.0,
+        };
       }
 
       log.info(

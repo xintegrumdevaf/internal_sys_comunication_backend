@@ -37,12 +37,14 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+import type { PromptResolverService } from "../../application/services/prompt-resolver.service";
 
 export class GeminiAdapter implements AIProviderPort {
   constructor(
     private readonly config: GeminiAdapterConfig,
     private readonly logger: Logger,
     private readonly routingService?: DepartmentRoutingService,
+    private readonly promptResolver?: PromptResolverService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -52,10 +54,25 @@ export class GeminiAdapter implements AIProviderPort {
       messageId: input.messageId,
     });
     const dynamicIntents = this.routingService ? await this.routingService.getPromptIntents() : undefined;
-    const { system, user } = buildInterpretMessagePrompt(input, dynamicIntents);
+    const fallback = () => buildInterpretMessagePrompt(input, dynamicIntents);
+    const resolved = this.promptResolver
+      ? await this.promptResolver.resolvePrompt(
+          "interpret_message",
+          {
+            text: input.text,
+            recentMessages: input.conversationSnapshot?.recentMessages,
+            activeCase: input.conversationSnapshot?.activeCase,
+          },
+          fallback,
+        )
+      : { ...fallback(), modelConfig: { temperature: 0.2 }, versionNumber: 0, source: "fallback_code" as const };
+
     const started = Date.now();
     try {
-      const payload = this.buildBasePayload(system, user, { jsonMode: true, temperature: 0.2 });
+      const payload = this.buildBasePayload(resolved.system, resolved.user, {
+        jsonMode: true,
+        temperature: (resolved.modelConfig.temperature as number) ?? 0.2,
+      });
       const raw = await this.callGemini(payload, this.config.timeoutMs);
       const interpretation = parseInterpretation(raw);
       log.info(
@@ -65,6 +82,8 @@ export class GeminiAdapter implements AIProviderPort {
           intent: interpretation.intent,
           confidence: interpretation.confidence,
           textPreview: input.text.slice(0, 80),
+          promptSource: resolved.source,
+          promptVersion: resolved.versionNumber,
         },
         "Gemini interpretacion OK",
       );
@@ -84,8 +103,30 @@ export class GeminiAdapter implements AIProviderPort {
   }
 
   async composeReply(input: ComposeReplyInput): Promise<string> {
-    const { system, user } = buildComposeReplyPrompt(input);
-    const payload = this.buildBasePayload(system, user, { jsonMode: false, temperature: 0.55 });
+    const fallback = () => buildComposeReplyPrompt(input);
+    const stepResult =
+      input.stepOutcome?.result && typeof input.stepOutcome.result === "object"
+        ? (input.stepOutcome.result as Record<string, unknown>)
+        : undefined;
+    const resolved = this.promptResolver
+      ? await this.promptResolver.resolvePrompt(
+          "compose_reply",
+          {
+            clientName: typeof stepResult?.clientName === "string" ? stepResult.clientName : "",
+            clientFirstName: typeof stepResult?.clientFirstName === "string" ? stepResult.clientFirstName : "",
+            stepOutcome: input.stepOutcome,
+            templateHint: input.templateHint,
+            missingFields: input.missingFields,
+            workflowType: input.workflowType,
+          },
+          fallback,
+        )
+      : { ...fallback(), modelConfig: { temperature: 0.55 }, versionNumber: 0, source: "fallback_code" as const };
+
+    const payload = this.buildBasePayload(resolved.system, resolved.user, {
+      jsonMode: false,
+      temperature: (resolved.modelConfig.temperature as number) ?? 0.55,
+    });
     const raw = await this.callGemini(payload, this.config.timeoutMs);
     return raw.trim().replace(/^["']|["']$/g, "");
   }
@@ -224,6 +265,18 @@ export class GeminiAdapter implements AIProviderPort {
       );
       throw error;
     }
+  }
+
+  async chat(
+    system: string,
+    user: string,
+    options?: { jsonMode?: boolean; temperature?: number; timeoutMs?: number },
+  ): Promise<string> {
+    const payload = this.buildBasePayload(system, user, {
+      jsonMode: options?.jsonMode ?? false,
+      temperature: options?.temperature ?? 0.2,
+    });
+    return this.callGemini(payload, options?.timeoutMs ?? this.config.timeoutMs);
   }
 
   private buildBasePayload(

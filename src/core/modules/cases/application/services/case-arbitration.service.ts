@@ -101,6 +101,14 @@ export class CaseArbitrationService {
         };
       }
 
+      if (
+        interpretation.type === "DENY" ||
+        interpretation.type === "CANCEL"
+      ) {
+        // Si el cliente niega o cancela mientras hay un caso activo, no insistir ni pedir aclaraciones; transferir a humano.
+        return { action: "REQUEST_HUMAN", caseId: activeCase.id };
+      }
+
       return { action: "CLARIFY" };
     }
 

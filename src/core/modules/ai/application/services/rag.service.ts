@@ -1,4 +1,4 @@
-﻿import { PDFParse } from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import type { RagChunk, RagDocument, RagFaq, RagQueryResult, RagStats } from "../../domain/rag.entity";
 import type { CreateRagFaqInput, RagDocumentRepositoryPort, UpdateRagFaqInput } from "../ports/rag-document.repository.port";
 import type { VectorStorePort } from "../ports/vector-store.port";
@@ -41,8 +41,8 @@ export class RagService {
   }
 
   // --- Documentos & FAQs (Delegados al Repository Port) ---
-  async listDocuments(): Promise<RagDocument[]> {
-    return this.docRepo.listDocuments();
+  async listDocuments(filter?: { departmentId?: string }): Promise<RagDocument[]> {
+    return this.docRepo.listDocuments(filter);
   }
 
   async deleteDocument(id: string): Promise<boolean> {
@@ -53,8 +53,8 @@ export class RagService {
     return this.docRepo.deleteDocument(id);
   }
 
-  async listFaqs(): Promise<RagFaq[]> {
-    return this.docRepo.listFaqs();
+  async listFaqs(filter?: { departmentId?: string }): Promise<RagFaq[]> {
+    return this.docRepo.listFaqs(filter);
   }
 
   async createFaq(input: CreateRagFaqInput): Promise<RagFaq> {
@@ -154,7 +154,17 @@ export class RagService {
 
   async processAndIndexDocument(
     buffer: Buffer,
-    input: { id: string; name: string; category: string; mimeType: string; sizeBytes: number; uploadedBy: string; sourceUrl?: string | null }
+    input: {
+      id: string;
+      name: string;
+      category: string;
+      departmentId?: string | null;
+      isGlobal?: boolean;
+      mimeType: string;
+      sizeBytes: number;
+      uploadedBy: string;
+      sourceUrl?: string | null;
+    }
   ): Promise<RagDocument> {
     const rawText = await this.extractText(buffer, input.mimeType, input.name);
     const rawChunks = this.chunkDocument(rawText, input.name);
@@ -174,6 +184,8 @@ export class RagService {
           filename: input.name,
           chunkIndex: idx + 1,
           section: chunk.section,
+          departmentId: input.departmentId,
+          isGlobal: input.isGlobal,
         },
       });
     }
@@ -185,6 +197,8 @@ export class RagService {
       id: input.id,
       name: input.name,
       category: input.category,
+      departmentId: input.departmentId,
+      isGlobal: input.isGlobal,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
       chunksCount: indexedCount,
@@ -193,18 +207,18 @@ export class RagService {
     });
   }
 
-  // --- Consulta y BÃºsqueda HÃ­brida ---
-  async searchHybrid(question: string, limit = 4): Promise<RagChunk[]> {
+  // --- Consulta y Búsqueda Híbrida ---
+  async searchHybrid(question: string, limit = 4, departmentId?: string | null): Promise<RagChunk[]> {
     const embedding = await this.embeddingProvider.generateEmbedding(question);
     const stopWords = new Set([
-      "dame", "numero", "nÃºmero", "cuÃ¡l", "cual", "cuales", "cuÃ¡les", "donde", "dÃ³nde", "como", "cÃ³mo",
+      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
       "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
-      "que", "quÃ©", "quien", "quiÃ©n", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
-      "quiero", "quisiera", "informacion", "informaciÃ³n", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
+      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
     ]);
     const rawWords = question
       .toLowerCase()
-      .replace(/[Â¿?Â¡!,.]/g, "")
+      .replace(/[¿?¡!,.]/g, "")
       .split(/\s+/)
       .map((w) => w.trim())
       .filter((w) => w.length >= 2 && !stopWords.has(w));
@@ -216,8 +230,8 @@ export class RagService {
       else if (w.endsWith("s") && w.length > 3) keywordsSet.add(w.slice(0, -1));
     }
 
-    // ExpansiÃ³n semÃ¡ntica para preguntas de cobertura, ciudades, ubicaciÃ³n o disponibilidad
-    const isCoverageOrLocation = /operan|operaci[oÃ³]n|cobertura|ciudad|ciudades|sector|sectores|disponib|llegada|llegan|est[aÃ¡]n|donde|d[oÃ³]nde|ubicaci[oÃ³]n|oficina|oficinas|lugar/i.test(question);
+    // Expansión semántica para preguntas de cobertura, ciudades, ubicación o disponibilidad
+    const isCoverageOrLocation = /operan|operaci[oó]n|cobertura|ciudad|ciudades|sector|sectores|disponib|llegada|llegan|est[aá]n|donde|d[oó]nde|ubicaci[oó]n|oficina|oficinas|lugar/i.test(question);
     if (isCoverageOrLocation) {
       keywordsSet.add("cobertura");
       keywordsSet.add("ciudades");
@@ -226,8 +240,8 @@ export class RagService {
       keywordsSet.add("sectores");
     }
 
-    // 1. Si la consulta es sobre planes/paquetes/precios/informaciÃ³n, expandir keywords y priorizar tabla de planes
-    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto|info|informaci[oÃ³]n|interesa|interesar[iÃ­]a|contratar|servicios|servicio|fibra|costo|costos/i.test(question);
+    // 1. Si la consulta es sobre planes/paquetes/precios/información, expandir keywords y priorizar tabla de planes
+    const isPlanQuery = /plan|planes|paquete|paquetes|precio|precios|velocidad|velocidades|oferta|tarifa|cuanto|info|informaci[oó]n|interesa|interesar[ií]a|contratar|servicios|servicio|fibra|costo|costos/i.test(question);
     if (isPlanQuery) {
       keywordsSet.add("planes");
       keywordsSet.add("paquetes");
@@ -239,12 +253,17 @@ export class RagService {
     const keywords = Array.from(keywordsSet);
 
     const candidateLimit = Math.max(limit, 10);
-    const rawResults = await this.vectorStore.searchHybrid({ embedding, keywords, limit: candidateLimit });
+    const rawResults = await this.vectorStore.searchHybrid({
+      embedding,
+      keywords,
+      limit: candidateLimit,
+      departmentId,
+    });
 
     // Filtrar cualquier fragmento de reglas internas/meta que no deba llegar al cliente
     const results = rawResults.filter(
       (c) =>
-        !c.contentSnippet.includes("Reglas de interpretaciÃ³n para un asistente RAG") &&
+        !c.contentSnippet.includes("Reglas de interpretación para un asistente RAG") &&
         !c.contentSnippet.includes("No inventar planes, precios, cuentas bancarias")
     );
 
@@ -253,18 +272,18 @@ export class RagService {
 
   async synthesizeAnswer(question: string, chunks: RagChunk[]): Promise<string> {
     if (chunks.length === 0) {
-      return "No encontrÃ© informaciÃ³n relevante en la base de conocimiento para responder a tu consulta.";
+      return "No encontré información relevante en la base de conocimiento para responder a tu consulta.";
     }
 
     const context = chunks.map((c) => c.contentSnippet).join("\n---\n");
     const systemPrompt =
-      "Eres el asesor de atenciÃ³n al cliente de la empresa. Responde de forma cordial, concisa y PUNTUAL (mÃ¡ximo 2 a 3 oraciones), basÃ¡ndote ÃšNICAMENTE en el contexto documental proporcionado.\n" +
-      "- Responde EXACTAMENTE a lo que el usuario pregunta, sin omitir datos especÃ­ficos pedidos (por ejemplo, lista de sectores, precios o requisitos si fueron preguntados).\n" +
-      "- NO agregues informaciÃ³n no solicitada (no agregues correos, telÃ©fonos, horarios de soporte ni detalles de planes a menos que el usuario los haya preguntado).\n" +
-      "- NUNCA digas que eres una IA o asistente virtual ni que careces de catÃ¡logo o informaciÃ³n.";
+      "Eres el asesor de atención al cliente de la empresa. Responde de forma cordial, concisa y PUNTUAL (máximo 2 a 3 oraciones), basándote ÚNICAMENTE en el contexto documental proporcionado.\n" +
+      "- Responde EXACTAMENTE a lo que el usuario pregunta, sin omitir datos específicos pedidos (por ejemplo, lista de sectores, precios o requisitos si fueron preguntados).\n" +
+      "- NO agregues información no solicitada (no agregues correos, teléfonos, horarios de soporte ni detalles de planes a menos que el usuario los haya preguntado).\n" +
+      "- NUNCA digas que eres una IA o asistente virtual ni que careces de catálogo o información.";
     const userPrompt = `Contexto documental:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta puntual y directa:`;
 
-    // 1. Si Gemini API Key estÃ¡ configurada, usar Gemini para respuesta limpia e instantÃ¡nea (sub-500ms)
+    // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
     if (this.geminiApiKey) {
       try {
         const model = this.geminiModel || "gemini-2.5-flash-lite";
@@ -321,13 +340,13 @@ export class RagService {
       this.logger?.warn({ err }, "Error o timeout sintetizando respuesta con Ollama");
     }
 
-    // 3. Fallback inteligente: extraer especÃ­ficamente el dato relevante segÃºn la intenciÃ³n de la pregunta
+    // 3. Fallback inteligente: extraer específicamente el dato relevante según la intención de la pregunta
     return extractSmartFallback(question, chunks[0]?.contentSnippet || "");
   }
 
-  async query(question: string, limit = 4): Promise<RagQueryResult> {
+  async query(question: string, limit = 4, departmentId?: string | null): Promise<RagQueryResult> {
     const startTime = Date.now();
-    const chunks = await this.searchHybrid(question, limit);
+    const chunks = await this.searchHybrid(question, limit, departmentId);
     const topScore = chunks.length > 0 && chunks[0] ? chunks[0].similarityScore : 0;
 
     // Si encontramos chunks en el vector store con score suficiente (threshold 0.15)
@@ -347,12 +366,12 @@ export class RagService {
 
     // Fallback: Buscar en FAQs estructuradas
     const stopWords = new Set([
-      "dame", "numero", "nÃºmero", "cuÃ¡l", "cual", "cuales", "cuÃ¡les", "donde", "dÃ³nde", "como", "cÃ³mo",
+      "dame", "numero", "número", "cuál", "cual", "cuales", "cuáles", "donde", "dónde", "como", "cómo",
       "para", "este", "esta", "estos", "estas", "del", "los", "las", "por", "con", "sin",
-      "que", "quÃ©", "quien", "quiÃ©n", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
-      "quiero", "quisiera", "informacion", "informaciÃ³n", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
+      "que", "qué", "quien", "quién", "tiene", "tienen", "hacer", "puedo", "saber", "de", "el", "la", "en", "un", "una",
+      "quiero", "quisiera", "informacion", "información", "sobre", "necesito", "favor", "dime", "busco", "buscar", "dar", "tengo"
     ]);
-    const faqs = await this.docRepo.findActiveFaqs();
+    const faqs = await this.docRepo.findActiveFaqs(departmentId ? { departmentId } : undefined);
     const words = question.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !stopWords.has(w));
     const matchedFaq = words.length > 0 ? faqs.find((f) => {
       const textToSearch = `${f.question} ${(f.tags || []).join(" ")} ${(f.variations || []).join(" ")}`.toLowerCase();
@@ -369,7 +388,7 @@ export class RagService {
           {
             id: `chk-faq-${matchedFaq.id}`,
             sourceName: `PostgreSQL FAQ: ${matchedFaq.category}`,
-            contentSnippet: `Pregunta: "${matchedFaq.question}" â€” Respuesta: "${matchedFaq.answer}"`,
+            contentSnippet: `Pregunta: "${matchedFaq.question}" — Respuesta: "${matchedFaq.answer}"`,
             similarityScore: 0.92,
           },
         ],
@@ -378,7 +397,7 @@ export class RagService {
     }
 
     return {
-      answer: "No se encontrÃ³ informaciÃ³n relevante en los documentos indexados para responder a tu consulta.",
+      answer: "No se encontró información relevante en los documentos indexados para responder a tu consulta.",
       found: false,
       confidenceScore: 0.0,
       sources: [],
@@ -397,5 +416,3 @@ function extractSmartFallback(_question: string, snippet: string): string {
 
   return rawLines.join("\n").trim() || snippet;
 }
-
-

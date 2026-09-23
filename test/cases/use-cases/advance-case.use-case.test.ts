@@ -200,4 +200,83 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () =>
     const conversationAfter = await conversationRepo.findById(conversation.id);
     expect(conversationAfter?.activeCaseId).toBeNull();
   });
+
+  it("escala de inmediato cuando el usuario expresa hostilidad, groserías o rechazo durante un WaitingStep", async () => {
+    const gateway = new N8nGatewayFake({});
+    const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
+
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    // Avanzar a WAITING_USER_CLIENT
+    await advanceCase.execute({ caseId: created.id, correlationId: "corr-guard-1", text: "" });
+
+    // Cliente responde con groserías/hostilidad
+    const hostileResult = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-guard-2",
+      text: "Vengan y lleven esas huevadas que chucha les voy a dar",
+      entities: {},
+    });
+
+    expect(hostileResult.case.status).toBe("ESCALATED");
+    expect(hostileResult.outcome.type).toBe("ESCALATED");
+    const automation = await caseRepo.getAutomationState(created.id);
+    expect(automation?.enabled).toBe(false);
+  });
+
+  it("escala tras agotar el límite de intentos cuando el usuario manda respuestas que no aportan entidades", async () => {
+    const gateway = new N8nGatewayFake({});
+    const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
+
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    // Paso 1: Pasa a WAITING_USER_CLIENT
+    await advanceCase.execute({ caseId: created.id, correlationId: "corr-max-1", text: "" });
+
+    // Intento 1: mensaje sin entidad (no saludo)
+    const attempt1 = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-max-2",
+      text: "no se cual es el numero de contrato",
+      entities: {},
+    });
+    expect(attempt1.outcome.type).toBe("WAITING_USER");
+
+    // Intento 2: segundo mensaje sin entidad
+    const attempt2 = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-max-3",
+      text: "no tengo ese dato a mano",
+      entities: {},
+    });
+    expect(attempt2.outcome.type).toBe("WAITING_USER");
+
+    // Intento 3: tercer mensaje sin entidad -> debe escalar por maxAttempts=3
+    const attempt3 = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-max-4",
+      text: "no puedo conseguir la cedula",
+      entities: {},
+    });
+    expect(attempt3.outcome.type).toBe("ESCALATED");
+    expect(attempt3.case.status).toBe("ESCALATED");
+  });
 });

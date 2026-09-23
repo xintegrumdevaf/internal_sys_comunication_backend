@@ -32,6 +32,7 @@ export function notFound(message: string): DomainError {
 export function validationError(message: string): DomainError {
   return new DomainError("VALIDATION_ERROR", message);
 }
+export const validation = validationError;
 
 export function businessError(message: string): DomainError {
   return new DomainError("BUSINESS_ERROR", message);

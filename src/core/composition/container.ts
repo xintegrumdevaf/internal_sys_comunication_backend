@@ -111,6 +111,15 @@ import { AIProviderPort } from "../modules/ai/application/ports/ai-provider.port
 import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases/compose-customer-reply.use-case";
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
 import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
+import { PromptTemplateRepositoryPg } from "../modules/ai/infrastructure/postgres/prompt-template.repository.pg";
+import { PromptResolverService } from "../modules/ai/application/services/prompt-resolver.service";
+import { ListPromptsUseCase } from "../modules/ai/application/use-cases/list-prompts.use-case";
+import { GetPromptUseCase } from "../modules/ai/application/use-cases/get-prompt.use-case";
+import { SavePromptVersionUseCase } from "../modules/ai/application/use-cases/save-prompt-version.use-case";
+import { PublishPromptVersionUseCase } from "../modules/ai/application/use-cases/publish-prompt-version.use-case";
+import { RollbackPromptVersionUseCase } from "../modules/ai/application/use-cases/rollback-prompt-version.use-case";
+import { SimulatePromptUseCase } from "../modules/ai/application/use-cases/simulate-prompt.use-case";
+import { createPromptsRouter } from "../modules/ai/presentation/prompts.router";
 import { N8nGatewayHttp } from "../modules/cases/infrastructure/n8n/n8n-gateway.http";
 import { MikrotikDiagnosticAdapter } from "../modules/cases/infrastructure/diagnostic/mikrotik-diagnostic.adapter";
 import { CompositeActionGateway } from "../modules/cases/infrastructure/gateways/composite-action-gateway";
@@ -323,8 +332,11 @@ export function createContainer(): Container {
     diagnosticGateway,
   });
 
-  // --- AI (Etapa 5) ---
+  // --- AI (Etapa 5) + Dynamic Prompts ---
   const aiLogger = logger.child({ module: "ai" });
+  const promptTemplateRepo = new PromptTemplateRepositoryPg(pgPool);
+  const promptResolver = new PromptResolverService(promptTemplateRepo, aiLogger);
+
   let aiProvider: AIProviderPort;
   if (env.AI_PROVIDER === "gemini") {
     if (!env.GEMINI_API_KEY) {
@@ -339,6 +351,7 @@ export function createContainer(): Container {
       },
       aiLogger,
       departmentRoutingService,
+      promptResolver,
     );
   } else {
     aiProvider = new OllamaAdapter(
@@ -350,6 +363,7 @@ export function createContainer(): Container {
       },
       aiLogger,
       departmentRoutingService,
+      promptResolver,
     );
   }
   const interpretationProvider = new AiInterpretationAdapter(aiProvider, aiLogger);
@@ -357,6 +371,13 @@ export function createContainer(): Container {
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
   const extractReceiptData = new ExtractReceiptDataUseCase(aiProvider);
   const refineQuickReplyTone = new RefineQuickReplyToneUseCase({ aiProvider });
+
+  const listPrompts = new ListPromptsUseCase(promptTemplateRepo);
+  const getPrompt = new GetPromptUseCase(promptTemplateRepo);
+  const savePromptVersion = new SavePromptVersionUseCase(promptTemplateRepo, promptResolver);
+  const publishPromptVersion = new PublishPromptVersionUseCase(promptTemplateRepo, promptResolver);
+  const rollbackPromptVersion = new RollbackPromptVersionUseCase(promptTemplateRepo, promptResolver);
+  const simulatePrompt = new SimulatePromptUseCase(promptTemplateRepo, aiProvider);
 
   // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
   const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
@@ -863,6 +884,17 @@ export function createContainer(): Container {
   );
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(createRagRouter({ ragService, logger: aiLogger }));
+  app.use(
+    "/api/prompts",
+    createPromptsRouter({
+      listPrompts,
+      getPrompt,
+      saveVersion: savePromptVersion,
+      publishVersion: publishPromptVersion,
+      rollbackVersion: rollbackPromptVersion,
+      simulatePrompt,
+    }),
+  );
   app.use(
     createN8nWorkflowsRouter({
       listN8nWorkflows,

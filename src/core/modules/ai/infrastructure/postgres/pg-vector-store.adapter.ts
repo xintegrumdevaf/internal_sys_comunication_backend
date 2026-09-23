@@ -44,13 +44,19 @@ export class PgVectorStoreAdapter implements VectorStorePort {
       keywordSql = conditions.join(" + ");
     }
 
+    let deptFilterSql = "";
+    if (input.departmentId) {
+      params.push(input.departmentId);
+      deptFilterSql = `AND (metadata->>'departmentId' = $${params.length} OR (metadata->>'isGlobal')::boolean = true OR metadata->>'departmentId' IS NULL)`;
+    }
+
     const query = `
       WITH matches AS (
         SELECT id, text, metadata,
                (1 - (embedding <=> $1::vector)) AS vec_score,
                (${keywordSql}) AS keyword_boost
         FROM n8n_vectors
-        WHERE length(text) > 30
+        WHERE length(text) > 30 ${deptFilterSql}
       )
       SELECT id, text, metadata, vec_score, (vec_score + keyword_boost) AS total_score
       FROM matches

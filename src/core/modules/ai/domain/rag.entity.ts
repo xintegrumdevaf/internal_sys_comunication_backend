@@ -2,6 +2,8 @@ export interface RagDocument {
   id: string;
   name: string;
   category: string;
+  departmentId?: string | null;
+  isGlobal?: boolean;
   mimeType: string;
   sizeBytes: number;
   status: "pending" | "processing" | "processed" | "error";
@@ -16,6 +18,8 @@ export interface RagDocument {
 export interface RagFaq {
   id: string;
   category: string;
+  departmentId?: string | null;
+  isGlobal?: boolean;
   question: string;
   answer: string;
   tags: string[];
