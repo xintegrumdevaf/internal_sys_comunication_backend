@@ -18,6 +18,7 @@ import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
 import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentResolverService } from "../services/department-resolver.service";
+import { checkCustomerGuardrails } from "../../domain/guardrails";
 
 const MAX_STEPS_PER_RUN = 10;
 
@@ -115,34 +116,51 @@ export class AdvanceCaseUseCase {
         (key) => key in entities && entities[key] !== undefined && entities[key] !== null && entities[key] !== "",
       );
 
-      const missing = missingRequiredFields(waitingStep, entities);
-      if (missing.length > 0) {
-        const nextContext = hasProvidedAnyRequiredEntity
-          ? bumpWaitingAttempts(context, missing)
-          : context;
-        const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
-        const max = maxAttemptsOf(waitingStep);
-        log.info(
-          { currentState, missing, attempts, max, hasProvidedAnyRequiredEntity },
-          "WaitingStep: datos incompletos",
+      // Guardrail anti-hostilidad o rechazo explícito a colaborar
+      const guardrail = checkCustomerGuardrails(input.text);
+      if (guardrail.shouldEscalate) {
+        log.warn(
+          { currentState, reason: guardrail.reason, text: input.text },
+          "WaitingStep: guardrail activado por hostilidad o rechazo; escalando a humano",
         );
-
-        if (attempts >= max) {
-          outcome = {
-            type: "ESCALATED",
-            reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
-            context: nextContext,
-          };
-        } else {
-          outcome = {
-            type: "WAITING_USER",
-            nextState: currentState,
-            context: nextContext,
-          };
-        }
+        const missing = missingRequiredFields(waitingStep, entities);
+        const nextContext = bumpWaitingAttempts(context, missing.length > 0 ? missing : ["input"]);
+        outcome = {
+          type: "ESCALATED",
+          reason: guardrail.reason ?? "Cliente expresó malestar o rechazo a proporcionar datos",
+          context: nextContext,
+        };
       } else {
-        context = clearWaitingMeta(context);
-        log.info({ currentState, entities }, "WaitingStep: datos completos, avanzando");
+        const missing = missingRequiredFields(waitingStep, entities);
+        if (missing.length > 0) {
+          // No quemar intentos si el cliente únicamente envió un saludo o puntuación de espera
+          const isPureGreetingOrPunctuation = /^(hola|buenos d[ií]as|buenas tardes|buenas noches|buenas|ok|espera|un momento|dame un momento|\?+|\.+)$/i.test(input.text.trim());
+          const shouldBump = hasProvidedAnyRequiredEntity || !isPureGreetingOrPunctuation;
+          const nextContext = shouldBump ? bumpWaitingAttempts(context, missing) : context;
+          const attempts = getEngineMeta(nextContext).waitingAttempts ?? 0;
+          const max = maxAttemptsOf(waitingStep);
+          log.info(
+            { currentState, missing, attempts, max, hasProvidedAnyRequiredEntity, shouldBump },
+            "WaitingStep: datos incompletos",
+          );
+
+          if (attempts >= max) {
+            outcome = {
+              type: "ESCALATED",
+              reason: `No fue posible obtener ${missing.join(", ")} tras ${max} intentos`,
+              context: nextContext,
+            };
+          } else {
+            outcome = {
+              type: "WAITING_USER",
+              nextState: currentState,
+              context: nextContext,
+            };
+          }
+        } else {
+          context = clearWaitingMeta(context);
+          log.info({ currentState, entities }, "WaitingStep: datos completos, avanzando");
+        }
       }
     }
 

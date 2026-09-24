@@ -8,6 +8,8 @@ export interface IndexChunkInput {
     filename: string;
     chunkIndex: number;
     section?: string;
+    departmentId?: string | null;
+    isGlobal?: boolean;
   };
 }
 
@@ -15,6 +17,7 @@ export interface HybridSearchInput {
   embedding: number[];
   keywords: string[];
   limit: number;
+  departmentId?: string | null;
 }
 
 export interface VectorStorePort {

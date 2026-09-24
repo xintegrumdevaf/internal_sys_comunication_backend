@@ -297,6 +297,21 @@ function debtReply(
   };
 }
 
+function extractCustomerFirstName(fullName?: string): string {
+  if (!fullName || typeof fullName !== "string") return "";
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return capitalizeWords(parts[0] ?? "");
+  if (parts.length === 2) return capitalizeWords(parts[0] ?? "");
+  // En Ecuador los registros en CRM suelen ser APELLIDO_PATERNO APELLIDO_MATERNO NOMBRES
+  // e.g. "FUENTES MEZA JEAN PIERRE" -> "Jean Pierre"
+  const givenNames = parts.slice(2).join(" ");
+  return capitalizeWords(givenNames || parts[0] || "");
+}
+
+function capitalizeWords(str: string): string {
+  return str.toLowerCase().replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
+}
+
 function flattenContext(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
@@ -309,5 +324,15 @@ function flattenContext(data: Record<string, unknown>): Record<string, unknown> 
       out[key] = value;
     }
   }
+
+  const clientObj = data.client as { fullName?: string } | undefined;
+  if (clientObj?.fullName) {
+    const firstName = extractCustomerFirstName(clientObj.fullName);
+    if (firstName) {
+      out["clientName"] = firstName;
+      out["clientFirstName"] = firstName;
+    }
+  }
+
   return out;
 }

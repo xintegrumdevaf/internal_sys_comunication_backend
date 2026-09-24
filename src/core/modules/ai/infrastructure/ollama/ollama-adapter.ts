@@ -38,6 +38,7 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+import type { PromptResolverService } from "../../application/services/prompt-resolver.service";
 
 /**
  * Adapter Ollama: solo transporta prompts ya armados (06_AI_PROMPTS.md §1).
@@ -47,6 +48,7 @@ export class OllamaAdapter implements AIProviderPort {
     private readonly config: OllamaAdapterConfig,
     private readonly logger: Logger,
     private readonly routingService?: DepartmentRoutingService,
+    private readonly promptResolver?: PromptResolverService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -56,10 +58,25 @@ export class OllamaAdapter implements AIProviderPort {
       messageId: input.messageId,
     });
     const dynamicIntents = this.routingService ? await this.routingService.getPromptIntents() : undefined;
-    const { system, user } = buildInterpretMessagePrompt(input, dynamicIntents);
+    const fallback = () => buildInterpretMessagePrompt(input, dynamicIntents);
+    const resolved = this.promptResolver
+      ? await this.promptResolver.resolvePrompt(
+          "interpret_message",
+          {
+            text: input.text,
+            recentMessages: input.conversationSnapshot?.recentMessages,
+            activeCase: input.conversationSnapshot?.activeCase,
+          },
+          fallback,
+        )
+      : { ...fallback(), modelConfig: { temperature: 0.2 }, versionNumber: 0, source: "fallback_code" as const };
+
     const started = Date.now();
     try {
-      const raw = await this.chat(system, user, { jsonMode: true, temperature: 0.2 });
+      const raw = await this.chat(resolved.system, resolved.user, {
+        jsonMode: true,
+        temperature: (resolved.modelConfig.temperature as number) ?? 0.2,
+      });
       const interpretation = parseInterpretation(raw);
       log.info(
         {
@@ -68,6 +85,8 @@ export class OllamaAdapter implements AIProviderPort {
           intent: interpretation.intent,
           confidence: interpretation.confidence,
           textPreview: input.text.slice(0, 80),
+          promptSource: resolved.source,
+          promptVersion: resolved.versionNumber,
         },
         "Ollama interpretacion OK",
       );
@@ -87,8 +106,30 @@ export class OllamaAdapter implements AIProviderPort {
   }
 
   async composeReply(input: ComposeReplyInput): Promise<string> {
-    const { system, user } = buildComposeReplyPrompt(input);
-    const raw = await this.chat(system, user, { jsonMode: false, temperature: 0.55 });
+    const fallback = () => buildComposeReplyPrompt(input);
+    const stepResult =
+      input.stepOutcome?.result && typeof input.stepOutcome.result === "object"
+        ? (input.stepOutcome.result as Record<string, unknown>)
+        : undefined;
+    const resolved = this.promptResolver
+      ? await this.promptResolver.resolvePrompt(
+          "compose_reply",
+          {
+            clientName: typeof stepResult?.clientName === "string" ? stepResult.clientName : "",
+            clientFirstName: typeof stepResult?.clientFirstName === "string" ? stepResult.clientFirstName : "",
+            stepOutcome: input.stepOutcome,
+            templateHint: input.templateHint,
+            missingFields: input.missingFields,
+            workflowType: input.workflowType,
+          },
+          fallback,
+        )
+      : { ...fallback(), modelConfig: { temperature: 0.55 }, versionNumber: 0, source: "fallback_code" as const };
+
+    const raw = await this.chat(resolved.system, resolved.user, {
+      jsonMode: false,
+      temperature: (resolved.modelConfig.temperature as number) ?? 0.55,
+    });
     return raw.trim().replace(/^["']|["']$/g, "");
   }
 
@@ -168,12 +209,12 @@ export class OllamaAdapter implements AIProviderPort {
     }
   }
 
-  private async chat(
+  async chat(
     system: string,
     user: string,
-    options: { jsonMode: boolean; temperature: number; numPredict?: number; timeoutMs?: number },
+    options?: { jsonMode?: boolean; temperature?: number; numPredict?: number; timeoutMs?: number },
   ): Promise<string> {
-    const timeoutMs = options.timeoutMs ?? this.config.timeoutMs;
+    const timeoutMs = options?.timeoutMs ?? this.config.timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -187,11 +228,11 @@ export class OllamaAdapter implements AIProviderPort {
           { role: "user", content: user },
         ],
         options: {
-          temperature: options.temperature,
-          num_predict: options.numPredict ?? 256,
+          temperature: options?.temperature ?? 0.2,
+          num_predict: options?.numPredict ?? 256,
         },
       };
-      if (options.jsonMode) {
+      if (options?.jsonMode) {
         payload.format = "json";
       }
 

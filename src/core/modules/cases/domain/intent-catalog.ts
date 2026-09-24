@@ -34,6 +34,26 @@ export const INTENT_CATALOG = [
     description: "quiere cambiar/mejorar su plan — RAG informa, luego escala a ventas si confirma",
   },
   {
+    intent: "support.service_cancellation",
+    workflowType: null,
+    description: "solicitud de cancelación, baja definitiva o retiro del servicio",
+  },
+  {
+    intent: "support.equipment_return",
+    workflowType: null,
+    description: "devolución o entrega de equipos/módem",
+  },
+  {
+    intent: "billing.dispute",
+    workflowType: null,
+    description: "reclamo o disputa por cobros indebidos o facturas erróneas",
+  },
+  {
+    intent: "general.complaint",
+    workflowType: null,
+    description: "queja formal por mala atención o inconformidad grave",
+  },
+  {
     intent: "general.inquiry",
     workflowType: "GENERAL_INQUIRY",
     description: "pregunta general de la empresa (oficinas, horarios, cuentas, cobertura, sectores)",

@@ -101,11 +101,29 @@ export class CaseArbitrationService {
         };
       }
 
+      if (
+        interpretation.type === "DENY" ||
+        interpretation.type === "CANCEL"
+      ) {
+        // Si el cliente niega o cancela mientras hay un caso activo, no insistir ni pedir aclaraciones; transferir a humano.
+        return { action: "REQUEST_HUMAN", caseId: activeCase.id };
+      }
+
       return { action: "CLARIFY" };
     }
 
     if (!targetWorkflowType || !meetsConfidence) {
       return { action: "CLARIFY" };
+    }
+
+    // Si la conversación ya tiene un caso escalado o atendido por humanos no expirado,
+    // no abrir un nuevo caso automatizado; mantener la atención con el asesor humano.
+    const allCases = await this.caseRepo.listByConversation(conversationId);
+    const pendingHumanCase = [...allCases].reverse().find(
+      (c) => (c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") && !this.expirationService.isExpired(c),
+    );
+    if (pendingHumanCase) {
+      return { action: "REQUEST_HUMAN", caseId: pendingHumanCase.id };
     }
 
     const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);

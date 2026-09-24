@@ -592,4 +592,221 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     expect(outcome.context.data.clientNotFound).toBe(true);
     expect(outcome.context.data.lastSearchedNationalId).toBe("0999999999");
   });
+
+  it("CONTINUE_DIAGNOSTIC con fallo dispara automáticamente fallback a DIAGNOSTIC inicial", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      CONTINUE_DIAGNOSTIC: () => ({
+        success: false,
+        error: { type: "EXTERNAL_SERVICE_ERROR", message: "session expired", retryable: true },
+      }),
+      DIAGNOSTIC: (params) => ({
+        success: true,
+        result: {
+          status: "COMPLETED",
+          diagnostic: "ONU_REESTABLECIDA_OK",
+        },
+      }),
+    });
+
+    const contextWithContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724482722", fullName: "Jean Pierre" },
+        contract: {
+          id: "1",
+          sector: "pifo",
+          oltName: "olt-pifo",
+          pon: "1",
+          serial: "DF30E67B6ADD",
+        },
+        diagnostic: {
+          status: "PENDING",
+          lastQuestion: "¿De qué color son las luces?",
+          rounds: 1,
+        },
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DIAGNOSTIC", contextWithContract, gateway),
+      text: "Son verdes",
+      entities: { answer: "Son verdes" },
+    });
+
+    // Se intentó CONTINUE_DIAGNOSTIC y falló, por lo que disparó DIAGNOSTIC como fallback
+    expect(gateway.actionsCalledFor("CONTINUE_DIAGNOSTIC")).toBe(1);
+    expect(gateway.actionsCalledFor("DIAGNOSTIC")).toBe(1);
+    const diagCall = gateway.calls.find((c) => c.action === "DIAGNOSTIC");
+    expect(diagCall?.input).toMatchObject({
+      sector: "pifo",
+      oltName: "olt-pifo",
+      pon: "1",
+      serial: "DF30E67B6ADD",
+      message: "Son verdes",
+    });
+    expect(outcome.type).toBe("COMPLETED");
+  });
+
+  it("si CONTINUE_DIAGNOSTIC falla y el fallback DIAGNOSTIC también falla, escala de inmediato a humano sin bucle", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      CONTINUE_DIAGNOSTIC: () => ({
+        success: false,
+        error: { type: "EXTERNAL_SERVICE_ERROR", message: "session lost", retryable: true },
+      }),
+      DIAGNOSTIC: () => ({
+        success: false,
+        error: { type: "EXTERNAL_SERVICE_ERROR", message: "olt timeout", retryable: true },
+      }),
+    });
+
+    const contextWithContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724482722", fullName: "Jean Pierre" },
+        contract: {
+          id: "1",
+          sector: "pifo",
+          oltName: "olt-pifo",
+          pon: "1",
+          serial: "DF30E67B6ADD",
+        },
+        diagnostic: {
+          status: "PENDING",
+          lastQuestion: "¿De qué color son las luces?",
+          rounds: 1,
+        },
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DIAGNOSTIC", contextWithContract, gateway),
+      text: "Son verdes",
+      entities: { answer: "Son verdes" },
+    });
+
+    expect(gateway.actionsCalledFor("CONTINUE_DIAGNOSTIC")).toBe(1);
+    expect(gateway.actionsCalledFor("DIAGNOSTIC")).toBe(1);
+    // Escala inmediatamente, nunca vuelve a WAITING_USER_DIAGNOSTIC
+    expect(outcome.type).toBe("ESCALATED");
+  });
+
+  it("si el servicio de diagnóstico devuelve pregunta repetida sobre las luces, escala a humano para evitar bucle", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      CONTINUE_DIAGNOSTIC: () => ({
+        success: true,
+        result: {
+          status: "WAITING_USER",
+          question: "Por favor confirme si las luces del router están encendidas y dígame su color",
+        },
+      }),
+    });
+
+    const contextWithContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724482722", fullName: "Jean Pierre" },
+        contract: {
+          id: "1",
+          sector: "pifo",
+          oltName: "olt-pifo",
+          pon: "1",
+          serial: "DF30E67B6ADD",
+        },
+        diagnostic: {
+          status: "PENDING",
+          lastQuestion: "Por favor confirma si las luces de tu router están encendidas y dime de qué color son",
+          rounds: 1,
+        },
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DIAGNOSTIC", contextWithContract, gateway),
+      text: "Son verdes",
+      entities: { answer: "Son verdes" },
+    });
+
+    expect(outcome.type).toBe("ESCALATED");
+    expect((outcome as { reason?: string }).reason).toMatch(/repitió la misma pregunta/i);
+  });
+
+  it("si el diagnóstico excede 2 rondas de preguntas, escala a humano", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      CONTINUE_DIAGNOSTIC: () => ({
+        success: true,
+        result: {
+          status: "WAITING_USER",
+          question: "¿El cable azul está firmemente conectado?",
+        },
+      }),
+    });
+
+    const contextWithContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724482722", fullName: "Jean Pierre" },
+        contract: {
+          id: "1",
+          sector: "pifo",
+          oltName: "olt-pifo",
+          pon: "1",
+          serial: "DF30E67B6ADD",
+        },
+        diagnostic: {
+          status: "PENDING",
+          lastQuestion: "¿Ya reinició el router desconectándolo de la toma eléctrica?",
+          rounds: 2, // Ya lleva 2 rondas
+        },
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DIAGNOSTIC", contextWithContract, gateway),
+      text: "Ya lo reinicié",
+      entities: { answer: "Ya lo reinicié" },
+    });
+
+    // 2 + 1 = 3 rondas > 2 -> ESCALATED
+    expect(outcome.type).toBe("ESCALATED");
+    expect((outcome as { reason?: string }).reason).toMatch(/límite de preguntas/i);
+  });
+
+  it("VALIDATE_CLIENT no vuelve a consultar n8n ni pedir cédula si los datos ya están en el contexto", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: () => {
+        throw new Error("VALIDATE_CLIENT no debería ser llamado si el cliente ya existe");
+      },
+    });
+
+    const contextWithExistingContract: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724482722", fullName: "Jean Pierre" },
+        contract: {
+          id: "1",
+          sector: "pifo",
+          oltName: "olt-pifo",
+          pon: "1",
+          serial: "DF30E67B6ADD",
+        },
+      },
+    };
+
+    const outcome = await engine.step(
+      "SUPPORT_INTERNET",
+      baseInput("VALIDATE_CLIENT", contextWithExistingContract, gateway),
+    );
+
+    expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
+    expect(outcome).toMatchObject({
+      type: "CONTINUE",
+      nextState: "CHECK_CLIENT_STATUS",
+    });
+  });
 });
+

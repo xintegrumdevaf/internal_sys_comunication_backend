@@ -113,7 +113,30 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
       message: params.input.message ?? "",
     };
 
-    return this.postJson(url, body, params.action, log);
+    const firstResult = await this.postJson(url, body, params.action, log);
+    if (!firstResult.success) {
+      return firstResult;
+    }
+
+    const res = (firstResult.result ?? {}) as Record<string, unknown>;
+    const workflowObj = (res.workflow ?? {}) as Record<string, unknown>;
+    const status = String(res.status || workflowObj.status || "").toLowerCase();
+    const currentStep = String(res.currentStep || workflowObj.currentStep || "").toLowerCase();
+
+    // Si el microservicio responde con 'waiting_system' o 'recheck',
+    // está ejecutando la revalidación interna del estado de la ONU.
+    // Esperamos 2.5 segundos y volvemos a consultar la continuación para obtener el resultado definitivo
+    // sin interrumpir al usuario ni confundirlo con instrucciones técnicas internas del sistema.
+    if (status === "waiting_system" || currentStep === "recheck") {
+      log.info({ status, currentStep }, "[diagnostic-api] microservicio en recheck/waiting_system; esperando 2.5s para obtener resultado final");
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const secondResult = await this.postJson(url, { conversationId: params.conversationId, message: "" }, params.action, log);
+      if (secondResult.success) {
+        return secondResult;
+      }
+    }
+
+    return firstResult;
   }
 
   private async postJson(

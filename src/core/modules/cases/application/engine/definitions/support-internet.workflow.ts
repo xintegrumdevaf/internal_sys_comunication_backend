@@ -92,6 +92,8 @@ export function normalizeDiagnosticResult(raw: Record<string, unknown>): Diagnos
     status = "COMPLETED";
   } else if (["escalated", "failed", "error", "unresolvable"].includes(workflowStatus)) {
     status = "ESCALATED";
+  } else if (workflowStatus === "waiting_system" || workflowStatus === "recheck") {
+    status = "ESCALATED";
   } else if (instruction) {
     status = "WAITING_USER";
   } else {
@@ -131,6 +133,11 @@ const validateClient: WorkflowStateHandler = async ({
   identity,
 }) => {
   let data = requireSupportInternetContext(context);
+
+  // Si el caso ya tiene cliente y contrato resuelto previamente, no re-validar ni pedir cédula.
+  if (data.client?.nationalId && data.contract?.id && (data.contract.sector || data.contract.oltName)) {
+    return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(data, context) };
+  }
 
   // §14: si esta conversación ya validó identidad, no pedir cédula ni llamar n8n.
   if (identity) {
@@ -501,6 +508,33 @@ const respondDebt: WorkflowStateHandler = async ({ context }) => {
   return { type: "COMPLETED", context };
 };
 
+/**
+ * Detecta si una pregunta devuelta por el servicio de diagnóstico es idéntica
+ * o semánticamente equivalente a una pregunta que el cliente ya respondió
+ * (evitando bucles de preguntar repetidamente por las luces/router).
+ */
+function isSameOrRedundantQuestion(q1?: string, q2?: string): boolean {
+  if (!q1 || !q2) return false;
+  const clean = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w\s]/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const c1 = clean(q1);
+  const c2 = clean(q2);
+  if (c1 === c2) return true;
+  const isLightsQuestion = (c: string) =>
+    (c.includes("luz") || c.includes("luces") || c.includes("color")) &&
+    (c.includes("router") || c.includes("equipo") || c.includes("modem") || c.includes("onu") || c.includes("led"));
+  if (isLightsQuestion(c1) && isLightsQuestion(c2)) {
+    return true;
+  }
+  return false;
+}
+
 const diagnostic: WorkflowStateHandler = async ({
   caseId,
   conversationId,
@@ -519,17 +553,20 @@ const diagnostic: WorkflowStateHandler = async ({
     typeof entities?.answer === "string" ? entities.answer.trim() : "";
   const message = isContinuation ? answerFromEntities || text || "" : undefined;
 
+  const initialInput = {
+    sector: data.contract?.sector ?? null,
+    oltName: data.contract?.oltName ?? null,
+    pon: data.contract?.pon ?? null,
+    serial: data.contract?.serial ?? null,
+    conversationId,
+    ...(message ? { message } : {}),
+  };
+
   const input = isContinuation
     ? { conversationId, message: message ?? "" }
-    : {
-        sector: data.contract?.sector ?? null,
-        oltName: data.contract?.oltName ?? null,
-        pon: data.contract?.pon ?? null,
-        serial: data.contract?.serial ?? null,
-        conversationId,
-      };
+    : initialInput;
 
-  const result = await gateway.executeAction({
+  let result = await gateway.executeAction({
     action,
     caseId,
     conversationId,
@@ -537,22 +574,34 @@ const diagnostic: WorkflowStateHandler = async ({
     input,
   });
 
+  // Resiliencia ante fallos de CONTINUE_DIAGNOSTIC:
+  // Si la sesión de continuación se perdió, expiró o falló,
+  // volvemos a disparar el DIAGNOSTIC inicial con los datos del contrato conocidos.
+  if (!result.success && isContinuation) {
+    result = await gateway.executeAction({
+      action: "DIAGNOSTIC",
+      caseId,
+      conversationId,
+      correlationId,
+      input: initialInput,
+    });
+  }
+
+  // Si tras el fallback sigue fallando, escalamos inmediatamente a un humano.
+  // NUNCA repetir la misma pregunta en bucle ni reintentar indefinidamente.
   if (!result.success) {
-    if (result.error.retryable !== false) {
-      const nextData: SupportInternetContext = {
-        ...data,
-        diagnostic: {
-          status: "PENDING",
-          lastQuestion: "Estamos analizando tu equipo. ¿Puedes confirmarnos si las luces del router están encendidas y de qué color están?",
-        },
-      };
-      const waiting = resetWaitingAttempts(
-        withContext(nextData, context),
-        "WAITING_USER_DIAGNOSTIC",
-      );
-      return { type: "WAITING_USER", nextState: "WAITING_USER_DIAGNOSTIC", context: waiting };
-    }
-    return { type: "ESCALATED", reason: result.error.message, context };
+    const nextData: SupportInternetContext = {
+      ...data,
+      diagnostic: {
+        status: "UNRESOLVABLE",
+        result: result.error.message || "Falla en servicio de diagnóstico",
+      },
+    };
+    return {
+      type: "ESCALATED",
+      reason: result.error.message || "El diagnóstico técnico no pudo continuar automáticamente; derivando a un asesor",
+      context: withContext(nextData, context),
+    };
   }
 
   const output = normalizeDiagnosticResult(
@@ -583,12 +632,54 @@ const diagnostic: WorkflowStateHandler = async ({
   }
 
   if (output.status === "WAITING_USER") {
+    // Si la pregunta devuelta es idéntica o redundante a la que el usuario acaba de responder,
+    // o si el sistema entra en bucle de preguntas de luces, derivar de inmediato a un humano.
+    if (isContinuation && isSameOrRedundantQuestion(output.question, data.diagnostic?.lastQuestion)) {
+      const nextData: SupportInternetContext = {
+        ...data,
+        diagnostic: {
+          status: "UNRESOLVABLE",
+          result: "Diagnóstico técnico requiere asistencia personalizada",
+          lastQuestion: output.question,
+          ...(output.technical ? { technical: output.technical } : {}),
+        },
+      };
+      return {
+        type: "ESCALATED",
+        reason: "El diagnóstico técnico repitió la misma pregunta; derivando a un asesor",
+        context: withContext(nextData, context),
+      };
+    }
+
+    const previousRounds = data.diagnostic?.rounds ?? 0;
+    const currentRounds = isContinuation ? previousRounds + 1 : 1;
+
+    // Máximo 2 rondas de preguntas técnicas automáticas antes de transferir a humano
+    if (currentRounds > 2) {
+      const nextData: SupportInternetContext = {
+        ...data,
+        diagnostic: {
+          status: "UNRESOLVABLE",
+          result: "Límite de preguntas de diagnóstico alcanzado",
+          lastQuestion: output.question,
+          rounds: currentRounds,
+          ...(output.technical ? { technical: output.technical } : {}),
+        },
+      };
+      return {
+        type: "ESCALATED",
+        reason: "Límite de preguntas de diagnóstico alcanzado; derivando a un asesor",
+        context: withContext(nextData, context),
+      };
+    }
+
     const nextData: SupportInternetContext = {
       ...data,
       diagnostic: {
         status: "PENDING",
         lastQuestion: output.question,
         result: output.diagnostic,
+        rounds: currentRounds,
         ...(output.technical ? { technical: output.technical } : {}),
       },
     };
@@ -605,6 +696,7 @@ const diagnostic: WorkflowStateHandler = async ({
       diagnostic: {
         status: "RESOLVED",
         result: output.diagnostic,
+        rounds: data.diagnostic?.rounds ?? 1,
         ...(output.technical ? { technical: output.technical } : {}),
       },
     };

@@ -216,13 +216,16 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
   }
 
   async listAutomatableExpiring(now: Date): Promise<Case[]> {
+    const cutoff24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const { rows } = await this.pool.query<CaseRow>(
       `SELECT * FROM "case"
-       WHERE status NOT IN (${TERMINAL_CASE_STATUSES.map((_, i) => `$${i + 2}`).join(", ")})
-         AND expires_at IS NOT NULL
-         AND expires_at <= $1
-       ORDER BY expires_at ASC`,
-      [now, ...TERMINAL_CASE_STATUSES],
+       WHERE status NOT IN (${TERMINAL_CASE_STATUSES.map((_, i) => `$${i + 3}`).join(", ")})
+         AND (
+           (expires_at IS NOT NULL AND expires_at <= $1)
+           OR (expires_at IS NULL AND last_activity_at <= $2)
+         )
+       ORDER BY expires_at ASC NULLS LAST, last_activity_at ASC`,
+      [now, cutoff24h, ...TERMINAL_CASE_STATUSES],
     );
     return rows.map(mapCaseRow);
   }

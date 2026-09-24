@@ -119,7 +119,10 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
 
   async listAutomatableExpiring(now: Date): Promise<Case[]> {
     return [...this.cases.values()].filter(
-      (c) => !TERMINAL_CASE_STATUSES.includes(c.status) && c.expiresAt !== null && c.expiresAt.getTime() <= now.getTime(),
+      (c) =>
+        !TERMINAL_CASE_STATUSES.includes(c.status) &&
+        ((c.expiresAt !== null && c.expiresAt.getTime() <= now.getTime()) ||
+          (c.expiresAt === null && now.getTime() - c.lastActivityAt.getTime() >= 24 * 60 * 60 * 1000)),
     );
   }
 
