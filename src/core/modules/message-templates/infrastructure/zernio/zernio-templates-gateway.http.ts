@@ -183,7 +183,11 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
         throw externalServiceError("Respuesta de Zernio API sin ID de plantilla");
       }
 
-      const status: MessageTemplateStatus = (data.template?.status as MessageTemplateStatus) || "PENDING";
+      const rawStatusSubmit = String(data.template?.status || "PENDING").toUpperCase();
+      let status: MessageTemplateStatus = "PENDING";
+      if (rawStatusSubmit === "APPROVED") status = "APPROVED";
+      else if (rawStatusSubmit === "REJECTED") status = "REJECTED";
+      else if (rawStatusSubmit === "PAUSED") status = "PAUSED";
 
       return {
         metaTemplateId,
@@ -217,7 +221,12 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
         throw externalServiceError("Zernio no devolvio el objeto de plantilla");
       }
 
-      const status: MessageTemplateStatus = (tpl.status as MessageTemplateStatus) || "PENDING";
+      const rawStatusFetch = String(tpl.status || "PENDING").toUpperCase();
+      let status: MessageTemplateStatus = "PENDING";
+      if (rawStatusFetch === "APPROVED") status = "APPROVED";
+      else if (rawStatusFetch === "REJECTED") status = "REJECTED";
+      else if (rawStatusFetch === "PAUSED") status = "PAUSED";
+
       const rejectedReason = tpl.rejected_reason || null;
 
       return {
