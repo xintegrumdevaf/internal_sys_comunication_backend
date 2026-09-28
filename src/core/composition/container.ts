@@ -46,6 +46,13 @@ import { ResolveQuickReplyUseCase } from "../modules/quick-replies/application/u
 import { RefineQuickReplyToneUseCase } from "../modules/quick-replies/application/use-cases/refine-quick-reply-tone.use-case";
 import { createQuickRepliesRouter } from "../modules/quick-replies/presentation/quick-replies.router";
 
+import { TagRepositoryPg } from "../modules/tags/infrastructure/postgres/tag.repository.pg";
+import { ListTagsUseCase } from "../modules/tags/application/use-cases/list-tags.use-case";
+import { CreateTagUseCase } from "../modules/tags/application/use-cases/create-tag.use-case";
+import { UpdateTagUseCase } from "../modules/tags/application/use-cases/update-tag.use-case";
+import { DeleteTagUseCase } from "../modules/tags/application/use-cases/delete-tag.use-case";
+import { createTagsRouter } from "../modules/tags/presentation/tags.router";
+
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
@@ -797,6 +804,12 @@ export function createContainer(): Container {
   );
   const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
 
+  const tagRepo = new TagRepositoryPg(pgPool);
+  const listTags = new ListTagsUseCase(tagRepo);
+  const createTag = new CreateTagUseCase(tagRepo);
+  const updateTag = new UpdateTagUseCase(tagRepo);
+  const deleteTag = new DeleteTagUseCase(tagRepo);
+
   // --- Zernio Historical Sync (Worker + Use Cases) ---
   const zernioHistoryGateway = new ZernioHistoryGatewayHttp(env, conversationsLogger);
   const zernioHistorySyncWorker = new ZernioHistorySyncWorker(
@@ -1006,6 +1019,7 @@ export function createContainer(): Container {
       getInfrastructureAlerts,
     }),
   );
+  app.use(createTagsRouter({ listTags, createTag, updateTag, deleteTag }));
 
   app.use(createErrorHandler(logger));
 

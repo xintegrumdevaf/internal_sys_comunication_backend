@@ -352,6 +352,18 @@ CREATE TABLE internal_message (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_internal_message_thread ON internal_message(thread_id, created_at ASC);
+
+-- Catálogo de etiquetas (tags) administrables para casos y atención
+CREATE TABLE tag (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name          VARCHAR(100) NOT NULL UNIQUE,
+  description   TEXT,
+  color         VARCHAR(50),
+  active        BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_tag_name ON tag(name);
 ```
 
 ## 3. Reglas de integridad relevantes

@@ -203,6 +203,10 @@ o en error:
 | `POST /api/internal/threads/direct` `{ peerAgentId }` | Obtiene o crea un hilo 1:1 con otro agente/supervisor |
 | `GET /api/internal/threads/:id/messages?limit=&cursor=` | Mensajes del hilo interno, orden cronológico, paginado |
 | `POST /api/internal/threads/:id/messages` `{ body, type?, contextData? }` | Envía mensaje al hilo (texto o quality_quote con contexto) |
+| `GET /api/tags` | Lista el catálogo de etiquetas administrables |
+| `POST /api/tags` `{ name, description?, color? }` | Crea una nueva etiqueta en el catálogo (`admin` únicamente) |
+| `PATCH /api/tags/:id` `{ name?, description?, color?, active? }` | Modifica una etiqueta del catálogo (`admin` únicamente) |
+| `DELETE /api/tags/:id` | Desactiva/elimina una etiqueta del catálogo (`admin` únicamente) |
 | `POST /api/internal/threads/:id/read` | Marca el hilo como leído para el agente autenticado |
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.
