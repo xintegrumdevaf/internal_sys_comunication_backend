@@ -143,17 +143,19 @@ describe("Cierre manual y agendamiento de casos", () => {
     });
     await caseRepo.setAssignedAgent(created.id, agent.id);
 
-    // Agendar para 100ms en el futuro
+    // Agendar para 100ms en el futuro con etiqueta MONITOREO
     const scheduledTime = new Date(Date.now() + 50);
     const scheduledCase = await scheduleCase.execute({
       caseId: created.id,
       agentUserId: agent.id,
       scheduledAt: scheduledTime,
+      scheduleTag: "MONITOREO",
       reminderReason: "Verificar servicio con el cliente",
     });
 
     expect(scheduledCase.status).toBe("WAITING_USER");
     expect(scheduledCase.context.schedulingMetadata).toMatchObject({
+      scheduleTag: "MONITOREO",
       reminderReason: "Verificar servicio con el cliente",
       scheduledByAgentId: agent.id,
       notifiedAt: null,
@@ -183,7 +185,32 @@ describe("Cierre manual y agendamiento de casos", () => {
       type: "CASE_SCHEDULED_REMINDER",
       caseId: created.id,
       conversationId: "conv-3",
+      scheduleTag: "MONITOREO",
       reminderReason: "Verificar servicio con el cliente",
     });
+  });
+
+  it("permite agendar con una etiqueta personalizada dinámica", async () => {
+    const { caseRepo, agentRepo, departmentRepo, scheduleCase } = buildSetup();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const agent = agentRepo.seed({ name: "Carlos", email: "carlos@isp.local", role: "agent", primaryDepartmentId: support.id });
+
+    const { case: created } = await caseRepo.create({
+      conversationId: "conv-4",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    const scheduledCase = await scheduleCase.execute({
+      caseId: created.id,
+      agentUserId: agent.id,
+      scheduledAt: new Date(Date.now() + 60000),
+      scheduleTag: "revision_tecnica",
+    });
+
+    expect(scheduledCase.context.schedulingMetadata?.scheduleTag).toBe("REVISION_TECNICA");
   });
 });

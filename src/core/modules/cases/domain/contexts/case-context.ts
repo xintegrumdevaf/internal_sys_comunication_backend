@@ -6,9 +6,12 @@ import type { CaseEngineMeta } from "./engine-meta";
 
 export type CaseCloseReason = "RESOLVED" | "CLIENT_NO_RESPONSE";
 
+export type CaseScheduleTag = "AGENDADO" | "POSPUESTO" | "MONITOREO" | (string & {});
+
 export type CaseSchedulingMetadata = {
   scheduledAt: string;
-  reminderReason: string | null;
+  scheduleTag: CaseScheduleTag;
+  reminderReason?: string | null;
   scheduledByAgentId: string;
   notifiedAt: string | null;
 };

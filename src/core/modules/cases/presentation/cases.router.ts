@@ -48,6 +48,8 @@ const completeBodySchema = z.object({
 
 const scheduleBodySchema = z.object({
   scheduledAt: z.string().datetime(),
+  tag: z.string().min(1).optional(),
+  scheduleTag: z.string().min(1).optional(),
   reminderReason: z.string().optional(),
 });
 
@@ -252,10 +254,12 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         res.status(501).json({ error: { type: "NOT_IMPLEMENTED", message: "Servicio de agendamiento no configurado" } });
         return;
       }
+      const scheduleTag = parsed.data.scheduleTag ?? parsed.data.tag;
       const result = await deps.scheduleCase.execute({
         caseId: req.params.id,
         agentUserId: agent.id,
         scheduledAt: new Date(parsed.data.scheduledAt),
+        scheduleTag,
         reminderReason: parsed.data.reminderReason,
       });
       res.json({ data: result });

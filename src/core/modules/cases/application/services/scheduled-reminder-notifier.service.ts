@@ -76,6 +76,7 @@ export class ScheduledReminderNotifierService {
           assignedAgentId: c.assignedAgentId,
           departmentId: c.departmentId,
           scheduledAt: metadata.scheduledAt,
+          scheduleTag: metadata.scheduleTag,
           reminderReason: metadata.reminderReason ?? undefined,
         });
 

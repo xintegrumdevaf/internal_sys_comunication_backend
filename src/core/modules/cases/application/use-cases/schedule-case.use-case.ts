@@ -6,6 +6,8 @@ import type { ConversationRepositoryPort } from "../../../conversations/applicat
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
+import type { CaseScheduleTag, CaseSchedulingMetadata } from "../../domain/contexts/case-context";
+
 const SCHEDULABLE: CaseStatus[] = ["NEW", "ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
 
 export class ScheduleCaseUseCase {
@@ -23,6 +25,7 @@ export class ScheduleCaseUseCase {
     caseId: string;
     agentUserId: string;
     scheduledAt: Date;
+    scheduleTag?: CaseScheduleTag | string;
     reminderReason?: string;
   }): Promise<Case> {
     const aggregate = await this.deps.caseRepo.findById(input.caseId);
@@ -35,8 +38,12 @@ export class ScheduleCaseUseCase {
       throw businessError("La fecha de agendamiento debe ser una fecha futura válida");
     }
 
-    const schedulingMetadata = {
+    const rawTag = (input.scheduleTag ?? "AGENDADO").toString().trim().toUpperCase();
+    const scheduleTag: CaseScheduleTag = rawTag.length > 0 ? rawTag : "AGENDADO";
+
+    const schedulingMetadata: CaseSchedulingMetadata = {
       scheduledAt: input.scheduledAt.toISOString(),
+      scheduleTag,
       reminderReason: input.reminderReason ?? null,
       scheduledByAgentId: input.agentUserId,
       notifiedAt: null,
@@ -63,6 +70,7 @@ export class ScheduleCaseUseCase {
 
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_SCHEDULED", {
       scheduledAt: input.scheduledAt.toISOString(),
+      scheduleTag,
       reminderReason: input.reminderReason ?? null,
       agentUserId: input.agentUserId,
     });
