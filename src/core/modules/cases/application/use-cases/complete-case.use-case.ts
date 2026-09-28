@@ -13,6 +13,8 @@ import type { EnqueueQualityReviewService } from "../../../quality/application/s
 const COMPLETABLE: CaseStatus[] = ["ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
 const ASSIGNMENT_GUARDED: CaseStatus[] = ["HUMAN_ACTIVE", "ESCALATED"];
 
+export type CaseCloseReason = "RESOLVED" | "CLIENT_NO_RESPONSE";
+
 export class CompleteCaseUseCase {
   constructor(
     private readonly deps: {
@@ -37,6 +39,7 @@ export class CompleteCaseUseCase {
     caseId: string;
     agentUserId: string;
     resolutionNote?: string;
+    closeReason?: CaseCloseReason;
   }): Promise<Case> {
     const aggregate = await this.deps.caseRepo.findById(input.caseId);
     if (!aggregate) throw notFound(`Caso ${input.caseId} no encontrado`);
@@ -55,16 +58,22 @@ export class CompleteCaseUseCase {
       });
     }
 
+    const closeReason = input.closeReason ?? "RESOLVED";
+
     const result = await this.deps.caseRepo.applyTransition({
       caseId: aggregate.case.id,
       expectedCaseVersion: aggregate.case.version,
       expectedWorkflowVersion: aggregate.workflowInstance.version,
       status: "COMPLETED",
-      context: aggregate.case.context,
+      context: {
+        ...aggregate.case.context,
+        closeReason,
+      },
       currentState: aggregate.workflowInstance.currentState,
       expiresAt: null,
     });
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_COMPLETED", {
+      closeReason,
       resolutionNote: input.resolutionNote ?? null,
       agentUserId: input.agentUserId,
     });
@@ -75,9 +84,9 @@ export class CompleteCaseUseCase {
       resourceType: "case",
       resourceId: aggregate.case.id,
       actorId: input.agentUserId,
-      metadata: { resolutionNote: input.resolutionNote ?? null },
+      metadata: { closeReason, resolutionNote: input.resolutionNote ?? null },
     });
-    this.deps.logger.info({ caseId: result.case.id }, "caso completado por agente");
+    this.deps.logger.info({ caseId: result.case.id, closeReason }, "caso completado por agente");
 
     if (this.deps.enqueueQualityReview) {
       void this.deps.enqueueQualityReview.tryAutoEnqueue(result.case).catch((err) => {

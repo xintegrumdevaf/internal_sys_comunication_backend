@@ -4,36 +4,46 @@ import type { SalesPackagesContext } from "./sales-packages.context";
 import type { GeneralInquiryContext } from "./general-inquiry.context";
 import type { CaseEngineMeta } from "./engine-meta";
 
+export type CaseCloseReason = "RESOLVED" | "CLIENT_NO_RESPONSE";
+
+export type CaseSchedulingMetadata = {
+  scheduledAt: string;
+  reminderReason: string | null;
+  scheduledByAgentId: string;
+  notifiedAt: string | null;
+};
+
+type ContextCommon = {
+  closeReason?: CaseCloseReason;
+  schedulingMetadata?: CaseSchedulingMetadata;
+  _engine?: CaseEngineMeta;
+};
+
 /**
  * docs/spec/01_DATA_MODEL.md §4 — `case.context` tipado por workflow_type.
  * `_engine` es metadata del motor (§13), no dato de negocio.
  */
 export type CaseContext =
-  | {
+  | ({
       workflowType: "SUPPORT_INTERNET";
       data: SupportInternetContext;
-      _engine?: CaseEngineMeta;
-    }
-  | {
+    } & ContextCommon)
+  | ({
       workflowType: "BILLING_BALANCE";
       data: BillingBalanceContext;
-      _engine?: CaseEngineMeta;
-    }
-  | {
+    } & ContextCommon)
+  | ({
       workflowType: "SALES_PACKAGES";
       data: SalesPackagesContext;
-      _engine?: CaseEngineMeta;
-    }
-  | {
+    } & ContextCommon)
+  | ({
       workflowType: "UNCLASSIFIED";
       data: Record<string, never>;
-      _engine?: CaseEngineMeta;
-    }
-  | {
+    } & ContextCommon)
+  | ({
       workflowType: "GENERAL_INQUIRY";
       data: GeneralInquiryContext;
-      _engine?: CaseEngineMeta;
-    };
+    } & ContextCommon);
 
 export function emptyContextFor(workflowType: CaseContext["workflowType"]): CaseContext {
   switch (workflowType) {

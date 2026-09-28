@@ -27,13 +27,13 @@
 | `PAUSED` | usuario retoma el tema | `ACTIVE` | caso no expirado |
 | `ACTIVE`/`WAITING_USER` | error no recuperable / baja confianza sostenida / excepción técnica / solicitud explícita de humano | `ESCALATED` | ver §4 |
 | `ESCALATED` | agente toma el caso | `HUMAN_ACTIVE` | agente pertenece al `department` del caso (o es admin global) |
-| `HUMAN_ACTIVE` | agente cierra | `COMPLETED` | — |
-| `HUMAN_ACTIVE` | agente reactiva automatización | `ACTIVE` | contexto se conserva, no se reinicia |
+| `HUMAN_ACTIVE`/`ESCALATED`/`ACTIVE`/`WAITING_USER` | agente cierra manualmente | `COMPLETED` | `closeReason ∈ {'RESOLVED', 'CLIENT_NO_RESPONSE'}` |
+| `ACTIVE`/`HUMAN_ACTIVE` | agente o sistema agenda seguimiento | `WAITING_USER` | `scheduled_at` configurado; pasa a sección "En Espera" |
+| `WAITING_USER` (`scheduled_at <= NOW()`) | vence fecha agendada | `WAITING_USER` | Emite `CASE_SCHEDULED_REMINDER` (notificación interna a agentes); agente envía plantilla WhatsApp |
 | `ACTIVE` | workflow llega a paso terminal exitoso | `COMPLETED` | — |
-| cualquiera activo | `last_activity_at + N horas` sin actividad | `EXPIRED` | `N` configurable por `workflow_type`, ver §5 |
 | `ACTIVE`/`PAUSED`/`WAITING_USER` | cancelación explícita | `CANCELLED` | — |
 
-**Regla dura:** ninguna transición vuelve a `NEW` desde otro estado. Retomar nunca es reiniciar.
+**Regla dura:** El cierre del caso es responsabilidad manual del agente. Al completar un caso, el agente debe especificar si se trata de un **Cierre normal** (`RESOLVED`) o un **Cierre por falta de respuesta** (`CLIENT_NO_RESPONSE`). Ningún proceso automatizado cierra casos sin intervención del personal. Retomar nunca es reiniciar.
 
 ## 3. `SUPPORT_INTERNET` — ejemplo de referencia para construir el motor
 

@@ -13,6 +13,7 @@ import type { CancelCaseUseCase } from "../application/use-cases/cancel-case.use
 import type { CompleteCaseUseCase } from "../application/use-cases/complete-case.use-case";
 import type { TransferCaseUseCase } from "../application/use-cases/transfer-case.use-case";
 import type { GetDashboardUseCase } from "../application/use-cases/get-dashboard.use-case";
+import type { ScheduleCaseUseCase } from "../application/use-cases/schedule-case.use-case";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 
 export type CasesRouterDeps = {
@@ -26,6 +27,7 @@ export type CasesRouterDeps = {
   completeCase: CompleteCaseUseCase;
   cancelCase: CancelCaseUseCase;
   transferCase: TransferCaseUseCase;
+  scheduleCase?: ScheduleCaseUseCase;
   getDashboard: GetDashboardUseCase;
   broadcaster?: RealtimeBroadcaster;
 };
@@ -41,6 +43,12 @@ const disableBodySchema = z.object({
 
 const completeBodySchema = z.object({
   resolutionNote: z.string().optional(),
+  closeReason: z.enum(["RESOLVED", "CLIENT_NO_RESPONSE"]).optional().default("RESOLVED"),
+});
+
+const scheduleBodySchema = z.object({
+  scheduledAt: z.string().datetime(),
+  reminderReason: z.string().optional(),
 });
 
 const cancelBodySchema = z.object({
@@ -225,6 +233,30 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         caseId: req.params.id,
         agentUserId: agent.id,
         resolutionNote: parsed.data.resolutionNote,
+        closeReason: parsed.data.closeReason,
+      });
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/cases/:id/schedule", async (req, res, next) => {
+    try {
+      const agent = requireAuth(req);
+      const parsed = scheduleBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
+      }
+      if (!deps.scheduleCase) {
+        res.status(501).json({ error: { type: "NOT_IMPLEMENTED", message: "Servicio de agendamiento no configurado" } });
+        return;
+      }
+      const result = await deps.scheduleCase.execute({
+        caseId: req.params.id,
+        agentUserId: agent.id,
+        scheduledAt: new Date(parsed.data.scheduledAt),
+        reminderReason: parsed.data.reminderReason,
       });
       res.json({ data: result });
     } catch (error) {

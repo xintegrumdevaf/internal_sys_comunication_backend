@@ -138,6 +138,8 @@ import { ListN8nWorkflowsUseCase } from "../modules/cases/application/use-cases/
 import { UpsertN8nWorkflowUseCase } from "../modules/cases/application/use-cases/upsert-n8n-workflow.use-case";
 import { DeactivateN8nWorkflowUseCase } from "../modules/cases/application/use-cases/deactivate-n8n-workflow.use-case";
 import { createN8nWorkflowsRouter } from "../modules/cases/presentation/admin/n8n-workflows.router";
+import { ScheduleCaseUseCase } from "../modules/cases/application/use-cases/schedule-case.use-case";
+import { ScheduledReminderNotifierService } from "../modules/cases/application/services/scheduled-reminder-notifier.service";
 import { createCasesRouter } from "../modules/cases/presentation/cases.router";
 
 import { EscalationRepositoryPg } from "../modules/escalation/infrastructure/postgres/escalation.repository.pg";
@@ -608,6 +610,20 @@ export function createContainer(): Container {
     departmentRepo,
     enqueueQualityReview,
   });
+  const scheduleCase = new ScheduleCaseUseCase({
+    caseRepo,
+    conversationRepo,
+    auditRepo,
+    logger: casesLogger,
+    broadcaster,
+  });
+  const scheduledReminderNotifier = new ScheduledReminderNotifierService({
+    caseRepo,
+    broadcaster,
+    logger: casesLogger,
+  });
+  scheduledReminderNotifier.start();
+
   const transferCase = new TransferCaseUseCase({
     caseRepo,
     departmentRepo,
@@ -914,6 +930,7 @@ export function createContainer(): Container {
       completeCase,
       cancelCase,
       transferCase,
+      scheduleCase,
       getDashboard,
       broadcaster,
     }),

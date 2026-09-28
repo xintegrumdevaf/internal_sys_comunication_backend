@@ -91,6 +91,7 @@ describe("TemplatePolicyValidator", () => {
         name: "test_template",
         category: "UTILITY",
         language: "es",
+        headerType: "NONE",
         bodyText: "Hola {{1}}, este es un mensaje de prueba válido.",
         footerText: "B".repeat(61),
       };
@@ -104,6 +105,7 @@ describe("TemplatePolicyValidator", () => {
         name: "test_template",
         category: "UTILITY",
         language: "es",
+        headerType: "NONE",
         bodyText: "Hola {{1}}, este es un mensaje de prueba válido.",
         buttons: [{ type: "QUICK_REPLY", text: "C".repeat(26) }],
       };

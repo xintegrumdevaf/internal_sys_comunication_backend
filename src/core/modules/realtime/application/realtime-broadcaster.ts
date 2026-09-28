@@ -70,6 +70,15 @@ export type RealtimeEvent =
       conversationId?: string;
     }
   | {
+      type: "CASE_SCHEDULED_REMINDER";
+      caseId: string;
+      conversationId: string;
+      assignedAgentId: string | null;
+      departmentId: string | null;
+      scheduledAt: string;
+      reminderReason?: string;
+    }
+  | {
       type: "MESSAGE_TEMPLATE_UPDATED";
       templateId: string;
       metaTemplateId: string | null;
