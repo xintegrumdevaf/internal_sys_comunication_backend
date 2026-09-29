@@ -85,7 +85,11 @@ CREATE TABLE customer (
   national_id   TEXT UNIQUE,          -- cédula
   full_name     TEXT,
   wa_phone      TEXT UNIQUE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  email         TEXT,                 -- migración 0033
+  address       TEXT,                 -- migración 0033
+  notes         TEXT,                 -- migración 0033
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now() -- migración 0033
 );
 
 CREATE TABLE contract (
@@ -364,6 +368,16 @@ CREATE TABLE tag (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_tag_name ON tag(name);
+
+-- Relación N:M de etiquetas por cliente/contacto (migración 0033)
+CREATE TABLE customer_tag (
+  customer_id UUID NOT NULL REFERENCES customer(id) ON DELETE CASCADE,
+  tag_id      UUID NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (customer_id, tag_id)
+);
+CREATE INDEX idx_customer_tag_customer ON customer_tag(customer_id);
+CREATE INDEX idx_customer_tag_tag ON customer_tag(tag_id);
 ```
 
 ## 3. Reglas de integridad relevantes

@@ -53,6 +53,14 @@ import { UpdateTagUseCase } from "../modules/tags/application/use-cases/update-t
 import { DeleteTagUseCase } from "../modules/tags/application/use-cases/delete-tag.use-case";
 import { createTagsRouter } from "../modules/tags/presentation/tags.router";
 
+import { ListCustomersUseCase } from "../modules/customers/application/use-cases/list-customers.use-case";
+import { GetCustomerUseCase } from "../modules/customers/application/use-cases/get-customer.use-case";
+import { CreateCustomerUseCase } from "../modules/customers/application/use-cases/create-customer.use-case";
+import { UpdateCustomerUseCase } from "../modules/customers/application/use-cases/update-customer.use-case";
+import { DeleteCustomerUseCase } from "../modules/customers/application/use-cases/delete-customer.use-case";
+import { SyncCustomerIspUseCase } from "../modules/customers/application/use-cases/sync-customer-isp.use-case";
+import { createCustomersRouter } from "../modules/customers/presentation/customers.router";
+
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
@@ -810,6 +818,18 @@ export function createContainer(): Container {
   const updateTag = new UpdateTagUseCase(tagRepo);
   const deleteTag = new DeleteTagUseCase(tagRepo);
 
+  const listCustomers = new ListCustomersUseCase(customerRepo);
+  const getCustomer = new GetCustomerUseCase(customerRepo);
+  const createCustomer = new CreateCustomerUseCase(customerRepo);
+  const updateCustomer = new UpdateCustomerUseCase(customerRepo);
+  const deleteCustomer = new DeleteCustomerUseCase(customerRepo);
+  const syncCustomerIsp = new SyncCustomerIspUseCase({
+    customerRepo,
+    contractRepo,
+    tagRepo,
+    actionGateway,
+  });
+
   // --- Zernio Historical Sync (Worker + Use Cases) ---
   const zernioHistoryGateway = new ZernioHistoryGatewayHttp(env, conversationsLogger);
   const zernioHistorySyncWorker = new ZernioHistorySyncWorker(
@@ -1020,6 +1040,16 @@ export function createContainer(): Container {
     }),
   );
   app.use(createTagsRouter({ listTags, createTag, updateTag, deleteTag }));
+  app.use(
+    createCustomersRouter({
+      listCustomers,
+      getCustomer,
+      createCustomer,
+      updateCustomer,
+      deleteCustomer,
+      syncCustomerIsp,
+    }),
+  );
 
   app.use(createErrorHandler(logger));
 

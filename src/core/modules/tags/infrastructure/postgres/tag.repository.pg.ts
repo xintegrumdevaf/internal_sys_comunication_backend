@@ -58,7 +58,7 @@ export class TagRepositoryPg implements TagRepositoryPort {
        RETURNING id, name, description, color, active, created_at, updated_at`,
       [input.name.trim().toUpperCase(), input.description ?? null, input.color ?? null],
     );
-    return mapRowToEntity(res.rows[0]);
+    return mapRowToEntity(res.rows[0]!);
   }
 
   async update(id: string, input: UpdateTagInput): Promise<Tag | null> {

@@ -46,6 +46,16 @@ export class ContractRepositoryPg implements ContractRepositoryPort {
     return rows.map(mapRow);
   }
 
+  async listByCustomerId(customerId: string): Promise<Contract[]> {
+    const { rows } = await this.pool.query<ContractRow>(
+      `SELECT * FROM contract
+       WHERE customer_id = $1
+       ORDER BY created_at ASC`,
+      [customerId],
+    );
+    return rows.map(mapRow);
+  }
+
   async upsertByCustomerAndNumber(input: UpsertContractInput): Promise<Contract> {
     const { rows } = await this.pool.query<ContractRow>(
       `INSERT INTO contract (
@@ -71,5 +81,16 @@ export class ContractRepositoryPg implements ContractRepositoryPort {
       ],
     );
     return mapRow(rows[0]!);
+  }
+
+  async deleteExcept(customerId: string, keepContractNumbers: string[]): Promise<void> {
+    if (keepContractNumbers.length === 0) {
+      await this.pool.query(`DELETE FROM contract WHERE customer_id = $1`, [customerId]);
+      return;
+    }
+    await this.pool.query(
+      `DELETE FROM contract WHERE customer_id = $1 AND contract_number != ALL($2)`,
+      [customerId, keepContractNumbers],
+    );
   }
 }

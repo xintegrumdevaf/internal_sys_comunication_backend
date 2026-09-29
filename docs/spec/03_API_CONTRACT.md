@@ -207,6 +207,12 @@ o en error:
 | `POST /api/tags` `{ name, description?, color? }` | Crea una nueva etiqueta en el catálogo (`admin` únicamente) |
 | `PATCH /api/tags/:id` `{ name?, description?, color?, active? }` | Modifica una etiqueta del catálogo (`admin` únicamente) |
 | `DELETE /api/tags/:id` | Desactiva/elimina una etiqueta del catálogo (`admin` únicamente) |
+| `GET /api/customers?search=&tagId=&hasTags=&startDate=&endDate=&page=&limit=` | Lista paginada de contactos/clientes con etiquetas, contratos y último mensaje |
+| `GET /api/customers/:id` | Detalle completo de un contacto con contratos, etiquetas y conversación asociada |
+| `POST /api/customers` `{ fullName, waPhone, nationalId?, email?, address?, notes?, tagIds? }` | Crea un contacto y lo vincula con su conversación si existe |
+| `PATCH /api/customers/:id` `{ fullName?, waPhone?, nationalId?, email?, address?, notes?, tagIds? }` | Modifica un contacto y actualiza sus etiquetas |
+| `DELETE /api/customers/:id` | Elimina un contacto (`admin`/`manager`) |
+| `POST /api/customers/:id/sync-isp` `{ nationalId? }` | Sincroniza con n8n (`VALIDATE_CLIENT`), guarda contratos y auto-etiqueta por sector |
 | `POST /api/internal/threads/:id/read` | Marca el hilo como leído para el agente autenticado |
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.

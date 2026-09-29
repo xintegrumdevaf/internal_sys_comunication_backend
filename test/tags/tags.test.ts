@@ -122,6 +122,6 @@ describe("Catálogo de etiquetas (Tags CRUD)", () => {
     await deleteTag.execute("tag-2");
     const remaining = await listTags.execute();
     expect(remaining).toHaveLength(1);
-    expect(remaining[0].id).toBe("tag-1");
+    expect(remaining[0]!.id).toBe("tag-1");
   });
 });
