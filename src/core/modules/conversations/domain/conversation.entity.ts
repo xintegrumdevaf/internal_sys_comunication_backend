@@ -4,6 +4,7 @@ export interface Conversation {
   id: string;
   waPhone: string;
   customerId: string | null;
+  customerName?: string | null;
   activeCaseId: string | null;
   status: ConversationStatus;
   lastActivityAt: Date;
