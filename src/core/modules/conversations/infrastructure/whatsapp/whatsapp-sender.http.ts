@@ -131,16 +131,30 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       interactive: {
         type: "button",
         ...(headerText ? { header: { type: "text", text: headerText } } : {}),
-        body: { text: bodyText },
-        ...(footerText ? { footer: { text: footerText } } : {}),
+        body: { text: bodyText.slice(0, 1024) },
+        ...(footerText ? { footer: { text: footerText.slice(0, 60) } } : {}),
         action: {
-          buttons: buttons.slice(0, 3).map((b) => ({
-            type: "reply",
-            reply: {
-              id: b.id.slice(0, 256),
-              title: b.title.slice(0, 20),
-            },
-          })),
+          buttons: (() => {
+            const seen = new Set<string>();
+            return buttons.slice(0, 3).map((b, i) => {
+              let title = b.title.trim().slice(0, 20);
+              if (!title) title = `Opción ${i + 1}`;
+              if (seen.has(title)) {
+                title = `${i + 1}. ${title}`.slice(0, 20);
+              }
+              if (seen.has(title)) {
+                title = `Opción ${i + 1}`;
+              }
+              seen.add(title);
+              return {
+                type: "reply" as const,
+                reply: {
+                  id: b.id.slice(0, 256),
+                  title,
+                },
+              };
+            });
+          })(),
         },
       },
     };
@@ -186,8 +200,8 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       interactive: {
         type: "list",
         ...(headerText ? { header: { type: "text", text: headerText } } : {}),
-        body: { text: bodyText },
-        ...(footerText ? { footer: { text: footerText } } : {}),
+        body: { text: bodyText.slice(0, 1024) },
+        ...(footerText ? { footer: { text: footerText.slice(0, 60) } } : {}),
         action: {
           button: buttonText.slice(0, 20),
           sections: sections.map((s) => ({

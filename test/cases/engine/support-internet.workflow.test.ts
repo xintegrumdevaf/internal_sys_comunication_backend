@@ -487,6 +487,24 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     if (outcomeTextPrimero.type === "CONTINUE" && outcomeTextPrimero.context.workflowType === "SUPPORT_INTERNET") {
       expect(outcomeTextPrimero.context.data.contract?.id).toBe("CNT-1");
     }
+
+    const outcomeButton1 = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "1. Montserrat",
+    });
+    expect(outcomeButton1).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcomeButton1.type === "CONTINUE" && outcomeButton1.context.workflowType === "SUPPORT_INTERNET") {
+      expect(outcomeButton1.context.data.contract?.id).toBe("CNT-1");
+    }
+
+    const outcomeOption2 = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "option_2",
+    });
+    expect(outcomeOption2).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcomeOption2.type === "CONTINUE" && outcomeOption2.context.workflowType === "SUPPORT_INTERNET") {
+      expect(outcomeOption2.context.data.contract?.id).toBe("CNT-2");
+    }
   });
 
   it("WAITING_USER_DISAMBIGUATE selecciona contrato por contractCode exacto", async () => {

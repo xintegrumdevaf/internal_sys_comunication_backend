@@ -324,7 +324,9 @@ const disambiguateContract: WorkflowStateHandler = async ({
 
   if (selectedIndex < 0 && text) {
     const trimmed = text.trim().toLowerCase();
-    const digitMatch = trimmed.match(/^(?:opci[oó]n|el|la|n[uú]mero|contrato)?\s*#?\s*([1-9]\d*)$/i);
+    const digitMatch =
+      trimmed.match(/^(?:option_|opci[oó]n\s*#?|el\s+|la\s+|n[uú]mero\s*#?|contrato\s*#?)?\s*([1-9]\d*)(?:[\.\-\:\s]|$)/i) ||
+      trimmed.match(/^([1-9]\d*)\b/);
     if (digitMatch && digitMatch[1]) {
       selectedIndex = parseInt(digitMatch[1], 10) - 1;
     } else if (trimmed === "primero" || trimmed === "primera" || trimmed === "el primero" || trimmed === "la primera") {

@@ -727,40 +727,57 @@ export class ProcessBufferedMessagesUseCase {
         input.outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
         pendingContracts.length > 1
       ) {
-        if (this.deps.whatsappSender.sendInteractiveList && pendingContracts.length > 3) {
-          const rows = pendingContracts.slice(0, 10).map((c, idx) => {
-            const num = idx + 1;
-            const title = (c.label || c.address || `Opción ${num}`).slice(0, 24);
-            const desc = (c.address || c.sector || `Contrato #${c.contractCode || c.id}`).slice(0, 72);
-            return {
-              id: `option_${num}`,
-              title,
-              description: desc !== title ? desc : undefined,
-            };
-          });
-          const sent = await this.deps.whatsappSender.sendInteractiveList(
-            conversation.waPhone,
-            body,
-            "Ver opciones",
-            [{ title: "Servicios disponibles", rows }],
+        try {
+          if (this.deps.whatsappSender.sendInteractiveList && pendingContracts.length > 2) {
+            const rows = pendingContracts.slice(0, 10).map((c, idx) => {
+              const num = idx + 1;
+              const cleanLabel = (c.label || c.address || c.sector || `Contrato #${c.contractCode || c.id}`).trim();
+              const title = `${num}. ${cleanLabel}`.slice(0, 24);
+              const desc = (c.address || c.sector || `Contrato #${c.contractCode || c.id}`).trim().slice(0, 72);
+              return {
+                id: `option_${num}`,
+                title,
+                description: desc !== title ? desc : undefined,
+              };
+            });
+            const sent = await this.deps.whatsappSender.sendInteractiveList(
+              conversation.waPhone,
+              body,
+              "Ver opciones",
+              [{ title: "Servicios disponibles", rows }],
+            );
+            externalId = sent.externalId;
+          } else if (this.deps.whatsappSender.sendInteractiveButtons && pendingContracts.length === 2) {
+            const seenTitles = new Set<string>();
+            const buttons = pendingContracts.map((c, idx) => {
+              const num = idx + 1;
+              const cleanLabel = (c.label || c.address || c.sector || `Opción ${num}`).trim();
+              // Meta max 20 caracteres por título. El prefijo `${num}. ` garantiza unicidad ante labels idénticos.
+              let title = `${num}. ${cleanLabel}`.slice(0, 20);
+              if (seenTitles.has(title)) {
+                title = `${num}. Contrato ${num}`.slice(0, 20);
+              }
+              seenTitles.add(title);
+              return {
+                id: `option_${num}`,
+                title,
+              };
+            });
+            const sent = await this.deps.whatsappSender.sendInteractiveButtons(
+              conversation.waPhone,
+              body,
+              buttons,
+            );
+            externalId = sent.externalId;
+          } else {
+            const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
+            externalId = sent.externalId;
+          }
+        } catch (interactiveError) {
+          input.log.warn(
+            { err: interactiveError instanceof Error ? interactiveError.message : String(interactiveError) },
+            "Fallo al enviar mensaje interactivo (botones/lista), ejecutando fallback inmediato a texto plano",
           );
-          externalId = sent.externalId;
-        } else if (this.deps.whatsappSender.sendInteractiveButtons && pendingContracts.length <= 3) {
-          const buttons = pendingContracts.map((c, idx) => {
-            const num = idx + 1;
-            const title = (c.label || c.address || `Opción ${num}`).slice(0, 20);
-            return {
-              id: `option_${num}`,
-              title,
-            };
-          });
-          const sent = await this.deps.whatsappSender.sendInteractiveButtons(
-            conversation.waPhone,
-            body,
-            buttons,
-          );
-          externalId = sent.externalId;
-        } else {
           const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
           externalId = sent.externalId;
         }
