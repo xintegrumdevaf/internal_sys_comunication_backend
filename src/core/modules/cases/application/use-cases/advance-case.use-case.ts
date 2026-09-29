@@ -6,6 +6,7 @@ import {
   clearWaitingMeta,
   getEngineMeta,
 } from "../../domain/contexts/engine-meta";
+import type { CaseContext } from "../../domain/contexts/case-context";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../ports/workflow-execution.repository.port";
 import type { N8nGatewayPort } from "../ports/n8n-gateway.port";
@@ -78,19 +79,64 @@ export class AdvanceCaseUseCase {
     let outcome: WorkflowStepOutcome | undefined;
 
     const definition = engine.getDefinition(aggregate.case.workflowType);
-    const waitingStep = definition?.waitingSteps?.[currentState];
+    let waitingStep = definition?.waitingSteps?.[currentState];
 
     // §13: si estamos en un WaitingStep y hay mensaje del usuario, evaluar entities.
     if (waitingStep && input.text !== undefined) {
-      // Si el paso pide "answer", el texto del usuario ES la respuesta.
-      // Algunos modelos devuelven answer:true/boolean; forzamos el string.
-      const needsAnswer =
-        waitingStep.requireAll?.includes("answer") ||
-        waitingStep.requireAny?.includes("answer");
-      if (needsAnswer && input.text.trim()) {
-        const current = entities.answer;
-        if (typeof current !== "string" || current.trim() === "") {
-          entities = { ...entities, answer: input.text.trim() };
+      // Si estamos en WAITING_USER_DISAMBIGUATE y el usuario envía un número de cédula (9 a 13 dígitos):
+      // El cliente intenta corregir o reingresar su cédula, no seleccionar un contrato existente.
+      if (currentState === "WAITING_USER_DISAMBIGUATE" && input.text) {
+        const cedulaMatch = input.text.match(/\b\d{9,13}\b/);
+        if (cedulaMatch) {
+          const newCedula = normalizeNationalId(cedulaMatch[0]);
+          log.info({ newCedula }, "WaitingStep DISAMBIGUATE: detectada cédula nueva/corregida, regresando a VALIDATE_CLIENT");
+          currentState = "VALIDATE_CLIENT";
+          const currentData = (context && "data" in context ? context.data : {}) as Record<string, unknown>;
+          context = {
+            ...context,
+            data: {
+              ...currentData,
+              client: { nationalId: newCedula, fullName: "" },
+              pendingContracts: undefined,
+              contract: undefined,
+              clientNotFound: false,
+            },
+          } as unknown as CaseContext;
+          entities = { nationalId: newCedula };
+          waitingStep = undefined;
+        }
+      }
+
+      if (waitingStep) {
+        // Si el paso pide "answer", el texto del usuario ES la respuesta.
+        // Algunos modelos devuelven answer:true/boolean; forzamos el string.
+        const needsAnswer =
+          waitingStep.requireAll?.includes("answer") ||
+          waitingStep.requireAny?.includes("answer");
+        if (needsAnswer && input.text.trim()) {
+          const current = entities.answer;
+          if (typeof current !== "string" || current.trim() === "") {
+            entities = { ...entities, answer: input.text.trim() };
+          }
+        }
+
+      // Si el paso pide "selectedOption" y no vino en entities, extraerlo del texto (ej: 1, 2, "option_1", "primero", etc.)
+      const needsOption =
+        waitingStep.requireAll?.includes("selectedOption") ||
+        waitingStep.requireAny?.includes("selectedOption");
+      if (needsOption && input.text && entities.selectedOption === undefined) {
+        const trimmed = input.text.trim().toLowerCase();
+        const digitMatch =
+          trimmed.match(/^(?:option_|opci[oó]n\s*#?|el\s+|la\s+|n[uú]mero\s*#?|contrato\s*#?)?\s*([1-9]\d*)(?:[\.\-\:\s]|$)/i) ||
+          trimmed.match(/^([1-9]\d*)\b/);
+        if (digitMatch && digitMatch[1]) {
+          entities = { ...entities, selectedOption: parseInt(digitMatch[1], 10) };
+        } else if (trimmed === "primero" || trimmed === "primera" || trimmed === "el primero" || trimmed === "la primera" || trimmed.includes("opcion 1") || trimmed.includes("opción 1")) {
+          entities = { ...entities, selectedOption: 1 };
+        } else if (trimmed === "segundo" || trimmed === "segunda" || trimmed === "el segundo" || trimmed === "la segunda" || trimmed.includes("opcion 2") || trimmed.includes("opción 2")) {
+          entities = { ...entities, selectedOption: 2 };
+        } else if (trimmed === "tercero" || trimmed === "tercera" || trimmed === "el tercero" || trimmed === "la tercera" || trimmed.includes("opcion 3") || trimmed.includes("opción 3")) {
+          entities = { ...entities, selectedOption: 3 };
         }
       }
 
@@ -163,6 +209,7 @@ export class AdvanceCaseUseCase {
         }
       }
     }
+  }
 
     if (!outcome) {
       for (let step = 0; step < MAX_STEPS_PER_RUN; step += 1) {

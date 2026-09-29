@@ -326,8 +326,15 @@ function flattenContext(data: Record<string, unknown>): Record<string, unknown> 
   }
 
   const clientObj = data.client as { fullName?: string } | undefined;
-  if (clientObj?.fullName) {
-    const firstName = extractCustomerFirstName(clientObj.fullName);
+  const pendingContracts = Array.isArray(data.pendingContracts)
+    ? (data.pendingContracts as Array<{ name?: string }>)
+    : [];
+  const rawFullName = (clientObj?.fullName || pendingContracts[0]?.name || "").trim();
+
+  if (rawFullName) {
+    out["fullName"] = rawFullName;
+    out["client.fullName"] = rawFullName;
+    const firstName = extractCustomerFirstName(rawFullName);
     if (firstName) {
       out["clientName"] = firstName;
       out["clientFirstName"] = firstName;

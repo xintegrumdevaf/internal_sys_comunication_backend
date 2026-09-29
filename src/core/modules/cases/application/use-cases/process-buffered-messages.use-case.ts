@@ -731,13 +731,14 @@ export class ProcessBufferedMessagesUseCase {
           if (this.deps.whatsappSender.sendInteractiveList && pendingContracts.length > 2) {
             const rows = pendingContracts.slice(0, 10).map((c, idx) => {
               const num = idx + 1;
-              const cleanLabel = (c.label || c.address || c.sector || `Contrato #${c.contractCode || c.id}`).trim();
-              const title = `${num}. ${cleanLabel}`.slice(0, 24);
-              const desc = (c.address || c.sector || `Contrato #${c.contractCode || c.id}`).trim().slice(0, 72);
+              const sectorPart = c.sector ? ` (${c.sector})` : "";
+              const cleanLabel = (c.label || c.address || `Contrato #${c.contractCode || c.id}`).trim();
+              const title = `${num}. ${cleanLabel}${sectorPart}`.slice(0, 24);
+              const desc = (c.address || (c.sector ? `Sector ${c.sector}` : `ID: ${c.id}`)).trim().slice(0, 72);
               return {
                 id: `option_${num}`,
                 title,
-                description: desc !== title ? desc : undefined,
+                description: desc !== title && desc.length > 0 ? desc : undefined,
               };
             });
             const sent = await this.deps.whatsappSender.sendInteractiveList(
@@ -751,11 +752,16 @@ export class ProcessBufferedMessagesUseCase {
             const seenTitles = new Set<string>();
             const buttons = pendingContracts.map((c, idx) => {
               const num = idx + 1;
-              const cleanLabel = (c.label || c.address || c.sector || `Opción ${num}`).trim();
-              // Meta max 20 caracteres por título. El prefijo `${num}. ` garantiza unicidad ante labels idénticos.
-              let title = `${num}. ${cleanLabel}`.slice(0, 20);
+              const sectorPart = c.sector ? ` (${c.sector})` : "";
+              const baseLabel = (c.label || c.address || `Contrato ${num}`).trim();
+              const maxBaseLen = Math.max(5, 20 - 3 - sectorPart.length);
+              const truncatedBase = baseLabel.length > maxBaseLen ? baseLabel.slice(0, maxBaseLen).trim() : baseLabel;
+              let title = `${num}. ${truncatedBase}${sectorPart}`.slice(0, 20);
               if (seenTitles.has(title)) {
-                title = `${num}. Contrato ${num}`.slice(0, 20);
+                title = `${num}. Contrato #${c.id}`.slice(0, 20);
+              }
+              if (seenTitles.has(title)) {
+                title = `Opción ${num}`.slice(0, 20);
               }
               seenTitles.add(title);
               return {

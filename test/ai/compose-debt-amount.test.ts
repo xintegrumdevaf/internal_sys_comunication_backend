@@ -89,4 +89,50 @@ describe("composeReply — monto de deuda (06_AI_PROMPTS.md §4)", () => {
     expect(resolved.templateHint).toContain("No encontré información");
     expect(resolved.resultVars.notFoundNationalId).toBe("0942783440");
   });
+
+  it("descarta naturalizacion con placeholders no resueltos como ${client.fullName} y sanitiza el fallback", async () => {
+    const fake = new FakeAIProvider();
+    // Simula LLM alucinando la variable sin interpolar
+    fake.composeImpl = async () =>
+      "Hola ${client.fullName}, encontré varios servicios. ¿Cuál tiene problemas?";
+
+    const compose = new ComposeCustomerReplyUseCase(fake);
+    const body = await compose.execute({
+      caseId: "case-template-leak",
+      workflowType: "SUPPORT_INTERNET",
+      stepOutcome: {
+        action: "WAITING_USER_DISAMBIGUATE",
+        status: "WAITING_USER",
+        result: {},
+      },
+      templateHint:
+        "Hola ${client.fullName}, encontramos 2 servicios asociados a tu cuenta. Por favor elige uno.",
+    });
+
+    expect(body).not.toContain("${client.fullName}");
+    expect(body).not.toContain("${");
+    expect(body).toContain("encontramos 2 servicios asociados a tu cuenta");
+  });
+
+  it("flattenContext en resolveReplyTemplate toma fullName de pendingContracts si client.fullName no estaba", () => {
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1724244827", fullName: "" },
+        pendingContracts: [
+          { id: "1", name: "Montserrat Alvarez", address: "Pifo", sector: "pifo", oltName: "o1", pon: "1", serial: "s1" },
+          { id: "2", name: "Montserrat Alvarez", address: "Mtk", sector: "mtk", oltName: "o2", pon: "2", serial: "s2" },
+        ],
+      },
+    };
+    const resolved = resolveReplyTemplate({
+      definition: supportInternetWorkflow,
+      outcome: { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context },
+      context,
+    });
+
+    expect(resolved.resultVars["client.fullName"]).toBe("Montserrat Alvarez");
+    expect(resolved.resultVars["clientName"]).toBe("Montserrat");
+  });
 });
+

@@ -253,7 +253,15 @@ const validateClient: WorkflowStateHandler = async ({
         ip: c.ip,
       };
     });
-    const nextData: SupportInternetContext = { ...data, pendingContracts };
+    const clientFullName = output.contracts[0]?.name || data.client?.fullName || "";
+    const nextData: SupportInternetContext = {
+      ...data,
+      pendingContracts,
+      client: {
+        nationalId: client.nationalId,
+        fullName: clientFullName,
+      },
+    };
     const waiting = resetWaitingAttempts(
       withContext(nextData, context),
       "WAITING_USER_DISAMBIGUATE",

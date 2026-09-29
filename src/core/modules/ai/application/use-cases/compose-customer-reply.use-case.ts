@@ -10,15 +10,20 @@ export class ComposeCustomerReplyUseCase {
 
   async execute(input: ComposeReplyInput): Promise<string> {
     if (input.templateHint && input.templateHint.trim().length > 0) {
-      const rendered = renderTemplate(input.templateHint, input.stepOutcome.result ?? {});
+      const rendered = cleanResidualPlaceholders(renderTemplate(input.templateHint, input.stepOutcome.result ?? {}));
       try {
         const naturalized = await this.provider.composeReply({
           ...input,
           templateHint: rendered,
         });
         const text = naturalized.trim();
-        if (text.length > 0 && !looksLikeRawJson(text) && includesRequiredFacts(text, input.stepOutcome.result)) {
-          return text;
+        if (
+          text.length > 0 &&
+          !looksLikeRawJson(text) &&
+          !hasUnresolvedPlaceholders(text) &&
+          includesRequiredFacts(text, input.stepOutcome.result)
+        ) {
+          return cleanResidualPlaceholders(text);
         }
       } catch {
         // Fallback determinista: la plantilla ya es mensaje de negocio.
@@ -30,19 +35,39 @@ export class ComposeCustomerReplyUseCase {
     if (looksLikeRawJson(composed)) {
       return "Estamos procesando tu solicitud. En breve te damos más información.";
     }
-    return composed.length > 0
-      ? composed
+    const cleaned = cleanResidualPlaceholders(composed);
+    return cleaned.length > 0
+      ? cleaned
       : "Estamos procesando tu solicitud. En breve te damos más información.";
   }
 }
 
 function renderTemplate(template: string, vars: Record<string, unknown>): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_match, key: string) => {
-    const value = vars[key];
-    if (value === undefined || value === null) return "";
-    if (typeof value === "object") return "";
-    return String(value);
-  });
+  return template
+    .replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_match, key: string) => {
+      const value = vars[key];
+      if (value === undefined || value === null) return "";
+      if (typeof value === "object") return "";
+      return String(value);
+    })
+    .replace(/\$\{\s*([\w.]+)\s*\}/g, (_match, key: string) => {
+      const value = vars[key];
+      if (value === undefined || value === null) return "";
+      if (typeof value === "object") return "";
+      return String(value);
+    });
+}
+
+function hasUnresolvedPlaceholders(text: string): boolean {
+  return /\$\{[\w.]+\}/.test(text) || /\{\{[\w.]+\}\}/.test(text);
+}
+
+function cleanResidualPlaceholders(text: string): string {
+  return text
+    .replace(/\$\{\s*[\w.]+\s*\}/g, "")
+    .replace(/\{\{\s*[\w.]+\s*\}\}/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function looksLikeRawJson(text: string): boolean {

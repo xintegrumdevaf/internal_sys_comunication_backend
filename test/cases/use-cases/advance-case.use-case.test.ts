@@ -279,4 +279,60 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () =>
     expect(attempt3.outcome.type).toBe("ESCALATED");
     expect(attempt3.case.status).toBe("ESCALATED");
   });
+
+  it("en WAITING_USER_DISAMBIGUATE, si el usuario envía una nueva cédula (no existente), ejecuta VALIDATE_CLIENT y pasa a WAITING_USER_CLIENT con clientNotFound", async () => {
+    let searchedNationalId = "";
+    const gateway = new N8nGatewayFake({
+      VALIDATE_CLIENT: (params) => {
+        searchedNationalId = (params.input as { id?: string })?.id ?? "";
+        return {
+          success: true,
+          result: {
+            found: false,
+            contractNumbers: 0,
+            contracts: [],
+          },
+        };
+      },
+    });
+    const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
+
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: {
+        workflowType: "SUPPORT_INTERNET",
+        data: {
+          client: { nationalId: "1710000001", fullName: "Cliente Existente" },
+          pendingContracts: [
+            { id: "101", name: "Cliente Existente", address: "Dir 1", sector: "pifo", oltName: "o1", pon: "1", serial: "s1" },
+            { id: "102", name: "Cliente Existente", address: "Dir 2", sector: "mtk", oltName: "o2", pon: "2", serial: "s2" },
+          ],
+        },
+      },
+      initialState: "WAITING_USER_DISAMBIGUATE",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    // El usuario envía una cédula nueva/errónea
+    const result = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-cedula-new",
+      text: "mi cedula es 172424482722",
+      entities: {},
+    });
+
+    expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(1);
+    expect(searchedNationalId).toBe("0172424482722");
+    expect(result.outcome.type).toBe("WAITING_USER");
+    if (result.outcome.type !== "WAITING_USER") throw new Error("unreachable");
+    expect(result.outcome.nextState).toBe("WAITING_USER_CLIENT");
+    const data = result.outcome.context.data as Record<string, unknown>;
+    expect(data.clientNotFound).toBe(true);
+    expect(data.lastSearchedNationalId).toBe("0172424482722");
+  });
 });
+
