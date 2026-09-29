@@ -77,7 +77,6 @@ export class ScheduledReminderNotifierService {
           departmentId: c.departmentId,
           scheduledAt: metadata.scheduledAt,
           scheduleTag: metadata.scheduleTag,
-          reminderReason: metadata.reminderReason ?? undefined,
         });
 
         await this.deps.caseRepo.appendEvent(c.id, "CASE_SCHEDULED_REMINDER_TRIGGERED", {

@@ -26,7 +26,6 @@ export class ScheduleCaseUseCase {
     agentUserId: string;
     scheduledAt: Date;
     scheduleTag?: CaseScheduleTag | string;
-    reminderReason?: string;
   }): Promise<Case> {
     const aggregate = await this.deps.caseRepo.findById(input.caseId);
     if (!aggregate) throw notFound(`Caso ${input.caseId} no encontrado`);
@@ -44,7 +43,6 @@ export class ScheduleCaseUseCase {
     const schedulingMetadata: CaseSchedulingMetadata = {
       scheduledAt: input.scheduledAt.toISOString(),
       scheduleTag,
-      reminderReason: input.reminderReason ?? null,
       scheduledByAgentId: input.agentUserId,
       notifiedAt: null,
     };
@@ -71,7 +69,6 @@ export class ScheduleCaseUseCase {
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_SCHEDULED", {
       scheduledAt: input.scheduledAt.toISOString(),
       scheduleTag,
-      reminderReason: input.reminderReason ?? null,
       agentUserId: input.agentUserId,
     });
 

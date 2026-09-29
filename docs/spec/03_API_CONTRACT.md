@@ -188,7 +188,7 @@ o en error:
 | `POST /api/cases/:id/assign` `{ agentUserId }` | Asigna/reasigna el caso (requiere `manager`/`admin` del departamento del caso, o ser el pool de triage) |
 | `POST /api/cases/:id/reassign` `{ agentUserId }` | Reasigna (alias semántico de `assign` sobre un caso ya asignado) |
 | `POST /api/cases/:id/complete` `{ resolutionNote?, closeReason?: 'RESOLVED' \| 'CLIENT_NO_RESPONSE' }` | `COMPLETED` (Cierre manual con motivo: Cierre normal o Cierre por falta de respuesta) |
-| `POST /api/cases/:id/schedule` `{ scheduledAt, scheduleTag?: string, reminderReason? }` | Agenda caso a la sección "En Espera" con etiqueta libre (`AGENDADO`, `POSPUESTO`, `MONITOREO` u otra etiqueta personalizada) |
+| `POST /api/cases/:id/schedule` `{ scheduledAt, scheduleTag? }` | Agenda caso a la sección "En Espera" con etiqueta (`AGENDADO`, `POSPUESTO`, `MONITOREO` u otra de catálogo) |
 | `POST /api/cases/:id/cancel` `{ reason }` | `CANCELLED` |
 | `POST /api/cases/:id/disable-automation` `{ reason }` | Fuerza `automation.enabled=false` sin escalar |
 | `POST /api/cases/:id/reactivate-automation` | `automation.enabled=true`, conserva `context` |

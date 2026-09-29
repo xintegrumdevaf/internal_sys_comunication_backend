@@ -50,7 +50,6 @@ const scheduleBodySchema = z.object({
   scheduledAt: z.string().datetime(),
   tag: z.string().min(1).optional(),
   scheduleTag: z.string().min(1).optional(),
-  reminderReason: z.string().optional(),
 });
 
 const cancelBodySchema = z.object({
@@ -260,7 +259,6 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         agentUserId: agent.id,
         scheduledAt: new Date(parsed.data.scheduledAt),
         scheduleTag,
-        reminderReason: parsed.data.reminderReason,
       });
       res.json({ data: result });
     } catch (error) {

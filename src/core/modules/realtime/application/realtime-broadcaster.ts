@@ -77,7 +77,6 @@ export type RealtimeEvent =
       departmentId: string | null;
       scheduledAt: string;
       scheduleTag?: string;
-      reminderReason?: string;
     }
   | {
       type: "MESSAGE_TEMPLATE_UPDATED";

@@ -11,7 +11,6 @@ export type CaseScheduleTag = "AGENDADO" | "POSPUESTO" | "MONITOREO" | (string &
 export type CaseSchedulingMetadata = {
   scheduledAt: string;
   scheduleTag: CaseScheduleTag;
-  reminderReason?: string | null;
   scheduledByAgentId: string;
   notifiedAt: string | null;
 };

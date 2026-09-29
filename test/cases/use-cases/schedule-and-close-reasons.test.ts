@@ -150,13 +150,11 @@ describe("Cierre manual y agendamiento de casos", () => {
       agentUserId: agent.id,
       scheduledAt: scheduledTime,
       scheduleTag: "MONITOREO",
-      reminderReason: "Verificar servicio con el cliente",
     });
 
     expect(scheduledCase.status).toBe("WAITING_USER");
     expect(scheduledCase.context.schedulingMetadata).toMatchObject({
       scheduleTag: "MONITOREO",
-      reminderReason: "Verificar servicio con el cliente",
       scheduledByAgentId: agent.id,
       notifiedAt: null,
     });
@@ -186,7 +184,6 @@ describe("Cierre manual y agendamiento de casos", () => {
       caseId: created.id,
       conversationId: "conv-3",
       scheduleTag: "MONITOREO",
-      reminderReason: "Verificar servicio con el cliente",
     });
   });
 
