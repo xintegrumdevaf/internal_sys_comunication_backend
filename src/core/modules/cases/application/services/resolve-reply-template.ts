@@ -101,8 +101,11 @@ export function resolveReplyTemplate(input: {
       const listFormatted = contracts
         .map((c, idx) => {
           const num = idx + 1;
-          const label = c.label || c.address || (c.sector ? `Sector ${c.sector}` : `Contrato #${c.contractCode || c.id}`);
-          return `${num}️⃣ ${label}`;
+          const contractPart = c.contractCode || c.id ? `Contrato #${c.contractCode || c.id}` : "";
+          const sectorPart = c.sector ? ` (Sector ${c.sector})` : "";
+          const mainLabel = c.label || c.address || `${contractPart}${sectorPart}`;
+          const extraAddress = c.address && mainLabel !== c.address ? `\n   📍 Dirección: ${c.address}` : "";
+          return `${num}️⃣ ${mainLabel}${extraAddress}`.trim();
         })
         .join("\n");
       templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\nPor favor indícame cuál de ellos presenta el inconveniente (responde con el número 1, 2... o selecciónalo).`;

@@ -5,6 +5,7 @@ import type {
 } from "../ports/customer.repository.port";
 import type {
   ConversationIdentityPort,
+  RememberCustomerContractsInput,
   RememberValidatedIdentityInput,
   ValidatedIdentitySnapshot,
 } from "../ports/conversation-identity.port";
@@ -60,8 +61,30 @@ export class ConversationIdentityService implements ConversationIdentityPort {
       pon: input.contract.pon,
       serial: input.contract.serial,
       routerModel: input.contract.routerModel,
+      address: input.contract.address,
       status: "active",
     });
+    await this.conversationRepo.setCustomerId(input.conversationId, customer.id);
+  }
+
+  async rememberCustomerContracts(input: RememberCustomerContractsInput): Promise<void> {
+    const customer = await this.customerRepo.upsertByNationalId({
+      nationalId: input.nationalId,
+      fullName: input.fullName,
+    });
+    for (const c of input.contracts) {
+      await this.contractRepo.upsertByCustomerAndNumber({
+        customerId: customer.id,
+        contractNumber: c.contractNumber,
+        sector: c.sector,
+        oltName: c.oltName,
+        pon: c.pon,
+        serial: c.serial,
+        routerModel: c.routerModel,
+        address: c.address,
+        status: "active",
+      });
+    }
     await this.conversationRepo.setCustomerId(input.conversationId, customer.id);
   }
 }

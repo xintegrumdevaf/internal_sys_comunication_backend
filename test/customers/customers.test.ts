@@ -190,7 +190,7 @@ class ContractRepositoryFake implements ContractRepositoryPort {
       (c) => c.customerId === input.customerId && c.contractNumber === input.contractNumber,
     );
     if (!contract) {
-      contract = {
+      const createdContract: Contract = {
         id: `contract-${Date.now()}-${Math.random()}`,
         customerId: input.customerId,
         contractNumber: input.contractNumber,
@@ -199,15 +199,18 @@ class ContractRepositoryFake implements ContractRepositoryPort {
         pon: input.pon ?? null,
         serial: input.serial ?? null,
         routerModel: input.routerModel ?? null,
+        address: input.address ?? null,
         status: input.status ?? "active",
         createdAt: new Date(),
       };
-      this.contracts.push(contract);
+      this.contracts.push(createdContract);
+      return createdContract;
     } else {
       contract.sector = input.sector ?? contract.sector;
+      contract.address = input.address ?? contract.address;
       contract.status = input.status ?? contract.status;
+      return contract;
     }
-    return contract;
   }
 
   async deleteExcept(customerId: string, keepContractNumbers: string[]): Promise<void> {

@@ -25,6 +25,8 @@ export type InsertOutboundMessageInput = {
   agentId?: string | null;
   /** Caso activo de la conversacion al momento del reply, si existe. */
   caseId?: string | null;
+  type?: string;
+  caption?: string | null;
   status?: MessageStatus;
   errorMessage?: string | null;
 };

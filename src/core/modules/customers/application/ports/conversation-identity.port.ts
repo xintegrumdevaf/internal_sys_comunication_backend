@@ -16,21 +16,32 @@ export type ValidatedIdentitySnapshot = {
   };
 };
 
+export type ContractIdentityInput = {
+  contractNumber: string;
+  sector?: string | null;
+  oltName?: string | null;
+  pon?: string | null;
+  serial?: string | null;
+  routerModel?: string | null;
+  address?: string | null;
+};
+
 export type RememberValidatedIdentityInput = {
   conversationId: string;
   nationalId: string;
   fullName: string;
-  contract: {
-    contractNumber: string;
-    sector?: string | null;
-    oltName?: string | null;
-    pon?: string | null;
-    serial?: string | null;
-    routerModel?: string | null;
-  };
+  contract: ContractIdentityInput;
+};
+
+export type RememberCustomerContractsInput = {
+  conversationId: string;
+  nationalId: string;
+  fullName: string;
+  contracts: ContractIdentityInput[];
 };
 
 export interface ConversationIdentityPort {
   tryGetValidatedIdentity(conversationId: string): Promise<ValidatedIdentitySnapshot | null>;
   rememberValidatedIdentity(input: RememberValidatedIdentityInput): Promise<void>;
+  rememberCustomerContracts(input: RememberCustomerContractsInput): Promise<void>;
 }

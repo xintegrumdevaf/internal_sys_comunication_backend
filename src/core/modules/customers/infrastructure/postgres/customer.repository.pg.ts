@@ -41,6 +41,7 @@ type ContractRow = {
   pon: string | null;
   serial: string | null;
   router_model: string | null;
+  address: string | null;
   status: string;
   created_at: Date;
 };
@@ -88,6 +89,7 @@ function mapContract(row: ContractRow): Contract {
     pon: row.pon,
     serial: row.serial,
     routerModel: row.router_model,
+    address: row.address,
     status: row.status,
     createdAt: row.created_at,
   };

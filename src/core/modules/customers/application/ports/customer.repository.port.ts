@@ -17,6 +17,7 @@ export type UpsertContractInput = {
   pon?: string | null;
   serial?: string | null;
   routerModel?: string | null;
+  address?: string | null;
   status?: string;
 };
 

@@ -254,6 +254,21 @@ const validateClient: WorkflowStateHandler = async ({
       };
     });
     const clientFullName = output.contracts[0]?.name || data.client?.fullName || "";
+    if (identity) {
+      await identity.rememberCustomerContracts({
+        conversationId,
+        nationalId: client.nationalId,
+        fullName: clientFullName,
+        contracts: pendingContracts.map((c) => ({
+          contractNumber: c.id,
+          sector: c.sector,
+          oltName: c.oltName,
+          pon: c.pon,
+          serial: c.serial,
+          address: c.address,
+        })),
+      });
+    }
     const nextData: SupportInternetContext = {
       ...data,
       pendingContracts,
@@ -295,6 +310,7 @@ const validateClient: WorkflowStateHandler = async ({
         oltName: found.router.olt_name,
         pon: found.router.pon,
         serial: found.router.serial,
+        address: found.address,
       },
     });
   }
@@ -418,6 +434,7 @@ const disambiguateContract: WorkflowStateHandler = async ({
         oltName: matched.oltName,
         pon: matched.pon,
         serial: matched.serial,
+        address: matched.address,
       },
     });
   }

@@ -143,6 +143,7 @@ export class SyncCustomerIspUseCase {
         pon: c.router?.pon ?? null,
         serial: c.router?.serial ?? null,
         routerModel: c.router?.model ?? null,
+        address: c.address?.trim() ?? null,
         status: c.status?.toLowerCase() ?? "active",
       });
     }

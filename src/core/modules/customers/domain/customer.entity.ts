@@ -26,6 +26,7 @@ export type Contract = {
   pon: string | null;
   serial: string | null;
   routerModel: string | null;
+  address: string | null;
   status: string;
   createdAt: Date;
 };

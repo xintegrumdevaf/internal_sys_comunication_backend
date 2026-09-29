@@ -14,6 +14,7 @@ type ContractRow = {
   pon: string | null;
   serial: string | null;
   router_model: string | null;
+  address: string | null;
   status: string;
   created_at: Date;
 };
@@ -28,6 +29,7 @@ function mapRow(row: ContractRow): Contract {
     pon: row.pon,
     serial: row.serial,
     routerModel: row.router_model,
+    address: row.address,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -59,14 +61,15 @@ export class ContractRepositoryPg implements ContractRepositoryPort {
   async upsertByCustomerAndNumber(input: UpsertContractInput): Promise<Contract> {
     const { rows } = await this.pool.query<ContractRow>(
       `INSERT INTO contract (
-         customer_id, contract_number, sector, olt_name, pon, serial, router_model, status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         customer_id, contract_number, sector, olt_name, pon, serial, router_model, address, status
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (customer_id, contract_number) DO UPDATE SET
          sector = COALESCE(EXCLUDED.sector, contract.sector),
          olt_name = COALESCE(EXCLUDED.olt_name, contract.olt_name),
          pon = COALESCE(EXCLUDED.pon, contract.pon),
          serial = COALESCE(EXCLUDED.serial, contract.serial),
          router_model = COALESCE(EXCLUDED.router_model, contract.router_model),
+         address = COALESCE(EXCLUDED.address, contract.address),
          status = EXCLUDED.status
        RETURNING *`,
       [
@@ -77,6 +80,7 @@ export class ContractRepositoryPg implements ContractRepositoryPort {
         input.pon ?? null,
         input.serial ?? null,
         input.routerModel ?? null,
+        input.address ?? null,
         input.status ?? "active",
       ],
     );

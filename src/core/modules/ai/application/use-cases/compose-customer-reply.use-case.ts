@@ -11,6 +11,9 @@ export class ComposeCustomerReplyUseCase {
   async execute(input: ComposeReplyInput): Promise<string> {
     if (input.templateHint && input.templateHint.trim().length > 0) {
       const rendered = cleanResidualPlaceholders(renderTemplate(input.templateHint, input.stepOutcome.result ?? {}));
+      if (input.stepOutcome.action === "WAITING_USER_DISAMBIGUATE") {
+        return rendered;
+      }
       try {
         const naturalized = await this.provider.composeReply({
           ...input,

@@ -716,6 +716,8 @@ export class ProcessBufferedMessagesUseCase {
     let externalId: string | null = null;
     let sendFailed = false;
     let errorMessage: string | null = null;
+    let messageType = "text";
+    let messageCaption: string | null = null;
     const contextData = input.context && "data" in input.context ? (input.context.data as Record<string, unknown>) : {};
     const pendingContracts = Array.isArray(contextData.pendingContracts)
       ? (contextData.pendingContracts as Array<{ id: string; label?: string; address?: string; sector?: string; contractCode?: string }>)
@@ -748,17 +750,40 @@ export class ProcessBufferedMessagesUseCase {
               [{ title: "Servicios disponibles", rows }],
             );
             externalId = sent.externalId;
+            messageType = "interactive";
+            messageCaption = JSON.stringify({
+              type: "list",
+              buttonText: "Ver opciones",
+              sections: [{ title: "Servicios disponibles", rows }],
+            });
           } else if (this.deps.whatsappSender.sendInteractiveButtons && pendingContracts.length === 2) {
             const seenTitles = new Set<string>();
             const buttons = pendingContracts.map((c, idx) => {
               const num = idx + 1;
-              const sectorPart = c.sector ? ` (${c.sector})` : "";
-              const baseLabel = (c.label || c.address || `Contrato ${num}`).trim();
-              const maxBaseLen = Math.max(5, 20 - 3 - sectorPart.length);
-              const truncatedBase = baseLabel.length > maxBaseLen ? baseLabel.slice(0, maxBaseLen).trim() : baseLabel;
-              let title = `${num}. ${truncatedBase}${sectorPart}`.slice(0, 20);
+              const sector = c.sector ? c.sector.trim().toLowerCase() : "";
+              const addrMatch = c.address?.match(/(?:OE|N|S|E)?\d+[-\d]*/i)?.[0];
+              const contractId = c.contractCode || c.id;
+
+              let title = "";
+              if (addrMatch && sector) {
+                const candidate = `${num}. ${addrMatch} (${sector})`;
+                if (candidate.length <= 20) title = candidate;
+              }
+              if (!title && addrMatch) {
+                const candidate = `${num}. ${addrMatch} (#${contractId})`;
+                if (candidate.length <= 20) title = candidate;
+              }
+              if (!title && sector) {
+                const candidate = `${num}. #${contractId} (${sector})`;
+                if (candidate.length <= 20) title = candidate;
+              }
+              if (!title) {
+                const candidate = `${num}. Contrato #${contractId}`;
+                title = candidate.length <= 20 ? candidate : `Opción ${num}`;
+              }
+
               if (seenTitles.has(title)) {
-                title = `${num}. Contrato #${c.id}`.slice(0, 20);
+                title = `${num}. #${contractId}`.slice(0, 20);
               }
               if (seenTitles.has(title)) {
                 title = `Opción ${num}`.slice(0, 20);
@@ -775,6 +800,11 @@ export class ProcessBufferedMessagesUseCase {
               buttons,
             );
             externalId = sent.externalId;
+            messageType = "interactive";
+            messageCaption = JSON.stringify({
+              type: "buttons",
+              buttons,
+            });
           } else {
             const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
             externalId = sent.externalId;
@@ -784,6 +814,8 @@ export class ProcessBufferedMessagesUseCase {
             { err: interactiveError instanceof Error ? interactiveError.message : String(interactiveError) },
             "Fallo al enviar mensaje interactivo (botones/lista), ejecutando fallback inmediato a texto plano",
           );
+          messageType = "text";
+          messageCaption = null;
           const sent = await this.deps.whatsappSender.sendText(conversation.waPhone, body);
           externalId = sent.externalId;
         }
@@ -804,6 +836,8 @@ export class ProcessBufferedMessagesUseCase {
       conversationId: input.conversationId,
       author: "ai",
       body,
+      type: messageType,
+      caption: messageCaption,
       externalId,
       status: sendFailed ? "failed" : "sent",
       errorMessage: sendFailed ? errorMessage : undefined,

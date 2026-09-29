@@ -1,5 +1,6 @@
 import type {
   ConversationIdentityPort,
+  RememberCustomerContractsInput,
   RememberValidatedIdentityInput,
   ValidatedIdentitySnapshot,
 } from "../../src/core/modules/customers/application/ports/conversation-identity.port";
@@ -33,5 +34,24 @@ export class ConversationIdentityFake implements ConversationIdentityPort {
         ...(input.contract.routerModel ? { router: input.contract.routerModel } : {}),
       },
     });
+  }
+
+  async rememberCustomerContracts(input: RememberCustomerContractsInput): Promise<void> {
+    this.rememberCalls += 1;
+    if (input.contracts.length > 0) {
+      const first = input.contracts[0]!;
+      this.byConversation.set(input.conversationId, {
+        nationalId: input.nationalId,
+        fullName: input.fullName,
+        contract: {
+          id: first.contractNumber,
+          sector: first.sector ?? "",
+          oltName: first.oltName ?? "",
+          pon: first.pon ?? "",
+          serial: first.serial ?? "",
+          ...(first.routerModel ? { router: first.routerModel } : {}),
+        },
+      });
+    }
   }
 }
