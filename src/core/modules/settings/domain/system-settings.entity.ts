@@ -89,3 +89,14 @@ export interface SystemSetupStatus {
   activeChannelProvider: "meta" | "zernio";
   activeAiProvider: "ollama" | "gemini";
 }
+
+/**
+ * Resultado de la prueba de conexión a proveedores de IA o mensajería.
+ */
+export interface TestConnectionResult {
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+  warning?: boolean;
+  details?: Record<string, unknown>;
+}

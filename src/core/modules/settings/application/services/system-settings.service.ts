@@ -7,6 +7,7 @@ import {
   type WhatsAppChannelSettings,
   type AiProviderSettings,
   type SystemSetupStatus,
+  type TestConnectionResult,
   WhatsAppChannelSettingsSchema,
   AiProviderSettingsSchema,
   maskSecret,
@@ -244,5 +245,268 @@ export class SystemSettingsService {
       activeChannelProvider: channels.provider,
       activeAiProvider: ai.provider,
     };
+  }
+
+  /**
+   * Prueba en vivo la conexión con el proveedor de IA (Gemini u Ollama).
+   */
+  async testAiConnection(input?: Partial<AiProviderSettings>): Promise<TestConnectionResult> {
+    const current = await this.getAiSettings();
+    const provider = input?.provider ?? current.provider;
+    const start = Date.now();
+
+    if (provider === "gemini") {
+      const apiKey = mergeSecret(input?.geminiApiKey, current.geminiApiKey);
+      const model = input?.geminiModel || current.geminiModel || "gemini-2.5-flash";
+
+      if (!apiKey || apiKey.trim() === "") {
+        return {
+          ok: false,
+          latencyMs: 0,
+          message: "API Key de Gemini no configurada",
+        };
+      }
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: "ping" }] }],
+            generationConfig: { maxOutputTokens: 2 },
+          }),
+        }).finally(() => clearTimeout(timer));
+
+        const latencyMs = Date.now() - start;
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+          const msg = errData?.error?.message || `HTTP ${res.status}`;
+          return {
+            ok: false,
+            latencyMs,
+            message: `Error en Gemini (${model}): ${msg}`,
+          };
+        }
+
+        return {
+          ok: true,
+          latencyMs,
+          message: `Conexión exitosa con Gemini (${model})`,
+          details: { model, provider: "gemini" },
+        };
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          message: `Error al conectar con Gemini: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    } else {
+      // Ollama
+      const baseUrl = (input?.ollamaBaseUrl || current.ollamaBaseUrl || "http://localhost:11434").replace(/\/$/, "");
+      const model = input?.ollamaModel || current.ollamaModel || "qwen3.5:4b";
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
+        const url = `${baseUrl}/api/tags`;
+        const res = await fetch(url, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        const latencyMs = Date.now() - start;
+
+        if (!res.ok) {
+          return {
+            ok: false,
+            latencyMs,
+            message: `Ollama HTTP ${res.status}`,
+          };
+        }
+
+        const data = await res.json().catch(() => null) as { models?: Array<{ name: string }> } | null;
+        const availableModels = data?.models?.map((m) => m.name) || [];
+        const hasModel = availableModels.some((m) => m === model || m.startsWith(`${model}:`));
+
+        if (!hasModel) {
+          return {
+            ok: true,
+            warning: true,
+            latencyMs,
+            message: `Ollama conectado, pero el modelo '${model}' no figura descargado (ejecutá: ollama pull ${model})`,
+            details: { baseUrl, model, availableModels },
+          };
+        }
+
+        return {
+          ok: true,
+          latencyMs,
+          message: `Conexión exitosa con Ollama. Modelo '${model}' listo.`,
+          details: { baseUrl, model, availableModels },
+        };
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          message: `Error al conectar con Ollama en ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+  }
+
+  /**
+   * Prueba en vivo las credenciales del canal de mensajería (Meta Cloud API o Zernio).
+   */
+  async testChannelConnection(input?: Partial<WhatsAppChannelSettings>): Promise<TestConnectionResult> {
+    const current = await this.getChannelSettings();
+    const provider = input?.provider ?? current.provider;
+    const start = Date.now();
+
+    if (provider === "meta") {
+      const phoneNumberId = input?.phoneNumberId?.trim() || current.phoneNumberId;
+      const accessToken = mergeSecret(input?.accessToken, current.accessToken);
+
+      if (!phoneNumberId) {
+        return {
+          ok: false,
+          latencyMs: 0,
+          message: "Falta configurar Phone Number ID de Meta",
+        };
+      }
+      if (!accessToken) {
+        return {
+          ok: false,
+          latencyMs: 0,
+          message: "Falta configurar Access Token de Meta",
+        };
+      }
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const url = `https://graph.facebook.com/v21.0/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`;
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        const latencyMs = Date.now() - start;
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+          const msg = errData?.error?.message || `HTTP ${res.status}`;
+          return {
+            ok: false,
+            latencyMs,
+            message: `Error Meta Graph API: ${msg}`,
+          };
+        }
+
+        const data = (await res.json()) as {
+          display_phone_number?: string;
+          verified_name?: string;
+          quality_rating?: string;
+          id?: string;
+        };
+
+        return {
+          ok: true,
+          latencyMs,
+          message: `Conexión exitosa con Meta Cloud API (${data.display_phone_number || phoneNumberId})`,
+          details: {
+            phoneNumberId,
+            displayPhoneNumber: data.display_phone_number,
+            verifiedName: data.verified_name,
+            qualityRating: data.quality_rating,
+          },
+        };
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          message: `Error al conectar con Meta Cloud API: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    } else {
+      // Zernio
+      const apiKey = mergeSecret(input?.zernioApiKey, current.zernioApiKey);
+      const accountId = input?.zernioAccountId?.trim() || current.zernioAccountId;
+      const baseUrl = (input?.zernioBaseUrl || current.zernioBaseUrl || "https://zernio.com/api/v1").replace(/\/$/, "");
+
+      if (!apiKey) {
+        return {
+          ok: false,
+          latencyMs: 0,
+          message: "Falta configurar Zernio API Key",
+        };
+      }
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const url = `${baseUrl}/accounts`;
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        const latencyMs = Date.now() - start;
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          return {
+            ok: false,
+            latencyMs,
+            message: `Error Zernio API (${res.status}): ${errText.slice(0, 150)}`,
+          };
+        }
+
+        const data = (await res.json().catch(() => null)) as {
+          accounts?: Array<{
+            _id: string;
+            platform: string;
+            metadata?: { wabaId?: string; phoneNumberId?: string };
+          }>;
+        } | null;
+
+        const accounts = data?.accounts || [];
+        const matched = accountId ? accounts.find((a) => a._id === accountId) : accounts[0];
+
+        if (accountId && !matched) {
+          return {
+            ok: true,
+            warning: true,
+            latencyMs,
+            message: `Zernio API Key válida, pero la cuenta '${accountId}' no figura entre las cuentas accesibles`,
+            details: { availableAccountsCount: accounts.length },
+          };
+        }
+
+        return {
+          ok: true,
+          latencyMs,
+          message: `Conexión exitosa con Zernio API (${accounts.length} cuenta(s) disponible(s))`,
+          details: {
+            accountsCount: accounts.length,
+            targetAccountId: accountId || matched?._id,
+          },
+        };
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          message: `Error al conectar con Zernio API: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
   }
 }

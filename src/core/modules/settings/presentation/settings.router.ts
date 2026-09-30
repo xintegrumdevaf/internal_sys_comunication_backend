@@ -75,6 +75,42 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   });
 
   /**
+   * POST /api/admin/settings/test-ai
+   * Prueba en vivo la conexión con el proveedor de IA (Gemini u Ollama).
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/test-ai", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      const result = await settingsService.testAiConnection(req.body);
+      res.json({
+        success: result.ok,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/test-channels
+   * Prueba en vivo las credenciales del canal de mensajería (Meta Cloud API o Zernio).
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/test-channels", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      const result = await settingsService.testChannelConnection(req.body);
+      res.json({
+        success: result.ok,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * GET /api/admin/settings/setup-status
    * Consulta el estado general de configuración del sistema (onboarding/wizard).
    */

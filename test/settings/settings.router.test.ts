@@ -191,4 +191,61 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       expect(res.body.data.geminiApiKey).toBeUndefined();
     });
   });
+
+  describe("POST /api/admin/settings/test-ai y /test-channels", () => {
+    it("valida conexión con Gemini correctamente", async () => {
+      currentRole = "admin";
+      // Mock global fetch para Gemini
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: "pong" }] } }] }),
+      })) as any;
+
+      try {
+        const res = await request(app)
+          .post("/api/admin/settings/test-ai")
+          .send({ provider: "gemini", geminiApiKey: "AIzaFakeKey" });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.ok).toBe(true);
+        expect(res.body.data.message).toContain("Conexión exitosa con Gemini");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("valida conexión con Meta Cloud API correctamente", async () => {
+      currentRole = "admin";
+      // Mock global fetch para Meta Graph API
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => ({
+          display_phone_number: "+58 412-1234567",
+          verified_name: "ISP Test",
+          quality_rating: "GREEN",
+        }),
+      })) as any;
+
+      try {
+        const res = await request(app)
+          .post("/api/admin/settings/test-channels")
+          .send({
+            provider: "meta",
+            phoneNumberId: "1234567890",
+            accessToken: "EAAG_fake_token",
+          });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.ok).toBe(true);
+        expect(res.body.data.message).toContain("Conexión exitosa con Meta Cloud API");
+        expect(res.body.data.details.displayPhoneNumber).toBe("+58 412-1234567");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });
