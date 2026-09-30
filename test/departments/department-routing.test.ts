@@ -173,7 +173,7 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
         intentKey: "retention.cancel_service",
         label: "Cancelación de Servicio",
         description: "cuando el cliente desea cancelar el contrato o darse de baja",
-        handlingMode: "human_direct",
+        handlingMode: "ai_assisted",
         workflowType: "GENERAL_INQUIRY",
         active: true,
       });
@@ -210,6 +210,54 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
       expect(decision.action).toBe("ACTIVATE");
       if (decision.action === "ACTIVATE") {
         expect(decision.workflowType).toBe("GENERAL_INQUIRY");
+      }
+    });
+
+    it("deriva a REQUEST_HUMAN cuando el caso está configurado como human_direct", async () => {
+      const arbitration = new CaseArbitrationService(
+        {
+          create: async () => ({} as any),
+          findById: async () => null,
+          findActiveByConversation: async () => null,
+          findPausedByConversationAndType: async () => null,
+          listByConversation: async () => [],
+          listAutomatableExpiring: async () => [],
+          applyTransition: async () => ({} as any),
+          setAssignedAgent: async () => {},
+          getAutomationState: async () => null,
+          setAutomationEnabled: async () => ({} as any),
+          appendEvent: async () => {},
+          listEvents: async () => [],
+          countActiveCasesByAgent: async () => ({}),
+        },
+        silentLogger,
+        routingService,
+      );
+
+      // Reconfiguramos a human_direct
+      await departmentRepo.createRouting({
+        departmentId: supportDeptId,
+        intentKey: "support.critical_escalation",
+        label: "Escalamiento Crítico",
+        description: "atención humana directa",
+        handlingMode: "human_direct",
+        active: true,
+      });
+      await routingService.invalidateCache();
+
+      const decision = await arbitration.decide({
+        conversationId: "conv-456",
+        interpretation: {
+          type: "NEW_INTENT",
+          intent: "support.critical_escalation",
+          confidence: 0.95,
+          entities: {},
+        },
+      });
+
+      expect(decision.action).toBe("REQUEST_HUMAN");
+      if (decision.action === "REQUEST_HUMAN") {
+        expect(decision.departmentId).toBe(supportDeptId);
       }
     });
   });

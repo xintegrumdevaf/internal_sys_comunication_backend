@@ -1,6 +1,7 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { WhatsAppSenderPort } from "../../application/ports/whatsapp-sender.port";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 type ZernioMessageResponse = {
   id?: string;
@@ -28,19 +29,39 @@ type ZernioConversationItem = {
  */
 export class ZernioSenderHttp implements WhatsAppSenderPort {
   private resolvedAccountId: string | null = null;
+  private lastInputAccountId: string | null = null;
   private readonly conversationIdCache = new Map<string, string>();
   private readonly phoneByConversationIdCache = new Map<string, string>();
-  private readonly baseUrl: string;
 
   constructor(
     private readonly env: Env,
     private readonly logger: Logger,
     private readonly fallbackSender?: WhatsAppSenderPort,
+    private readonly settingsService?: SystemSettingsService,
   ) {
-    this.baseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
     if (this.env.ZERNIO_ACCOUNT_ID?.trim()) {
       this.resolvedAccountId = this.env.ZERNIO_ACCOUNT_ID.trim();
+      this.lastInputAccountId = this.resolvedAccountId;
     }
+  }
+
+  private async resolveConfig(): Promise<{ baseUrl: string; apiKey: string; accountId: string }> {
+    let baseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+    let apiKey = this.env.ZERNIO_API_KEY || "";
+    let accountId = this.env.ZERNIO_ACCOUNT_ID?.trim() || "";
+
+    if (this.settingsService) {
+      try {
+        const s = await this.settingsService.getChannelSettings();
+        if (s.zernioBaseUrl) baseUrl = s.zernioBaseUrl.replace(/\/$/, "");
+        if (s.zernioApiKey) apiKey = s.zernioApiKey;
+        if (s.zernioAccountId) accountId = s.zernioAccountId.trim();
+      } catch {
+        // Fallback a env
+      }
+    }
+
+    return { baseUrl, apiKey, accountId };
   }
 
   public isBusinessAccount(phone: string): boolean {
@@ -82,10 +103,11 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
 
     try {
-      const url = `${this.baseUrl}/inbox/conversations?platform=whatsapp`;
+      const config = await this.resolveConfig();
+      const url = `${config.baseUrl}/inbox/conversations?platform=whatsapp`;
       const res = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${config.apiKey}`,
         },
       });
 
@@ -107,16 +129,18 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
   }
 
   private async getAccountId(forceRefresh = false): Promise<string> {
-    if (this.resolvedAccountId && !forceRefresh) {
+    const config = await this.resolveConfig();
+    if (this.resolvedAccountId && !forceRefresh && this.lastInputAccountId === config.accountId) {
       return this.resolvedAccountId;
     }
 
-    const inputId = this.env.ZERNIO_ACCOUNT_ID?.trim();
-    const url = `${this.baseUrl}/accounts`;
+    const inputId = config.accountId;
+    this.lastInputAccountId = inputId;
+    const url = `${config.baseUrl}/accounts`;
 
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
     });
 
@@ -159,10 +183,11 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
 
     try {
-      const url = `${this.baseUrl}/inbox/conversations?platform=whatsapp`;
+      const config = await this.resolveConfig();
+      const url = `${config.baseUrl}/inbox/conversations?platform=whatsapp`;
       const res = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${config.apiKey}`,
         },
       });
 
@@ -183,6 +208,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
   }
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
+    const config = await this.resolveConfig();
     const cleanPhone = waPhone.replace(/\D/g, "");
     const accountId = await this.getAccountId();
     const existingConversationId = await this.resolveConversationId(cleanPhone);
@@ -191,13 +217,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     let payload: Record<string, unknown>;
 
     if (existingConversationId) {
-      url = `${this.baseUrl}/inbox/conversations/${existingConversationId}/messages`;
+      url = `${config.baseUrl}/inbox/conversations/${existingConversationId}/messages`;
       payload = {
         accountId,
         message: body,
       };
     } else {
-      url = `${this.baseUrl}/inbox/conversations`;
+      url = `${config.baseUrl}/inbox/conversations`;
       payload = {
         accountId,
         participantId: cleanPhone,
@@ -211,7 +237,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(payload),
     });
@@ -230,7 +256,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
         if (existingConversationId) {
           this.phoneByConversationIdCache.delete(existingConversationId);
         }
-        url = `${this.baseUrl}/inbox/conversations`;
+        url = `${config.baseUrl}/inbox/conversations`;
         payload = {
           accountId,
           participantId: cleanPhone,
@@ -240,7 +266,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+            Authorization: `Bearer ${config.apiKey}`,
           },
           body: JSON.stringify(payload),
         });
@@ -270,7 +296,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+            Authorization: `Bearer ${config.apiKey}`,
           },
           body: JSON.stringify(payload),
         });
@@ -328,10 +354,11 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     languageCode = "es",
     parameters: string[] = [],
   ): Promise<{ externalId: string }> {
+    const config = await this.resolveConfig();
     const cleanPhone = waPhone.replace(/\D/g, "");
     const accountId = await this.getAccountId();
 
-    const url = `${this.baseUrl}/inbox/conversations`;
+    const url = `${config.baseUrl}/inbox/conversations`;
     const payload: Record<string, unknown> = {
       accountId,
       participantId: cleanPhone,
@@ -355,7 +382,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(payload),
     });
@@ -376,7 +403,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+            Authorization: `Bearer ${config.apiKey}`,
           },
           body: JSON.stringify(payload),
         });
@@ -421,15 +448,16 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     externalId: string,
   ): Promise<{ status: "sent" | "delivered" | "failed"; errorMessage?: string } | null> {
     try {
+      const config = await this.resolveConfig();
       const cleanPhone = waPhone.replace(/\D/g, "");
       const accountId = await this.getAccountId();
       const convId = await this.resolveConversationId(cleanPhone);
       if (!convId) return null;
 
-      const url = `${this.baseUrl}/inbox/conversations/${convId}/messages?accountId=${accountId}`;
+      const url = `${config.baseUrl}/inbox/conversations/${convId}/messages?accountId=${accountId}`;
       const res = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${config.apiKey}`,
         },
       });
 

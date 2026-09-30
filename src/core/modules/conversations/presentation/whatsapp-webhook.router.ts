@@ -12,12 +12,15 @@ import {
 import type { ReceiveInboundMessageUseCase } from "../application/use-cases/receive-inbound-message.use-case";
 import type { ReceiveInboundEditUseCase } from "../application/use-cases/receive-inbound-edit.use-case";
 
+import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
+
 export type WhatsAppWebhookRouterDeps = {
   env: Env;
   receiveInboundMessage: ReceiveInboundMessageUseCase;
   redisClient: Redis;
   syncTemplateStatus?: SyncTemplateStatusUseCase;
   receiveInboundEdit?: ReceiveInboundEditUseCase;
+  settingsService?: SystemSettingsService;
 };
 
 /**
@@ -27,14 +30,24 @@ export type WhatsAppWebhookRouterDeps = {
  */
 export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Router {
   const router = Router();
-  const { env, receiveInboundMessage, redisClient, syncTemplateStatus, receiveInboundEdit } = deps;
+  const { env, receiveInboundMessage, redisClient, syncTemplateStatus, receiveInboundEdit, settingsService } = deps;
 
-  router.get("/api/webhooks/whatsapp", (req, res) => {
+  router.get("/api/webhooks/whatsapp", async (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
     const modeMatches = mode === "subscribe";
-    const tokenMatches = token === env.WHATSAPP_VERIFY_TOKEN;
+
+    let verifyToken = env.WHATSAPP_VERIFY_TOKEN;
+    if (settingsService) {
+      try {
+        const s = await settingsService.getChannelSettings();
+        if (s.verifyToken) verifyToken = s.verifyToken;
+      } catch {
+        // fallback
+      }
+    }
+    const tokenMatches = token === verifyToken;
 
     if (modeMatches && tokenMatches) {
       req.log?.info({ challengeProvided: challenge !== undefined }, "webhook de whatsapp verificado");
@@ -59,9 +72,19 @@ export function createWhatsAppWebhookRouter(deps: WhatsAppWebhookRouterDeps): Ro
     try {
       req.log?.info({ path: req.path }, "webhook whatsapp POST");
 
+      let appSecret = env.WHATSAPP_APP_SECRET;
+      if (settingsService) {
+        try {
+          const s = await settingsService.getChannelSettings();
+          if (s.appSecret) appSecret = s.appSecret;
+        } catch {
+          // fallback
+        }
+      }
+
       const signatureHeader = req.header("x-hub-signature-256");
       const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
-      const signatureValid = verifyWhatsAppSignature(rawBody, signatureHeader, env.WHATSAPP_APP_SECRET);
+      const signatureValid = verifyWhatsAppSignature(rawBody, signatureHeader, appSecret);
 
       if (!signatureValid) {
         req.log?.warn("firma de webhook de whatsapp invalida");

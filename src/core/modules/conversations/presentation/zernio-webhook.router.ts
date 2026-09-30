@@ -13,6 +13,8 @@ import type { MessageRepositoryPort } from "../application/ports/message.reposit
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 import type { MessageStatus } from "../domain/message.entity";
 
+import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
+
 export type ZernioWebhookRouterDeps = {
   env: Env;
   receiveInboundMessage: ReceiveInboundMessageUseCase;
@@ -23,6 +25,7 @@ export type ZernioWebhookRouterDeps = {
   messageRepo?: MessageRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
   conversationRepo?: import("../application/ports/conversation.repository.port").ConversationRepositoryPort;
+  settingsService?: SystemSettingsService;
 };
 
 /**
@@ -42,6 +45,7 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
     messageRepo,
     broadcaster,
     conversationRepo,
+    settingsService,
   } = deps;
 
   router.get("/api/webhooks/zernio", (_req, res) => {
@@ -56,6 +60,16 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
     try {
       req.log?.info({ path: req.path }, "webhook zernio POST");
 
+      let webhookSecret = env.ZERNIO_WEBHOOK_SECRET;
+      if (settingsService) {
+        try {
+          const s = await settingsService.getChannelSettings();
+          if (s.zernioWebhookSecret) webhookSecret = s.zernioWebhookSecret;
+        } catch {
+          // fallback
+        }
+      }
+
       const signatureHeader =
         (req.header("x-zernio-signature") || req.header("x-late-signature"))?.trim();
       const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
@@ -63,7 +77,7 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
       const signatureValid = verifyZernioSignature(
         rawBody,
         signatureHeader,
-        env.ZERNIO_WEBHOOK_SECRET,
+        webhookSecret,
       );
 
       if (!signatureValid) {

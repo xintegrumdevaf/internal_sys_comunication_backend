@@ -39,6 +39,7 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
 
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import type { PromptResolverService } from "../../application/services/prompt-resolver.service";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 /**
  * Adapter Ollama: solo transporta prompts ya armados (06_AI_PROMPTS.md §1).
@@ -49,6 +50,7 @@ export class OllamaAdapter implements AIProviderPort {
     private readonly logger: Logger,
     private readonly routingService?: DepartmentRoutingService,
     private readonly promptResolver?: PromptResolverService,
+    private readonly settingsService?: SystemSettingsService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -218,8 +220,20 @@ export class OllamaAdapter implements AIProviderPort {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      let model = this.config.model;
+      let baseUrl = this.config.baseUrl;
+      if (this.settingsService) {
+        try {
+          const aiSettings = await this.settingsService.getAiSettings();
+          if (aiSettings.ollamaModel) model = aiSettings.ollamaModel;
+          if (aiSettings.ollamaBaseUrl) baseUrl = aiSettings.ollamaBaseUrl;
+        } catch {
+          // Fallback a config inicial
+        }
+      }
+
       const payload: Record<string, unknown> = {
-        model: this.config.model,
+        model,
         stream: false,
         think: false,
         keep_alive: "24h",
@@ -236,7 +250,7 @@ export class OllamaAdapter implements AIProviderPort {
         payload.format = "json";
       }
 
-      const response = await fetch(`${this.config.baseUrl.replace(/\/$/, "")}/api/chat`, {
+      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,

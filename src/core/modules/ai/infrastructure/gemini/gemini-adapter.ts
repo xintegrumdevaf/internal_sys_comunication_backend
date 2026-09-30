@@ -38,6 +38,7 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
 
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import type { PromptResolverService } from "../../application/services/prompt-resolver.service";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 export class GeminiAdapter implements AIProviderPort {
   constructor(
@@ -45,6 +46,7 @@ export class GeminiAdapter implements AIProviderPort {
     private readonly logger: Logger,
     private readonly routingService?: DepartmentRoutingService,
     private readonly promptResolver?: PromptResolverService,
+    private readonly settingsService?: SystemSettingsService,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -337,7 +339,20 @@ export class GeminiAdapter implements AIProviderPort {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent?key=${this.config.apiKey}`;
+      let apiKey = this.config.apiKey;
+      let model = this.config.model;
+
+      if (this.settingsService) {
+        try {
+          const aiSettings = await this.settingsService.getAiSettings();
+          if (aiSettings.geminiApiKey) apiKey = aiSettings.geminiApiKey;
+          if (aiSettings.geminiModel) model = aiSettings.geminiModel;
+        } catch {
+          // Fallback a config inicial
+        }
+      }
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

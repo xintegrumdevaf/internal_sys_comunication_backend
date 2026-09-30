@@ -1,6 +1,7 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { WhatsAppSenderPort } from "../../application/ports/whatsapp-sender.port";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 const GRAPH_API_VERSION = "v20.0";
 
@@ -16,10 +17,27 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
   constructor(
     private readonly env: Env,
     private readonly logger: Logger,
+    private readonly settingsService?: SystemSettingsService,
   ) {}
 
+  private async resolveCredentials(): Promise<{ phoneNumberId: string; accessToken: string }> {
+    let phoneNumberId = this.env.WHATSAPP_PHONE_NUMBER_ID || "";
+    let accessToken = this.env.WHATSAPP_ACCESS_TOKEN || "";
+    if (this.settingsService) {
+      try {
+        const config = await this.settingsService.getChannelSettings();
+        if (config.phoneNumberId) phoneNumberId = config.phoneNumberId;
+        if (config.accessToken) accessToken = config.accessToken;
+      } catch {
+        // Fallback a env
+      }
+    }
+    return { phoneNumberId, accessToken };
+  }
+
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const creds = await this.resolveCredentials();
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
 
     const cleanPhone = waPhone.replace(/\D/g, "");
 
@@ -27,7 +45,7 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${creds.accessToken}`,
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
@@ -59,7 +77,8 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
     languageCode = "es",
     parameters: string[] = [],
   ): Promise<{ externalId: string }> {
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const creds = await this.resolveCredentials();
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
 
     const cleanPhone = waPhone.replace(/\D/g, "");
 
@@ -90,7 +109,7 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${creds.accessToken}`,
       },
       body: JSON.stringify(payload),
     });
@@ -121,7 +140,8 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
     headerText?: string,
     footerText?: string,
   ): Promise<{ externalId: string }> {
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const creds = await this.resolveCredentials();
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
     const cleanPhone = waPhone.replace(/\D/g, "");
 
     const payload = {
@@ -163,7 +183,7 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${creds.accessToken}`,
       },
       body: JSON.stringify(payload),
     });
@@ -190,7 +210,8 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
     headerText?: string,
     footerText?: string,
   ): Promise<{ externalId: string }> {
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${this.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const creds = await this.resolveCredentials();
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
     const cleanPhone = waPhone.replace(/\D/g, "");
 
     const payload = {
@@ -220,7 +241,7 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.env.WHATSAPP_ACCESS_TOKEN}`,
+        Authorization: `Bearer ${creds.accessToken}`,
       },
       body: JSON.stringify(payload),
     });
