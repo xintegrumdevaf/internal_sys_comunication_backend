@@ -138,9 +138,10 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
       entities?.salesPurpose === "upgrade" ||
       entities?.intent === "sales.upgrade";
 
-    data = { ...data, question, wantsUpgrade };
+    const departmentId = data.departmentId ?? (typeof entities?.departmentId === "string" ? entities.departmentId : undefined);
+    data = { ...data, question, wantsUpgrade, departmentId };
 
-    const result = await ragService.query(question, 4);
+    const result = await ragService.query(question, 4, departmentId);
 
     if (!result.found || result.confidenceScore < 0.15) {
       const isSalesQuery =

@@ -17,7 +17,7 @@ export type ArbitrationDecision =
     pauseCaseId: string | null;
   }
   | { action: "CLARIFY" }
-  | { action: "REQUEST_HUMAN"; caseId: string | null };
+  | { action: "REQUEST_HUMAN"; caseId: string | null; departmentId?: string | null; reason?: string };
 
 /**
  * docs/spec/02_STATE_MACHINE.md §4 + §7 — un solo caso automatizado activo
@@ -37,9 +37,18 @@ export class CaseArbitrationService {
   async decide(input: { conversationId: string; interpretation: Interpretation }): Promise<ArbitrationDecision> {
     const { conversationId, interpretation } = input;
 
+    const dynamicRouting = this.routingService
+      ? await this.routingService.resolveByIntent(interpretation.intent)
+      : null;
+
     if (interpretation.type === "REQUEST_HUMAN") {
       const active = await this.caseRepo.findActiveByConversation(conversationId);
-      return { action: "REQUEST_HUMAN", caseId: active?.case.id ?? null };
+      return {
+        action: "REQUEST_HUMAN",
+        caseId: active?.case.id ?? null,
+        ...(dynamicRouting?.departmentId ? { departmentId: dynamicRouting.departmentId } : {}),
+        ...(dynamicRouting?.label ? { reason: dynamicRouting.label } : {}),
+      };
     }
 
     if (interpretation.type === "UNCLEAR") {
@@ -47,14 +56,28 @@ export class CaseArbitrationService {
     }
 
     let targetWorkflowType = mapIntentToWorkflowType(interpretation.intent);
-    if (!targetWorkflowType && this.routingService) {
-      const dynamicRouting = await this.routingService.resolveByIntent(interpretation.intent);
-      if (dynamicRouting) {
-        targetWorkflowType = dynamicRouting.workflowType;
-      }
+    if (!targetWorkflowType && dynamicRouting) {
+      targetWorkflowType = dynamicRouting.workflowType;
     }
     const activeAggregate = await this.caseRepo.findActiveByConversation(conversationId);
     const meetsConfidence = interpretation.confidence >= confidenceThreshold(interpretation.intent);
+
+    // Si el enrutamiento está configurado expresamente como human_direct,
+    // o si el intent no tiene workflowType automatizado asignado (ej: support.service_cancellation, general.complaint)
+    // pero la intención fue comprendida con suficiente confianza:
+    // NO forzar CLARIFY; derivar directamente a atención humana / departamento correspondiente.
+    const isHumanDirect = dynamicRouting?.handlingMode === "human_direct";
+    const isIntentWithoutWorkflow = !targetWorkflowType && Boolean(interpretation.intent) && interpretation.intent !== "unknown";
+
+    if (meetsConfidence && (isHumanDirect || isIntentWithoutWorkflow)) {
+      const reason = dynamicRouting?.label || interpretation.intent;
+      return {
+        action: "REQUEST_HUMAN",
+        caseId: activeAggregate?.case.id ?? null,
+        ...(dynamicRouting?.departmentId ? { departmentId: dynamicRouting.departmentId } : {}),
+        ...(reason ? { reason } : {}),
+      };
+    }
 
     if (activeAggregate) {
       const activeCase = activeAggregate.case;

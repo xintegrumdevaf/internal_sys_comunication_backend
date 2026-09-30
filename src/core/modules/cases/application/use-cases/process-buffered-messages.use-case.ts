@@ -378,6 +378,47 @@ export class ProcessBufferedMessagesUseCase {
       log.info({ decision: decision.action }, "arbitraje de caso decidido");
 
       if (decision.action === "CLARIFY") {
+        // Circuit Breaker anti-aturdimiento / anti-bucle:
+        // Si el último mensaje del bot hacia el cliente ya fue una aclaración (CLARIFY),
+        // no insistir por segunda vez consecutiva: escalar a triage humano.
+        const lastOutbound = rawHistory.find(
+          (m) => m.direction === "outbound" && (m.author === "ai" || m.author === "system"),
+        );
+        const isConsecutiveClarify =
+          lastOutbound !== undefined &&
+          (lastOutbound.caption?.includes('"action":"CLARIFY"') ||
+            lastOutbound.body.includes("¿En qué te puedo ayudar") ||
+            lastOutbound.body.includes("¿Tienes algún inconveniente"));
+
+        if (isConsecutiveClarify) {
+          log.warn(
+            { conversationId, lastOutboundBody: lastOutbound?.body?.slice(0, 60) },
+            "Circuit breaker activado: múltiples intentos de aclaración consecutivos; escalando a humano",
+          );
+          if (this.deps.escalationService) {
+            const { customerMessage } = await this.deps.escalationService.sendToTriage({
+              conversationId,
+              reason: "MAX_CLARIFY_ATTEMPTS_EXCEEDED",
+              correlationId,
+            });
+            await this.deliverFixedReply({
+              conversationId,
+              correlationId,
+              body: customerMessage || "Veo que no logré comprender tu solicitud. Te voy a transferir con un asesor de nuestro equipo para que te ayude directamente.",
+              log,
+            });
+            return;
+          }
+
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: "Veo que no logré comprender tu solicitud. Te voy a transferir con un asesor de nuestro equipo para que te ayude directamente.",
+            log,
+          });
+          return;
+        }
+
         await this.sendCustomerReply({
           conversationId,
           correlationId,
@@ -390,10 +431,11 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       if (decision.action === "REQUEST_HUMAN") {
+        const escalationReason = decision.reason ?? "REQUEST_HUMAN";
         if (decision.caseId && this.deps.escalationService) {
           const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
             caseId: decision.caseId,
-            reason: "REQUEST_HUMAN",
+            reason: escalationReason,
             correlationId,
           });
           await this.deliverFixedReply({
@@ -406,6 +448,20 @@ export class ProcessBufferedMessagesUseCase {
         }
         if (decision.caseId) {
           await this.escalateToHuman(decision.caseId, log);
+        } else if (this.deps.escalationService) {
+          const { customerMessage } = await this.deps.escalationService.sendToTriage({
+            conversationId,
+            reason: escalationReason,
+            correlationId,
+            departmentId: decision.departmentId ?? null,
+          });
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: customerMessage,
+            log,
+          });
+          return;
         }
         await this.sendCustomerReply({
           conversationId,
@@ -717,7 +773,8 @@ export class ProcessBufferedMessagesUseCase {
     let sendFailed = false;
     let errorMessage: string | null = null;
     let messageType = "text";
-    let messageCaption: string | null = null;
+    let messageCaption: string | null =
+      input.decision === "CLARIFY" ? JSON.stringify({ action: "CLARIFY" }) : null;
     const contextData = input.context && "data" in input.context ? (input.context.data as Record<string, unknown>) : {};
     const pendingContracts = Array.isArray(contextData.pendingContracts)
       ? (contextData.pendingContracts as Array<{ id: string; label?: string; address?: string; sector?: string; contractCode?: string }>)
