@@ -1,4 +1,4 @@
-import { intentListForPrompt } from "../../../cases/domain/intent-catalog";
+import { INTENT_CATALOG, intentListForPrompt } from "../../../cases/domain/intent-catalog";
 import type { InterpretMessageInput } from "../ports/ai-provider.port";
 
 export type DynamicPromptIntentItem = {
@@ -20,21 +20,25 @@ export function buildInterpretMessagePrompt(
   user: string;
 } {
   const defaultIntents = intentListForPrompt();
+  const baseCatalogIntents = INTENT_CATALOG.map((row) => row.intent);
   const intents = dynamicIntents && dynamicIntents.length > 0
-    ? Array.from(new Set([...dynamicIntents.map((d) => d.intent), "general.inquiry", "unknown"])).join(" | ")
+    ? Array.from(new Set([...dynamicIntents.map((d) => d.intent), ...baseCatalogIntents, "general.inquiry", "unknown"])).join(" | ")
     : defaultIntents;
 
   const active = input.conversationSnapshot?.activeCase;
   const recentMessages = input.conversationSnapshot?.recentMessages ?? [];
 
+  const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
+- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
+- billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
+- billing.record_payment: envío o reporte de comprobante/transferencia de pago YA realizado (ÚNICAMENTE CUANDO EL CLIENTE YA REALIZÓ EL PAGO Y ADJUNTA/ENVÍA LA FOTO DEL COMPROBANTE O EL NÚMERO DE REFERENCIA).`;
+
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
-    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n")
+    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
     : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional, y consultas sobre planes o servicios) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida. IMPORTANTE: Si el cliente envía un mensaje de agradecimiento o cortesía indicando que pagará más tarde (ej: "Listo muchas gracias mas tarde le pago", "Gracias luego transfiero", "Ok muchas gracias", "Listo gracias"), clasifica SIEMPRE como CANCEL o general.inquiry con intent="general.inquiry" y question="<texto del cliente>". NUNCA clasificar como billing.balance ni billing.record_payment. El cliente NO está pidiendo su saldo de nuevo ni adjuntando un comprobante, solo está cerrando la atención.
 - sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
 - sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.
-- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
-- billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
-- billing.record_payment: envío o reporte de comprobante/transferencia de pago YA realizado (ÚNICAMENTE CUANDO EL CLIENTE YA REALIZÓ EL PAGO Y ADJUNTA/ENVÍA LA FOTO DEL COMPROBANTE O EL NÚMERO DE REFERENCIA). NUNCA clasificar como billing.record_payment si el cliente apenas está pidiendo las cuentas bancarias o despidiéndose para ir a pagar más tarde.`;
+${staticRelocationAndCatalog}`;
 
   const system = `Eres un módulo de interpretación de lenguaje para el sistema de atención automatizada de un proveedor de internet (ISP) en Ecuador. Tu ÚNICA función es analizar el mensaje del cliente y devolver una interpretación estructurada.
 
@@ -82,6 +86,13 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   Si el cliente manifiesta que quiere cancelar el servicio, dar de baja, rescindir contrato, que le corten definitivamente el servicio o devolver los equipos (ej: "quiero cancelar el servicio", "denme de baja", "ya no quiero el servicio", "vengan a retirar el router", "cancélenme el contrato"):
   → Clasifica SIEMPRE como intent="support.service_cancellation" (o intent="support.equipment_return") con type="NEW_INTENT" o type="REQUEST_HUMAN".
   → NUNCA clasificar como support.internet. El cliente NO está pidiendo soporte técnico ni pruebas de conexión; está solicitando la baja y debe ser atendido por un asesor humano.
+- TRASLADO O CAMBIO DE DOMICILIO:
+  Si el cliente menciona que se va a cambiar de casa, mudar, o solicita trasladar/cambiar la dirección de su servicio de internet (ej: "voy a cambiarme de domicilio, como puedo hacer con el servicio", "me voy a cambiar de domicilio", "quiero trasladar mi internet", "cambio de casa", "traslado de servicio"):
+  → Clasifica SIEMPRE como intent="support.home_relocation" con type="NEW_INTENT".
+  → NUNCA clasificar como sales.packages, sales.upgrade ni general.inquiry. El cliente NO está pidiendo un folleto de planes ni contratando un paquete nuevo; es un cliente que requiere gestionar el traslado de su contrato activo a un nuevo domicilio.
+  Si el caso activo es de traslado de domicilio (HOME_RELOCATION) y está esperando la nueva dirección, referencias o ubicación:
+  → Clasifica SIEMPRE como type="ANSWER" con intent="support.home_relocation".
+  → Extrae en \`entities\`: \`newAddress\` (dirección), \`references\` (referencias físicas como cerca de la escuela, frente a, etc.) y \`mapLocation\` (link, ubicación o coordenadas). Si la dirección y referencias vienen juntas, extrae ambas.
 - RECLAMOS DE FACTURACIÓN O DISPUTAS DE COBRO:
   Si el cliente reclama por valores cobrados incorrectamente, disputas de facturas o cobros indebidos:
   → Clasifica SIEMPRE como intent="billing.dispute".
@@ -162,7 +173,10 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
    → {"type":"NEW_INTENT","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}
 
 16. Mensaje: "Es la octava vez que me cortan el servicio, quiero cancelar ya"
-   → {"type":"REQUEST_HUMAN","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}`;
+   → {"type":"REQUEST_HUMAN","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}
+
+17. Mensaje: "voy a cambiarme de domicilio, como puedo hacer con el servicio" (o "quiero cambiar la dirección de mi internet")
+   → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

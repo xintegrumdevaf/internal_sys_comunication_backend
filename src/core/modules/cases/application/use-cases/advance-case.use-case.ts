@@ -154,6 +154,40 @@ export class AdvanceCaseUseCase {
         entities = { ...entities, nationalId: normalizeNationalId(entities.nationalId) };
       }
 
+      // Si el paso pide campos de traslado (newAddress, references, mapLocation):
+      const needsRelocationDetails =
+        waitingStep.requireAll?.includes("newAddress") ||
+        waitingStep.requireAll?.includes("references") ||
+        waitingStep.requireAll?.includes("mapLocation");
+
+      if (needsRelocationDetails && input.text && input.text.trim()) {
+        const rawText = input.text.trim();
+        const currentNewAddress = (entities.newAddress ?? entities.address ?? entities.direccion) as string | undefined;
+        const currentRef = (entities.references ?? entities.addressReferences ?? entities.referencias) as string | undefined;
+        const currentMap = (entities.mapLocation ?? entities.locationUrl ?? entities.coordinates ?? entities.ubicacion) as string | undefined;
+
+        const resolvedAddress = currentNewAddress || (rawText.length >= 5 ? rawText : undefined);
+        const resolvedRef =
+          currentRef ||
+          (/frente|junto|cerca|metros|escuela|bazar|lado|diagonal|detras|casa|esquina|referencia/i.test(rawText)
+            ? rawText
+            : resolvedAddress && resolvedAddress.length >= 20
+              ? resolvedAddress
+              : undefined);
+        const resolvedMap =
+          currentMap ||
+          (rawText.match(/(https?:\/\/[^\s]+)/i)?.[1] ??
+            (/mapa|ubicacion|ubicación|coordenadas|gps|pin|maps|google/i.test(rawText)
+              ? "Ubicación compartida en chat"
+              : resolvedAddress && resolvedRef && rawText.length >= 25
+                ? `Ver dirección: ${resolvedAddress}`
+                : undefined));
+
+        if (resolvedAddress) entities = { ...entities, newAddress: resolvedAddress };
+        if (resolvedRef) entities = { ...entities, references: resolvedRef };
+        if (resolvedMap) entities = { ...entities, mapLocation: resolvedMap };
+      }
+
       const requiredKeys = [
         ...(waitingStep.requireAll ?? []),
         ...(waitingStep.requireAny ?? []),

@@ -142,6 +142,7 @@ import { WorkflowEngine } from "../modules/cases/application/engine/workflow-eng
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
 import { createGeneralInquiryWorkflow } from "../modules/cases/application/engine/definitions/general-inquiry.workflow";
+import { createHomeRelocationWorkflow } from "../modules/cases/application/engine/definitions/home-relocation.workflow";
 import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
 import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
 import { ExpirationService } from "../modules/cases/application/services/expiration.service";
@@ -435,10 +436,12 @@ export function createContainer(): Container {
   // son respondidos por GENERAL_INQUIRY via RAG. Solo si el cliente quiere contratar/mejorar
   // tras recibir la info → GENERAL_INQUIRY escala a ventas.
   const generalInquiryWorkflow = createGeneralInquiryWorkflow(ragService);
+  const homeRelocationWorkflow = createHomeRelocationWorkflow(ragService);
   const workflowEngine = new WorkflowEngine([
     supportInternetWorkflow,
     billingBalanceWorkflow,
     generalInquiryWorkflow,
+    homeRelocationWorkflow,
   ]);
   const departmentResolver = new DepartmentResolverService(departmentRepo, departmentRoutingService);
   const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger, departmentRoutingService);

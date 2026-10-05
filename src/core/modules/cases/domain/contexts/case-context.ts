@@ -2,6 +2,7 @@ import type { SupportInternetContext } from "./support-internet.context";
 import type { BillingBalanceContext } from "./billing-balance.context";
 import type { SalesPackagesContext } from "./sales-packages.context";
 import type { GeneralInquiryContext } from "./general-inquiry.context";
+import type { HomeRelocationContext } from "./home-relocation.context";
 import type { CaseEngineMeta } from "./engine-meta";
 
 export type CaseCloseReason = "RESOLVED" | "CLIENT_NO_RESPONSE";
@@ -39,6 +40,10 @@ export type CaseContext =
       data: SalesPackagesContext;
     } & ContextCommon)
   | ({
+      workflowType: "HOME_RELOCATION";
+      data: HomeRelocationContext;
+    } & ContextCommon)
+  | ({
       workflowType: "UNCLASSIFIED";
       data: Record<string, never>;
     } & ContextCommon)
@@ -55,9 +60,12 @@ export function emptyContextFor(workflowType: CaseContext["workflowType"]): Case
       return { workflowType, data: {} };
     case "SALES_PACKAGES":
       return { workflowType, data: {} };
+    case "HOME_RELOCATION":
+      return { workflowType, data: {} };
     case "UNCLASSIFIED":
       return { workflowType, data: {} };
     case "GENERAL_INQUIRY":
       return { workflowType, data: {} };
   }
 }
+

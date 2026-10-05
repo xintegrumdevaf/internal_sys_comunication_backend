@@ -319,8 +319,8 @@ export class ProcessBufferedMessagesUseCase {
 
       // Auto-extracción de cédula SOLO cuando el intent activo o entrante es de soporte/facturación
       // (nunca inyectar nationalId en flujos de ventas, consultas generales, etc.)
-      const identityRelatedIntents = ["support.internet", "support.slow_internet", "billing.balance", "billing.record_payment"];
-      const identityRelatedWorkflows = ["SUPPORT_INTERNET", "BILLING_BALANCE"];
+      const identityRelatedIntents = ["support.internet", "support.slow_internet", "support.home_relocation", "billing.balance", "billing.record_payment"];
+      const identityRelatedWorkflows = ["SUPPORT_INTERNET", "BILLING_BALANCE", "HOME_RELOCATION"];
       const isIdentityContext =
         identityRelatedIntents.includes(interpretation.intent) ||
         (activeAggregate && identityRelatedWorkflows.includes(activeAggregate.case.workflowType));

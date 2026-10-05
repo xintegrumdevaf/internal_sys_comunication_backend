@@ -14,6 +14,11 @@ export const INTENT_CATALOG = [
     description: "internet lento (a futuro, workflow propio)",
   },
   {
+    intent: "support.home_relocation",
+    workflowType: "HOME_RELOCATION",
+    description: "solicitud de traslado o cambio de domicilio del servicio de internet",
+  },
+  {
     intent: "billing.balance",
     workflowType: "BILLING_BALANCE",
     description: "quiere saber cuánto debe / su saldo",

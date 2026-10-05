@@ -116,14 +116,19 @@ export class CaseArbitrationService {
       return { action: "CLARIFY" };
     }
 
-    // Si la conversación ya tiene un caso escalado o atendido por humanos no expirado,
-    // no abrir un nuevo caso automatizado; mantener la atención con el asesor humano.
+    // Si la conversación ya tiene un caso escalado o en atención humana no expirado:
+    // - Si tiene un agente asignado (assignedAgentId) o esta en HUMAN_ACTIVE, mantener atencion humana.
+    // - Si esta en ESCALATED sin agente asignado (pool/triage sin reclamar), y llega un NEW_INTENT valido
+    //   con alta confianza, permitir activar el workflow automatizado para recopilar la informacion del cliente.
     const allCases = await this.caseRepo.listByConversation(conversationId);
     const pendingHumanCase = [...allCases].reverse().find(
       (c) => (c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") && !this.expirationService.isExpired(c),
     );
     if (pendingHumanCase) {
-      return { action: "REQUEST_HUMAN", caseId: pendingHumanCase.id };
+      const isAssignedToAgent = pendingHumanCase.status === "HUMAN_ACTIVE" || Boolean(pendingHumanCase.assignedAgentId);
+      if (isAssignedToAgent) {
+        return { action: "REQUEST_HUMAN", caseId: pendingHumanCase.id };
+      }
     }
 
     const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);

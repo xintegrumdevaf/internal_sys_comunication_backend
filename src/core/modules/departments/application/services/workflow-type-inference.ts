@@ -35,6 +35,15 @@ export function inferWorkflowType(
   }
 
   if (
+    combined.includes("traslado") ||
+    combined.includes("mudanza") ||
+    combined.includes("domicilio") ||
+    intentKey.toLowerCase() === "support.home_relocation"
+  ) {
+    return "HOME_RELOCATION";
+  }
+
+  if (
     combined.includes("soporte") ||
     combined.includes("tecnico") ||
     combined.includes("técnico") ||

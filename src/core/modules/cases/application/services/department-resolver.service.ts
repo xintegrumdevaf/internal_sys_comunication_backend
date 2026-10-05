@@ -24,6 +24,7 @@ export class DepartmentResolverService {
     }
 
     const candidateSlugsMap: Record<string, string[]> = {
+      HOME_RELOCATION: ["traslados", "traslado", "soporte", "support", "atencion"],
       BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos"],
       SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico"],
       SALES_PACKAGES: ["sales", "ventas", "comercial"],

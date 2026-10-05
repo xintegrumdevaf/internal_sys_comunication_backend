@@ -116,6 +116,8 @@ function describeProblem(workflowType: string, reason?: string, results?: Record
   switch (workflowType) {
     case "SUPPORT_INTERNET":
       return "Cliente reporta problema de internet";
+    case "HOME_RELOCATION":
+      return "Solicitud de traslado / cambio de domicilio";
     case "BILLING_BALANCE":
       return "Cliente consulta o gestiona facturación";
     case "SALES_PACKAGES":

@@ -1,6 +1,7 @@
 import type { DepartmentRepositoryPort } from "../ports/department.repository.port";
 import type { DepartmentCaseRouting } from "../../domain/department-case-routing.entity";
 import type { Logger } from "../../../../../shared/logging/logger";
+import { mapIntentToWorkflowType } from "../../../cases/domain/intent-catalog";
 
 export interface DynamicPromptIntent {
   intent: string;
@@ -71,10 +72,16 @@ export class DepartmentRoutingService {
     const exact = this.cache.find((r) => r.intentKey.toLowerCase() === intentKey.toLowerCase());
     if (exact) return exact;
 
-    // Fallback por prefijo: ej. support.xxx -> match primer support.*
+    const catalogWorkflow = mapIntentToWorkflowType(intentKey);
+
+    // Fallback por prefijo: ej. support.xxx -> match primer support.* SOLO si coincide el workflowType (para no heredar human_direct de otro intent como support.service_cancellation)
     const prefix = intentKey.split(".")[0]?.toLowerCase();
     if (prefix) {
-      const byPrefix = this.cache.find((r) => r.intentKey.toLowerCase().startsWith(`${prefix}.`));
+      const byPrefix = this.cache.find((r) => {
+        if (!r.intentKey.toLowerCase().startsWith(`${prefix}.`)) return false;
+        if (catalogWorkflow && r.workflowType.toUpperCase() !== catalogWorkflow.toUpperCase()) return false;
+        return true;
+      });
       if (byPrefix) return byPrefix;
     }
 
@@ -94,6 +101,7 @@ export class DepartmentRoutingService {
 
     // 2. Fallback por lista de candidatos de slugs comunes por tipo de flujo
     const candidateSlugsMap: Record<string, string[]> = {
+      HOME_RELOCATION: ["traslados", "traslado", "soporte", "support", "atencion"],
       BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos", "cuentas"],
       SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico", "averias"],
       SALES_PACKAGES: ["sales", "ventas", "comercial", "planes"],
@@ -124,6 +132,7 @@ export class DepartmentRoutingService {
       const activeDepts = allDepts.filter((d) => d.active !== false);
 
       const keywordsMap: Record<string, string[]> = {
+        HOME_RELOCATION: ["traslado", "traslados", "mudanza", "soporte", "support"],
         BILLING_BALANCE: ["cartera", "factura", "cobro", "pago", "billing", "saldo", "deuda"],
         SUPPORT_INTERNET: ["soporte", "tecnico", "support", "internet", "averia"],
         SALES_PACKAGES: ["venta", "comercial", "sales", "plan"],
