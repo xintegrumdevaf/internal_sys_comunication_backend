@@ -494,4 +494,86 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     const refreshedOldCase = await caseRepo.findById(oldCase.case.id);
     expect(refreshedOldCase?.case.status).toBe("EXPIRED");
   });
+
+  it("activa el Circuit Breaker y escala a triage con MAX_CLARIFY_ATTEMPTS_EXCEEDED si el bot ya había pedido aclaración", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+
+    // 1. Simular que el bot ya envió una aclaración previa
+    messageRepo.seedText(
+      conversation.id,
+      "¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un especialista?",
+      {
+        direction: "outbound",
+        author: "ai",
+        caption: JSON.stringify({ action: "CLARIFY" }),
+      },
+    );
+
+    // 2. El cliente responde algo ambiguo que vuelve a dar UNCLEAR
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "UNCLEAR", intent: "unknown", entities: {}, confidence: 0.2 },
+    ]);
+
+    let triageInput: any = null;
+    const escalationService = {
+      sendToTriage: async (input: any) => {
+        triageInput = input;
+        return {
+          case: {} as any,
+          escalation: {} as any,
+          customerMessage: "Te estamos transfiriendo con un asesor humano.",
+        };
+      },
+      escalateExistingCase: async () => ({ case: {} as any, escalation: {} as any, customerMessage: "" }),
+    } as any;
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const customerMsg = messageRepo.seedText(conversation.id, "No me funciona nada");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-circuit-breaker-test",
+      messages: [customerMsg],
+    });
+
+    // Se activó el circuit breaker hacia triage
+    expect(triageInput).not.toBeNull();
+    expect(triageInput.reason).toBe("MAX_CLARIFY_ATTEMPTS_EXCEEDED");
+    expect(triageInput.conversationId).toBe(conversation.id);
+
+    // Se envió la respuesta al cliente sin entrar en bucle de clarificación
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toBe("Te estamos transfiriendo con un asesor humano.");
+  });
 });

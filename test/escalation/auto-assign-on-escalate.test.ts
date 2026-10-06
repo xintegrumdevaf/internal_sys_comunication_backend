@@ -118,18 +118,25 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
     expect(escalation.status).toBe("PENDING");
   });
 
-  it("respeta el umbral de carga: no fuerza la asignacion a un agente sobrecargado", async () => {
-    const { caseRepo, departmentRepo, agentRepo, escalationService } = buildStack(1);
+  it("balancea equitativamente al agente con menor carga activa (least-connections)", async () => {
+    const { caseRepo, departmentRepo, agentRepo, escalationService } = buildStack();
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
-    const agent = agentRepo.seed({
+    const ana = agentRepo.seed({
       name: "Ana",
       email: "ana@isp.local",
       role: "agent",
       primaryDepartmentId: support.id,
       autoAssignEnabled: true,
     });
+    const beto = agentRepo.seed({
+      name: "Beto",
+      email: "beto@isp.local",
+      role: "agent",
+      primaryDepartmentId: support.id,
+      autoAssignEnabled: true,
+    });
 
-    // Ya tiene 1 caso activo -> alcanza el umbral de 1
+    // Ana ya tiene 1 caso activo
     const { case: existing } = await caseRepo.create({
       conversationId: "conv-prev",
       workflowType: "SUPPORT_INTERNET",
@@ -147,7 +154,7 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
       currentState: "VALIDATE_CLIENT",
       expiresAt: null,
     });
-    await caseRepo.setAssignedAgent(existing.id, agent.id);
+    await caseRepo.setAssignedAgent(existing.id, ana.id);
 
     const { case: created } = await caseRepo.create({
       conversationId: "conv-4",
@@ -163,7 +170,8 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
       correlationId: "corr-4",
     });
 
-    expect(escalated.assignedAgentId).toBeNull();
-    expect(escalated.status).toBe("ESCALATED");
+    // Debe balancear a Beto que tiene 0 casos activos
+    expect(escalated.assignedAgentId).toBe(beto.id);
+    expect(escalated.status).toBe("HUMAN_ACTIVE");
   });
 });

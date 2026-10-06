@@ -5,6 +5,8 @@ import type { VectorStorePort } from "../ports/vector-store.port";
 import type { EmbeddingProviderPort } from "../ports/embedding-provider.port";
 import type { Logger } from "../../../../../shared/logging/logger";
 
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
+
 export interface RagServiceDeps {
   documentRepository: RagDocumentRepositoryPort;
   vectorStore: VectorStorePort;
@@ -15,6 +17,7 @@ export interface RagServiceDeps {
   geminiModel?: string;
   aiTimeoutMs?: number;
   logger?: Logger;
+  settingsService?: SystemSettingsService;
 }
 
 export class RagService {
@@ -27,6 +30,7 @@ export class RagService {
   private readonly geminiModel?: string;
   private readonly aiTimeoutMs: number;
   private readonly logger?: Logger;
+  private readonly settingsService?: SystemSettingsService;
 
   constructor(deps: RagServiceDeps) {
     this.docRepo = deps.documentRepository;
@@ -38,6 +42,7 @@ export class RagService {
     this.geminiModel = deps.geminiModel || "gemini-2.5-flash-lite";
     this.aiTimeoutMs = deps.aiTimeoutMs || 45000;
     this.logger = deps.logger?.child({ service: "RagService" });
+    this.settingsService = deps.settingsService;
   }
 
   // --- Documentos & FAQs (Delegados al Repository Port) ---
@@ -283,11 +288,29 @@ export class RagService {
       "- NUNCA digas que eres una IA o asistente virtual ni que careces de catálogo o información.";
     const userPrompt = `Contexto documental:\n${context}\n\nPregunta del cliente: ${question}\nRespuesta puntual y directa:`;
 
-    // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
-    if (this.geminiApiKey) {
+    // Resolver configuración dinámica de IA si settingsService está disponible
+    let geminiApiKey = this.geminiApiKey;
+    let geminiModel = this.geminiModel || "gemini-2.5-flash-lite";
+    let chatModelUrl = this.chatModelUrl;
+    let chatModel = this.chatModel;
+
+    if (this.settingsService) {
       try {
-        const model = this.geminiModel || "gemini-2.5-flash-lite";
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`, {
+        const s = await this.settingsService.getAiSettings();
+        if (s.geminiApiKey) geminiApiKey = s.geminiApiKey;
+        if (s.geminiModel) geminiModel = s.geminiModel;
+        if (s.ollamaBaseUrl) chatModelUrl = s.ollamaBaseUrl;
+        if (s.ollamaModel) chatModel = s.ollamaModel;
+      } catch {
+        // Fallback a config inicial
+      }
+    }
+
+    // 1. Si Gemini API Key está configurada, usar Gemini para respuesta limpia e instantánea (sub-500ms)
+    if (geminiApiKey) {
+      try {
+        const model = geminiModel;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -311,12 +334,12 @@ export class RagService {
       const controller = new AbortController();
       const ollamaTimeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`${this.chatModelUrl}/api/chat`, {
+        const res = await fetch(`${chatModelUrl}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            model: this.chatModel,
+            model: chatModel,
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },

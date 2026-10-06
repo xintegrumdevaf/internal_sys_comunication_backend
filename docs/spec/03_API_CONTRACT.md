@@ -155,8 +155,7 @@ o en error:
 | `POST /api/auth/login` | `{ email, password }` → `{ data: AgentDto }` + cookie `httpOnly` de sesión (§F) |
 | `POST /api/auth/logout` | Revoca la sesión actual → `204` |
 | `GET /api/auth/me` | Agente de la sesión actual → `{ data: AgentDto }` \| `403` sin sesión |
-| `POST /api/auth/change-password` | `{ currentPassword, newPassword }` — autoservicio, requiere sesión → `204` |
-| `GET /api/conversations?departmentId=&userId=&status=` | Bandeja de conversaciones — cada item incluye `lastMessagePreview` (ver `ConversationDto` en §C.4), para pintar el inbox sin pedir `/messages` por cada fila |
+| `GET /api/conversations?departmentId=&userId=&status=` | Bandeja de conversaciones — cada item incluye `lastMessagePreview` (ver `ConversationDto` en §C.4) y `activeCase`. Los filtros `departmentId` y `userId` aplican estrictamente sobre el caso activo actual (§G v9), para evitar contaminación por casos históricos previos |
 | `GET /api/conversations/:id/messages?limit=&cursor=` | Mensajes de la conversación, orden cronológico, paginado |
 | `GET /api/conversations/:id/cases` | Casos (histórico) de la conversación |
 | `GET /api/conversations/:id/automation` | Estado de automatización del caso activo |
@@ -534,3 +533,9 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 - `DepartmentRoutingService`: caché en memoria con invalidación inmediata al modificar departamentos o casos.
 - Inyección dinámica en tiempo real al prompt de interpretación de IA (`interpret-message.prompt.ts`) con normalización de acentos sin requerir nuevo deploy ni reinicio.
 - Soporte para `handling_mode = "human_direct"`: escalación inmediata y asignación al departamento sin pasos previos de bot.
+
+**v8 → v9**: Filtrado Estricto de Bandeja por Caso Activo (`GET /api/conversations?departmentId=&userId=`):
+- Corrección de aislamiento operativo: los filtros `departmentId` y `userId` ahora evalúan exclusivamente el **caso activo actual** (`conversation.activeCaseId` o el caso en curso más reciente: `HUMAN_ACTIVE`, `ESCALATED`, `ACTIVE`, `WAITING_USER`), en lugar de cualquier caso histórico asociado a la conversación.
+- Evita que conversaciones con casos históricos cerrados en un departamento (ej. Cartera) se filtren indebidamente en bandejas de esa área cuando el cliente tiene un caso activo abierto en otra (ej. Soporte).
+- Optimización de consulta: resolución del caso activo en una sola pasada para filtrado y construcción del `ConversationDto.activeCase`.
+

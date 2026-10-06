@@ -219,4 +219,61 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       pauseCaseId: active.id,
     });
   });
+
+  it("intención sin workflowType asignado (ej: support.service_cancellation) deriva directo a REQUEST_HUMAN en vez de CLARIFY", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
+
+    const decision = await service.decide({
+      conversationId: "conv-cancellation",
+      interpretation: interpretation({
+        intent: "support.service_cancellation",
+        confidence: 0.95,
+      }),
+    });
+
+    expect(decision).toEqual({
+      action: "REQUEST_HUMAN",
+      caseId: null,
+      reason: "support.service_cancellation",
+    });
+  });
+
+  it("intención con handlingMode human_direct en enrutamiento dinámico deriva a REQUEST_HUMAN con departmentId", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const routingServiceFake = {
+      resolveByIntent: async (intent: string) => {
+        if (intent === "audit.complaint") {
+          return {
+            id: "route-1",
+            intentKey: "audit.complaint",
+            label: "Auditoría de Reclamos",
+            description: "Reclamos graves",
+            handlingMode: "human_direct" as const,
+            workflowType: "GENERAL_INQUIRY",
+            departmentId: "dept-auditoria-uuid",
+            active: true,
+          };
+        }
+        return null;
+      },
+    } as any;
+
+    const service = new CaseArbitrationService(caseRepo, silentLogger, routingServiceFake);
+
+    const decision = await service.decide({
+      conversationId: "conv-audit",
+      interpretation: interpretation({
+        intent: "audit.complaint",
+        confidence: 0.9,
+      }),
+    });
+
+    expect(decision).toEqual({
+      action: "REQUEST_HUMAN",
+      caseId: null,
+      departmentId: "dept-auditoria-uuid",
+      reason: "Auditoría de Reclamos",
+    });
+  });
 });

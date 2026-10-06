@@ -28,6 +28,7 @@ import { createAuditRouter } from "../modules/audit/presentation/audit.router";
 import { MessageTemplateRepositoryPg } from "../modules/message-templates/infrastructure/postgres/message-template.repository.pg";
 import { MetaTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/meta/meta-templates-gateway.http";
 import { ZernioTemplatesGatewayHttp } from "../modules/message-templates/infrastructure/zernio/zernio-templates-gateway.http";
+import { DynamicTemplatesGateway } from "../modules/message-templates/infrastructure/dynamic-templates-gateway";
 import type { MetaTemplatesGatewayPort } from "../modules/message-templates/application/ports/meta-templates-gateway.port";
 import { CreateMessageTemplateUseCase } from "../modules/message-templates/application/use-cases/create-message-template.use-case";
 import { ListMessageTemplatesUseCase } from "../modules/message-templates/application/use-cases/list-message-templates.use-case";
@@ -65,6 +66,7 @@ import { ConversationRepositoryPg } from "../modules/conversations/infrastructur
 import { MessageRepositoryPg } from "../modules/conversations/infrastructure/postgres/message.repository.pg";
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
 import { ZernioSenderHttp } from "../modules/conversations/infrastructure/zernio/zernio-sender.http";
+import { DynamicWhatsAppSender } from "../modules/conversations/infrastructure/dynamic-whatsapp-sender";
 import type { WhatsAppSenderPort } from "../modules/conversations/application/ports/whatsapp-sender.port";
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
 import { ReceiveInboundEditUseCase } from "../modules/conversations/application/use-cases/receive-inbound-edit.use-case";
@@ -122,6 +124,8 @@ import { N8nWorkflowRegistryRepositoryPg } from "../modules/cases/infrastructure
 import { AiInterpretationAdapter } from "../modules/cases/infrastructure/ai/ai-interpretation.adapter";
 import { OllamaAdapter } from "../modules/ai/infrastructure/ollama/ollama-adapter";
 import { GeminiAdapter } from "../modules/ai/infrastructure/gemini/gemini-adapter";
+import { DynamicAiProvider } from "../modules/ai/infrastructure/dynamic/dynamic-ai-provider";
+import { DynamicEmbeddingProvider } from "../modules/ai/infrastructure/dynamic/dynamic-embedding-provider";
 import { AIProviderPort } from "../modules/ai/application/ports/ai-provider.port";
 import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases/compose-customer-reply.use-case";
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
@@ -226,6 +230,10 @@ import { GetAgentsPerformanceUseCase } from "../modules/analytics/application/us
 import { GetInfrastructureAlertsUseCase } from "../modules/analytics/application/use-cases/get-infrastructure-alerts.use-case";
 import { createAnalyticsRouter } from "../modules/analytics/presentation/analytics.router";
 
+import { SystemSettingsRepositoryPg } from "../modules/settings/infrastructure/postgres/system-settings.repository.pg";
+import { SystemSettingsService } from "../modules/settings/application/services/system-settings.service";
+import { createSettingsRouter } from "../modules/settings/presentation/settings.router";
+
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
  * Aqui, y solo aqui, se instancian adapters de infraestructura y se
@@ -242,6 +250,7 @@ export type Container = {
   cancelCase: CancelCaseUseCase;
   expirationService: ExpirationService;
   quickReplyCatalogService?: QuickReplyCatalogService;
+  systemSettingsService: SystemSettingsService;
   shutdown: () => Promise<void>;
 };
 
@@ -268,18 +277,6 @@ export function createContainer(): Container {
     customerRepo,
     contractRepo,
   );
-  const metaSender = new WhatsAppSenderHttp(env, conversationsLogger);
-  let whatsappSender: WhatsAppSenderPort;
-  let zernioSender: ZernioSenderHttp | undefined;
-
-  if (env.WHATSAPP_PROVIDER === "zernio") {
-    conversationsLogger.info("Configurando proveedor de WhatsApp: Zernio (con fallback Meta Cloud API)");
-    zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender);
-    whatsappSender = zernioSender;
-  } else {
-    conversationsLogger.info("Configurando proveedor de WhatsApp: Meta Cloud API directo");
-    whatsappSender = metaSender;
-  }
   const departmentRepo = new DepartmentRepositoryPg(pgPool);
   const departmentRoutingService = new DepartmentRoutingService(
     departmentRepo,
@@ -289,6 +286,21 @@ export function createContainer(): Container {
     logger.warn({ err }, "Error al precargar caché de enrutamiento de departamentos");
   });
   const agentRepo = new AgentRepositoryPg(pgPool);
+
+  // --- Configuración Dinámica de Canales e IA (Sin redespliegues) ---
+  const systemSettingsRepo = new SystemSettingsRepositoryPg(pgPool);
+  const systemSettingsService = new SystemSettingsService(
+    systemSettingsRepo,
+    env,
+    logger.child({ module: "settings" }),
+    departmentRepo,
+    agentRepo,
+  );
+
+  const metaSender = new WhatsAppSenderHttp(env, conversationsLogger, systemSettingsService);
+  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender, systemSettingsService);
+  const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
+
   const sessionStore = new SessionStoreRedis(redisClient);
   const caseRepo = new CaseRepositoryPg(pgPool);
   const workflowExecutionRepo = new WorkflowExecutionRepositoryPg(pgPool);
@@ -296,10 +308,11 @@ export function createContainer(): Container {
   const escalationRepo = new EscalationRepositoryPg(pgPool);
   const messageTemplateRepo = new MessageTemplateRepositoryPg(pgPool);
   const templatesLogger = logger.child({ module: "message-templates" });
-  const metaTemplatesGateway: MetaTemplatesGatewayPort =
-    env.WHATSAPP_PROVIDER === "zernio"
-      ? new ZernioTemplatesGatewayHttp(env, templatesLogger)
-      : new MetaTemplatesGatewayHttp(env, templatesLogger);
+  const metaTemplatesGateway: MetaTemplatesGatewayPort = new DynamicTemplatesGateway(
+    systemSettingsService,
+    new MetaTemplatesGatewayHttp(env, templatesLogger),
+    new ZernioTemplatesGatewayHttp(env, templatesLogger),
+  );
 
   // --- Campañas (Campaigns) ---
   const campaignRepo = new CampaignRepositoryPg(pgPool);
@@ -350,40 +363,36 @@ export function createContainer(): Container {
     diagnosticGateway,
   });
 
-  // --- AI (Etapa 5) + Dynamic Prompts ---
+  // --- AI (Etapa 5) + Dynamic Prompts + Dynamic Provider ---
   const aiLogger = logger.child({ module: "ai" });
   const promptTemplateRepo = new PromptTemplateRepositoryPg(pgPool);
   const promptResolver = new PromptResolverService(promptTemplateRepo, aiLogger);
 
-  let aiProvider: AIProviderPort;
-  if (env.AI_PROVIDER === "gemini") {
-    if (!env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY es requerida cuando AI_PROVIDER=gemini");
-    }
-    aiProvider = new GeminiAdapter(
-      {
-        apiKey: env.GEMINI_API_KEY,
-        model: env.GEMINI_MODEL,
-        timeoutMs: env.AI_CALL_TIMEOUT_MS,
-        qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
-      },
-      aiLogger,
-      departmentRoutingService,
-      promptResolver,
-    );
-  } else {
-    aiProvider = new OllamaAdapter(
-      {
-        baseUrl: env.OLLAMA_BASE_URL,
-        model: env.OLLAMA_MODEL,
-        timeoutMs: env.AI_CALL_TIMEOUT_MS,
-        qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
-      },
-      aiLogger,
-      departmentRoutingService,
-      promptResolver,
-    );
-  }
+  const geminiProvider = new GeminiAdapter(
+    {
+      apiKey: env.GEMINI_API_KEY || "",
+      model: env.GEMINI_MODEL || "gemini-2.5-flash",
+      timeoutMs: env.AI_CALL_TIMEOUT_MS,
+      qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
+    },
+    aiLogger,
+    departmentRoutingService,
+    promptResolver,
+    systemSettingsService,
+  );
+  const ollamaProvider = new OllamaAdapter(
+    {
+      baseUrl: env.OLLAMA_BASE_URL,
+      model: env.OLLAMA_MODEL,
+      timeoutMs: env.AI_CALL_TIMEOUT_MS,
+      qualityTimeoutMs: env.AI_QUALITY_TIMEOUT_MS,
+    },
+    aiLogger,
+    departmentRoutingService,
+    promptResolver,
+    systemSettingsService,
+  );
+  const aiProvider = new DynamicAiProvider(systemSettingsService, geminiProvider, ollamaProvider);
   const interpretationProvider = new AiInterpretationAdapter(aiProvider, aiLogger);
   const composeReply = new ComposeCustomerReplyUseCase(aiProvider);
   const transcribeAudio = new TranscribeAudioUseCase(aiProvider);
@@ -400,24 +409,31 @@ export function createContainer(): Container {
   // --- RAG (Módulo de Conocimiento Vectorial Nativo) ---
   const ragDocumentRepo = new RagDocumentRepositoryPg(pgPool);
   const vectorStore = new PgVectorStoreAdapter(pgPool);
-  const embeddingProvider =
-    env.AI_PROVIDER === "gemini" && env.GEMINI_API_KEY
-      ? new GeminiEmbeddingAdapter(
-        {
-          apiKey: env.GEMINI_API_KEY,
-          model: env.GEMINI_EMBEDDING_MODEL,
-          dimension: env.GEMINI_EMBEDDING_DIMENSION,
-        },
-        aiLogger,
-      )
-      : new OllamaEmbeddingAdapter(
-        {
-          baseUrl: env.OLLAMA_BASE_URL,
-          model: env.OLLAMA_EMBEDDING_MODEL,
-          dimension: env.OLLAMA_EMBEDDING_DIMENSION,
-        },
-        aiLogger,
-      );
+  const geminiEmbedding = new GeminiEmbeddingAdapter(
+    {
+      apiKey: env.GEMINI_API_KEY || "",
+      model: env.GEMINI_EMBEDDING_MODEL || "text-embedding-004",
+      dimension: env.GEMINI_EMBEDDING_DIMENSION || 768,
+    },
+    aiLogger,
+    systemSettingsService,
+  );
+
+  const ollamaEmbedding = new OllamaEmbeddingAdapter(
+    {
+      baseUrl: env.OLLAMA_BASE_URL,
+      model: env.OLLAMA_EMBEDDING_MODEL || "qwen3-embedding:4b",
+      dimension: env.OLLAMA_EMBEDDING_DIMENSION || 2560,
+    },
+    aiLogger,
+    systemSettingsService,
+  );
+
+  const embeddingProvider = new DynamicEmbeddingProvider(
+    systemSettingsService,
+    geminiEmbedding,
+    ollamaEmbedding,
+  );
 
   const ragService = new RagService({
     documentRepository: ragDocumentRepo,
@@ -429,6 +445,7 @@ export function createContainer(): Container {
     geminiModel: env.GEMINI_MODEL,
     aiTimeoutMs: env.AI_CALL_TIMEOUT_MS,
     logger: aiLogger,
+    settingsService: systemSettingsService,
   });
 
   // --- Motor de workflow (Etapa 2 + RAG unificado) ---
@@ -690,7 +707,10 @@ export function createContainer(): Container {
         messages,
       });
     },
-    { debounceMs: env.MESSAGE_DEBOUNCE_MS },
+    {
+      debounceMs: env.MESSAGE_DEBOUNCE_MS,
+      getDebounceMs: () => systemSettingsService.getMessageDebounceMs(),
+    },
     ingestionLogger,
   );
 
@@ -868,7 +888,7 @@ export function createContainer(): Container {
 
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
-  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus }));
+  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus, settingsService: systemSettingsService }));
   app.use(
     createZernioWebhookRouter({
       env,
@@ -880,6 +900,7 @@ export function createContainer(): Container {
       messageRepo,
       broadcaster,
       conversationRepo,
+      settingsService: systemSettingsService,
     }),
   );
 
@@ -935,6 +956,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
+  app.use(createSettingsRouter({ settingsService: systemSettingsService, logger: logger.child({ module: "settings" }) }));
   app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     "/api/prompts",
@@ -1068,5 +1090,5 @@ export function createContainer(): Container {
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };
 
-  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, shutdown };
+  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, systemSettingsService, shutdown };
 }

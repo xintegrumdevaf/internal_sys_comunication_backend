@@ -146,13 +146,14 @@ export class EscalationService {
   }
 
   /**
-   * Pool de triage: caso UNCLASSIFIED + department_id NULL + escalation sin dept
+   * Pool de triage: caso UNCLASSIFIED + department_id (opcional o null) + escalation
    * (02_STATE_MACHINE.md §10).
    */
   async sendToTriage(input: {
     conversationId: string;
     reason: string;
     correlationId: string;
+    departmentId?: string | null;
   }): Promise<{ case: Case; escalation: Escalation; customerMessage: string }> {
     const { caseRepo, conversationRepo } = this.deps;
     const log = this.deps.logger.child({
@@ -163,7 +164,7 @@ export class EscalationService {
     const aggregate = await caseRepo.create({
       conversationId: input.conversationId,
       workflowType: "UNCLASSIFIED",
-      departmentId: null,
+      departmentId: input.departmentId ?? null,
       context: emptyContextFor("UNCLASSIFIED"),
       initialState: "TRIAGE",
       expiresAt: null,
@@ -191,14 +192,14 @@ export class EscalationService {
     const customerMessage = businessReplyForReason("TRIAGE");
 
     log.info(
-      { caseId: transitioned.case.id, escalationId: escalation.id },
-      "caso enviado al pool de triage",
+      { caseId: transitioned.case.id, escalationId: escalation.id, departmentId: input.departmentId ?? null },
+      "caso enviado al pool de triage / cola de departamento",
     );
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: transitioned.case.id,
       conversationId: input.conversationId,
-      departmentId: null,
+      departmentId: input.departmentId ?? null,
       at: new Date().toISOString(),
     });
     return { case: caseEntity, escalation, customerMessage };
