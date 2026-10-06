@@ -6,29 +6,26 @@ export type AutoAssignAgentDeps = {
   agentRepo: AgentRepositoryPort;
   caseRepo: CaseRepositoryPort;
   /**
-   * Umbral de carga (docs/spec/06_BACKEND_GAPS.md §2): un agente con esta
-   * cantidad de casos `HUMAN_ACTIVE` o mas queda fuera de la seleccion
-   * automatica (sigue disponible para asignacion manual por un manager).
+   * Umbral opcional de referencia o telemetría.
    */
-  maxActiveCasesPerAgent: number;
+  maxActiveCasesPerAgent?: number;
 };
 
 /**
- * Elige el agente humano que debe recibir un caso recien escalado dentro de
- * un departamento (docs/spec/06_BACKEND_GAPS.md §2). Reglas:
+ * Elige el agente humano que debe recibir un caso recién escalado dentro de
+ * un departamento. Reglas:
  *
  * 1. Solo agentes `active` con `autoAssignEnabled` y `role` `agent` o
- *    `manager` (los `admin` no reciben carga operativa automatica).
+ *    `manager` (los `admin` no reciben carga operativa automática).
  * 2. Elegibles: `primaryDepartmentId` del departamento, o con
- *    `agent_membership` explicita en el (departamentos `restricted` con
- *    varios agentes asignados via membership).
- * 3. Se excluyen los que ya estan en o por encima del umbral de carga.
- * 4. Entre los elegibles, se elige el de MENOR carga activa; el empate se
- *    resuelve por nombre (orden simple y determinista — no hay todavia un
- *    registro de "ultima asignacion" para un round-robin mas fino).
- * 5. Si no queda nadie elegible, devuelve `null` — el caso se queda sin
- *    asignar en el pool de escalaciones para que un manager/admin lo asigne
- *    a mano (nunca se fuerza una asignacion a alguien sobrecargado).
+ *    `agent_membership` explícita en él (departamentos `restricted` con
+ *    varios agentes asignados vía membership).
+ * 3. Balanceo Equitativo Garantizado (Least-Connections): Entre los elegibles,
+ *    se elige al de MENOR carga activa en ese instante (`HUMAN_ACTIVE`).
+ * 4. Desempate determinista por nombre.
+ * 5. Si no hay ningún agente elegible en turno, devuelve `null` — el caso
+ *    queda en estado ESCALATED en el pool del departamento a la espera de claim
+ *    o asignación manual.
  */
 export class AutoAssignAgentService {
   constructor(private readonly deps: AutoAssignAgentDeps) {}
@@ -51,15 +48,18 @@ export class AutoAssignAgentService {
     if (eligible.length === 0) return null;
 
     const loads = await this.deps.caseRepo.countActiveCasesByAgent(eligible.map((a) => a.id));
-    const underThreshold = eligible.filter((a) => (loads[a.id] ?? 0) < this.deps.maxActiveCasesPerAgent);
-    if (underThreshold.length === 0) return null;
 
-    underThreshold.sort((a, b) => {
+    // Balanceo Equitativo Garantizado (Least-Connections):
+    // Siempre se elige al agente con menor carga activa en ese instante.
+    // Si todos los agentes están por encima de un umbral orientativo, el sistema
+    // NO bloquea la atención ni deja al cliente huérfano: continúa repartiendo
+    // de forma simétrica y justa entre los agentes en turno.
+    eligible.sort((a, b) => {
       const diff = (loads[a.id] ?? 0) - (loads[b.id] ?? 0);
       if (diff !== 0) return diff;
       return a.name.localeCompare(b.name, "es");
     });
 
-    return underThreshold[0]!;
+    return eligible[0]!;
   }
 }

@@ -87,4 +87,32 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
     expect(flushed.get(conversationA)).toEqual(["a-1"]);
     expect(flushed.get(conversationB)).toEqual(["b-1"]);
   });
+
+  it("utiliza getDebounceMs dinamico cuando esta configurado", async () => {
+    const conversationId = randomUUID();
+    const flushes: string[][] = [];
+    let dynamicDelay = 300;
+
+    const buffer = new InboundBufferService(
+      redisClient,
+      async (_conversationId, messageIds) => {
+        flushes.push(messageIds);
+      },
+      {
+        debounceMs: 50, // estático rápido
+        getDebounceMs: async () => dynamicDelay,
+      },
+      silentLogger,
+    );
+
+    await buffer.push(conversationId, "msg-1");
+    // Si usara los 50ms estáticos, a los 100ms ya habría flusheado.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(flushes).toHaveLength(0);
+
+    // Llegando al vencimiento de los 300ms dinámicos
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(flushes).toHaveLength(1);
+    expect(flushes[0]).toEqual(["msg-1"]);
+  });
 });

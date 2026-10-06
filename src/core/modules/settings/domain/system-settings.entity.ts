@@ -51,6 +51,8 @@ export const WhatsAppChannelSettingsSchema = z.object({
   zernioAccountId: z.string().default(""),
   zernioWebhookSecret: z.string().default(""),
   zernioBaseUrl: z.string().default("https://zernio.com/api/v1"),
+  // Parámetros de buffer y debounce
+  messageDebounceMs: z.number().int().min(1000).max(60000).default(4500),
 });
 
 export type WhatsAppChannelSettings = z.infer<typeof WhatsAppChannelSettingsSchema>;

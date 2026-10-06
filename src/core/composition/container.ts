@@ -704,7 +704,10 @@ export function createContainer(): Container {
         messages,
       });
     },
-    { debounceMs: env.MESSAGE_DEBOUNCE_MS },
+    {
+      debounceMs: env.MESSAGE_DEBOUNCE_MS,
+      getDebounceMs: () => systemSettingsService.getMessageDebounceMs(),
+    },
     ingestionLogger,
   );
 

@@ -56,6 +56,7 @@ export class SystemSettingsService {
         zernioAccountId: this.env.ZERNIO_ACCOUNT_ID || "",
         zernioWebhookSecret: this.env.ZERNIO_WEBHOOK_SECRET || "",
         zernioBaseUrl: this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1",
+        messageDebounceMs: this.env.MESSAGE_DEBOUNCE_MS ?? 4500,
       };
 
       const resolved = WhatsAppChannelSettingsSchema.parse({
@@ -78,6 +79,7 @@ export class SystemSettingsService {
         zernioAccountId: this.env.ZERNIO_ACCOUNT_ID || "",
         zernioWebhookSecret: this.env.ZERNIO_WEBHOOK_SECRET || "",
         zernioBaseUrl: this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1",
+        messageDebounceMs: this.env.MESSAGE_DEBOUNCE_MS ?? 4500,
       };
     }
   }
@@ -138,7 +140,22 @@ export class SystemSettingsService {
       verifyToken: maskSecret(raw.verifyToken),
       zernioApiKey: maskSecret(raw.zernioApiKey),
       zernioWebhookSecret: maskSecret(raw.zernioWebhookSecret),
+      messageDebounceMs: raw.messageDebounceMs ?? this.env.MESSAGE_DEBOUNCE_MS ?? 4500,
     };
+  }
+
+  /**
+   * Resuelve el tiempo dinámico de debounce del buffer para procesamiento de mensajes entrantes.
+   */
+  async getMessageDebounceMs(): Promise<number> {
+    try {
+      const s = await this.getChannelSettings();
+      return typeof s.messageDebounceMs === "number" && s.messageDebounceMs > 0
+        ? s.messageDebounceMs
+        : this.env.MESSAGE_DEBOUNCE_MS ?? 4500;
+    } catch {
+      return this.env.MESSAGE_DEBOUNCE_MS ?? 4500;
+    }
   }
 
   async getMaskedAiSettings(): Promise<AiProviderSettings> {
@@ -166,6 +183,10 @@ export class SystemSettingsService {
       zernioAccountId: input.zernioAccountId !== undefined ? input.zernioAccountId.trim() : current.zernioAccountId,
       zernioWebhookSecret: mergeSecret(input.zernioWebhookSecret, current.zernioWebhookSecret),
       zernioBaseUrl: input.zernioBaseUrl !== undefined ? input.zernioBaseUrl.trim() : current.zernioBaseUrl,
+      messageDebounceMs:
+        typeof input.messageDebounceMs === "number" && !Number.isNaN(input.messageDebounceMs)
+          ? input.messageDebounceMs
+          : current.messageDebounceMs,
     };
 
     const validated = WhatsAppChannelSettingsSchema.parse(merged);

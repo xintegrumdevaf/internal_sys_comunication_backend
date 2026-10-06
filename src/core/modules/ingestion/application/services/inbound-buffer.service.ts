@@ -16,6 +16,7 @@ const DRAIN_BUFFER_SCRIPT = `
 
 export type InboundBufferOptions = {
   debounceMs: number;
+  getDebounceMs?: () => Promise<number> | number;
 };
 
 /**
@@ -27,6 +28,7 @@ export type InboundBufferOptions = {
  */
 export class InboundBufferService {
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly timerRequestIds = new Map<string, number>();
   private readonly processingConversations = new Set<string>();
 
   constructor(
@@ -46,7 +48,7 @@ export class InboundBufferService {
    * Verifica si la conversación tiene un debounce timer activo.
    */
   hasActiveBuffer(conversationId: string): boolean {
-    return this.timers.has(conversationId);
+    return this.timers.has(conversationId) || this.timerRequestIds.has(conversationId);
   }
 
   /**
@@ -54,7 +56,7 @@ export class InboundBufferService {
    * Retorna true si el debounce estaba activo y fue reprogramado; false si ya se procesó.
    */
   touch(conversationId: string): boolean {
-    if (this.timers.has(conversationId)) {
+    if (this.hasActiveBuffer(conversationId)) {
       this.logger.info({ conversationId }, "edicion recibida durante debounce: timer reseteado");
       this.reschedule(conversationId);
       return true;
@@ -69,6 +71,7 @@ export class InboundBufferService {
       clearTimeout(existing);
       this.timers.delete(conversationId);
     }
+    this.timerRequestIds.delete(conversationId);
     await this.drain(conversationId);
   }
 
@@ -78,23 +81,48 @@ export class InboundBufferService {
       clearTimeout(timer);
     }
     this.timers.clear();
+    this.timerRequestIds.clear();
+  }
+
+  private async resolveDebounceMs(): Promise<number> {
+    if (this.options.getDebounceMs) {
+      try {
+        const dynamicMs = await this.options.getDebounceMs();
+        if (typeof dynamicMs === "number" && dynamicMs > 0) {
+          return dynamicMs;
+        }
+      } catch (err) {
+        this.logger.warn({ err }, "error al resolver debounce dinamico; usando fallback estatico");
+      }
+    }
+    return this.options.debounceMs;
   }
 
   private reschedule(conversationId: string): void {
     const existing = this.timers.get(conversationId);
     if (existing) {
       clearTimeout(existing);
+      this.timers.delete(conversationId);
     }
-    const timer = setTimeout(() => {
-      this.drain(conversationId).catch((error) => {
-        this.logger.error({ err: error, conversationId }, "fallo al procesar el buffer de la conversacion");
-      });
-    }, this.options.debounceMs);
-    this.timers.set(conversationId, timer);
+    const requestId = (this.timerRequestIds.get(conversationId) ?? 0) + 1;
+    this.timerRequestIds.set(conversationId, requestId);
+
+    void this.resolveDebounceMs().then((ms) => {
+      if (this.timerRequestIds.get(conversationId) !== requestId) {
+        return;
+      }
+      const timer = setTimeout(() => {
+        this.drain(conversationId).catch((error) => {
+          this.logger.error({ err: error, conversationId }, "fallo al procesar el buffer de la conversacion");
+        });
+      }, ms);
+      this.timers.set(conversationId, timer);
+    });
   }
 
   private async drain(conversationId: string): Promise<void> {
     this.timers.delete(conversationId);
+    this.timerRequestIds.delete(conversationId);
 
     // Evitar flushes paralelos para la misma conversación (race condition):
     // Si ya se está procesando un lote previo, reprogramar para esperar que finalice.

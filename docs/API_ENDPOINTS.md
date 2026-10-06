@@ -70,8 +70,7 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 ## 4. Conversaciones (inbox + chat)
 
 | Método | Ruta | Query / Body | Descripción |
-|---|---|---|---|
-| `GET` | `/api/conversations` | `?departmentId=&userId=&status=open\|pending\|resolved\|closed` | Bandeja. Cada ítem trae `lastMessagePreview` (no hace falta pedir mensajes por fila) y `activeCase` (con estado, departamento, agente y estado del bot) |
+| `GET` | `/api/conversations` | `?departmentId=&userId=&status=open\|pending\|resolved\|closed` | Bandeja. Cada ítem trae `lastMessagePreview` (no hace falta pedir mensajes por fila) y `activeCase` (estado, departamento, agente y estado del bot). Los filtros `departmentId` y `userId` aplican sobre el **caso activo actual**, ignorando casos históricos cerrados. |
 | `GET` | `/api/conversations/:id/messages` | `?limit=&cursor=` | Historial cronológico paginado |
 | `GET` | `/api/conversations/:id/cases` | — | Casos de esa conversación (histórico; pueden coexistir SUPPORT + BILLING) |
 | `GET` | `/api/conversations/:id/automation` | — | Automation del caso activo (o `null`) |

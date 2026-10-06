@@ -105,19 +105,28 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
     expect(chosen?.id).toBe(manager.id); // manager si es elegible, admin no
   });
 
-  it("excluye a un agente que ya alcanzo el umbral de carga", async () => {
-    const { agentRepo, caseRepo, service } = build(1);
-    const overloaded = agentRepo.seed({
+  it("asigna al agente con menor carga activa garantizando balanceo equitativo aun con carga existente", async () => {
+    const { agentRepo, caseRepo, service } = build();
+    const ana = agentRepo.seed({
       name: "Ana",
       email: "ana@isp.local",
       role: "agent",
       primaryDepartmentId: "dept-1",
       autoAssignEnabled: true,
     });
-    await seedHumanActiveCase(caseRepo, overloaded.id, "dept-1");
+    const beto = agentRepo.seed({
+      name: "Beto",
+      email: "beto@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      autoAssignEnabled: true,
+    });
+    await seedHumanActiveCase(caseRepo, ana.id, "dept-1");
+    await seedHumanActiveCase(caseRepo, ana.id, "dept-1");
+    await seedHumanActiveCase(caseRepo, beto.id, "dept-1");
 
     const chosen = await service.pickAgentForDepartment("dept-1");
-    expect(chosen).toBeNull();
+    expect(chosen?.id).toBe(beto.id);
   });
 
   it("incluye agentes con membership explicita aunque su primaryDepartmentId sea otro", async () => {

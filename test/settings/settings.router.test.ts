@@ -154,6 +154,21 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       expect(raw.phoneNumberId).toBe("10425556666");
       expect(raw.accessToken).toBe("EAAG_real_super_secret_token_abcd");
     });
+
+    it("permite actualizar el tiempo de debounce del buffer desde la API", async () => {
+      currentRole = "admin";
+      const res = await request(app)
+        .put("/api/admin/settings/channels")
+        .send({
+          messageDebounceMs: 12000,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.messageDebounceMs).toBe(12000);
+
+      const raw = await service.getChannelSettings();
+      expect(raw.messageDebounceMs).toBe(12000);
+    });
   });
 
   describe("PUT /api/admin/settings/ai", () => {

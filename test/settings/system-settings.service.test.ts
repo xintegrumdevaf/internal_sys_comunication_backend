@@ -294,5 +294,18 @@ describe("SystemSettings - Seguridad y Configuración Dinámica", () => {
       expect(replyOllama).toBe("Respuesta Ollama");
       expect(ollamaProvider.composeReply).toHaveBeenCalledTimes(1);
     });
+
+    it("permite configurar y recuperar el debounce del buffer de mensajes", async () => {
+      // Valor por defecto en fakeEnv es 1000
+      const initialDelay = await service.getMessageDebounceMs();
+      expect(initialDelay).toBe(1000);
+
+      // Actualizamos a 8500 ms
+      const updated = await service.updateChannelSettings({ messageDebounceMs: 8500 });
+      expect(updated.messageDebounceMs).toBe(8500);
+
+      const dynamicDelay = await service.getMessageDebounceMs();
+      expect(dynamicDelay).toBe(8500);
+    });
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "isp-customer-service-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Backend de la plataforma omnicanal de atencion automatizada para un ISP (WhatsApp Business Cloud + n8n + PostgreSQL + Redis).",
   "main": "dist/index.js",
   "private": true,
