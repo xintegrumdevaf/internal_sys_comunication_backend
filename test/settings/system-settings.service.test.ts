@@ -359,7 +359,8 @@ describe("SystemSettings - Seguridad y Configuración Dinámica", () => {
         const res = await service.listCompatibleAiModels({ provider: "gemini" });
 
         expect(fetchSpy).toHaveBeenCalled();
-        const calledUrl = fetchSpy.mock.calls[0][0] as string;
+        const call = fetchSpy.mock.calls[0];
+        const calledUrl = (call ? call[0] : "") as string;
         expect(calledUrl).toContain("https://generativelanguage.googleapis.com/v1beta/models");
         expect(calledUrl).toContain(fakeEnv.GEMINI_API_KEY);
 
@@ -386,9 +387,10 @@ describe("SystemSettings - Seguridad y Configuración Dinámica", () => {
 
         // text-embedding-004 clasificado como embedding con 768 dims
         expect(res.embeddingModels.length).toBe(1);
-        expect(res.embeddingModels[0].id).toBe("text-embedding-004");
-        expect(res.embeddingModels[0].defaultDimension).toBe(768);
-        expect(res.embeddingModels[0].recommended).toBe(true);
+        const geminiEmbedding = res.embeddingModels[0];
+        expect(geminiEmbedding?.id).toBe("text-embedding-004");
+        expect(geminiEmbedding?.defaultDimension).toBe(768);
+        expect(geminiEmbedding?.recommended).toBe(true);
 
         fetchSpy.mockRestore();
       });
@@ -442,8 +444,9 @@ describe("SystemSettings - Seguridad y Configuración Dinámica", () => {
         expect(llama70b?.costTier).toBe(3);
 
         // embedding qwen -> 2560 dims
-        expect(res.embeddingModels[0].id).toBe("qwen3-embedding:4b");
-        expect(res.embeddingModels[0].defaultDimension).toBe(2560);
+        const ollamaEmbedding = res.embeddingModels[0];
+        expect(ollamaEmbedding?.id).toBe("qwen3-embedding:4b");
+        expect(ollamaEmbedding?.defaultDimension).toBe(2560);
 
         fetchSpy.mockRestore();
       });
