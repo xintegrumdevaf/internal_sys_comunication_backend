@@ -735,7 +735,8 @@ export class SystemSettingsService {
             });
           } else {
             const match = paramSize.match(/^(\d+(?:\.\d+)?)/);
-            const numParams = match ? parseFloat(match[1]) : 0;
+            const paramValue = match?.[1];
+            const numParams = paramValue ? parseFloat(paramValue) : 0;
 
             let tier: AiModelTier = "balanced";
             let tierLabel = `Equilibrado (${paramSize || "Estándar"})`;
