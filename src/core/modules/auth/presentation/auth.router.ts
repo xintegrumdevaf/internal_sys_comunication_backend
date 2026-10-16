@@ -70,7 +70,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       }
 
       res.cookie(SESSION_COOKIE_NAME, session.token, sessionCookieOptions(env, deps.sessionTtlSeconds));
-      res.json({ data: toPublicAgentDto(agent) });
+      res.json({ data: toPublicAgentDto(agent), token: session.token });
     } catch (error) {
       if (deps.auditRepo && req.body?.email) {
         void deps.auditRepo
