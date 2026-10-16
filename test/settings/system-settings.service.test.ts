@@ -307,5 +307,147 @@ describe("SystemSettings - Seguridad y Configuración Dinámica", () => {
       const dynamicDelay = await service.getMessageDebounceMs();
       expect(dynamicDelay).toBe(8500);
     });
+
+    describe("listCompatibleAiModels", () => {
+      it("obtiene y categoriza modelos de Gemini por costo y potencia excluyendo obsoletos", async () => {
+        const mockGeminiResponse = {
+          models: [
+            {
+              name: "models/gemini-2.5-flash",
+              displayName: "Gemini 2.5 Flash",
+              description: "Fast and balanced",
+              supportedGenerationMethods: ["generateContent", "countTokens"],
+              inputTokenLimit: 1048576,
+            },
+            {
+              name: "models/gemini-2.5-pro",
+              displayName: "Gemini 2.5 Pro",
+              description: "Complex reasoning",
+              supportedGenerationMethods: ["generateContent", "countTokens"],
+              inputTokenLimit: 2097152,
+            },
+            {
+              name: "models/gemini-2.0-flash-lite",
+              displayName: "Gemini 2.0 Flash Lite",
+              description: "Ultra low cost",
+              supportedGenerationMethods: ["generateContent"],
+            },
+            {
+              name: "models/text-embedding-004",
+              displayName: "Text Embedding 004",
+              description: "Google embedding model",
+              supportedGenerationMethods: ["embedContent"],
+            },
+            {
+              name: "models/imagen-3.0",
+              displayName: "Imagen 3",
+              supportedGenerationMethods: ["generateImage"],
+            },
+            {
+              name: "models/gemini-1.0-pro",
+              displayName: "Gemini 1.0 Pro (Deprecated)",
+              supportedGenerationMethods: ["generateContent"],
+            },
+          ],
+        };
+
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockGeminiResponse,
+        } as unknown as Response);
+
+        const res = await service.listCompatibleAiModels({ provider: "gemini" });
+
+        expect(fetchSpy).toHaveBeenCalled();
+        const calledUrl = fetchSpy.mock.calls[0][0] as string;
+        expect(calledUrl).toContain("https://generativelanguage.googleapis.com/v1beta/models");
+        expect(calledUrl).toContain(fakeEnv.GEMINI_API_KEY);
+
+        expect(res.provider).toBe("gemini");
+        expect(res.inferenceModels.length).toBe(3);
+        // Excluyó imagen y gemini-1.0-pro
+        expect(res.inferenceModels.some((m) => m.id === "gemini-1.0-pro")).toBe(false);
+        expect(res.inferenceModels.some((m) => m.id === "imagen-3.0")).toBe(false);
+
+        // gemini-2.5-flash está recomendado
+        const flash25 = res.inferenceModels.find((m) => m.id === "gemini-2.5-flash");
+        expect(flash25?.recommended).toBe(true);
+        expect(flash25?.costTier).toBe(2);
+
+        // gemini-2.0-flash-lite es ultra económico
+        const flashLite = res.inferenceModels.find((m) => m.id === "gemini-2.0-flash-lite");
+        expect(flashLite?.tier).toBe("economy");
+        expect(flashLite?.costTier).toBe(1);
+
+        // gemini-2.5-pro es performance / más potente
+        const pro = res.inferenceModels.find((m) => m.id === "gemini-2.5-pro");
+        expect(pro?.tier).toBe("performance");
+        expect(pro?.costTier).toBe(3);
+
+        // text-embedding-004 clasificado como embedding con 768 dims
+        expect(res.embeddingModels.length).toBe(1);
+        expect(res.embeddingModels[0].id).toBe("text-embedding-004");
+        expect(res.embeddingModels[0].defaultDimension).toBe(768);
+        expect(res.embeddingModels[0].recommended).toBe(true);
+
+        fetchSpy.mockRestore();
+      });
+
+      it("obtiene y categoriza modelos de Ollama por tamaño de parámetros y embeddings", async () => {
+        const mockOllamaResponse = {
+          models: [
+            {
+              name: "qwen3.5:4b",
+              details: { parameter_size: "4.2B", family: "qwen" },
+            },
+            {
+              name: "qwen2.5:14b",
+              details: { parameter_size: "14.7B", family: "qwen" },
+            },
+            {
+              name: "llama3:70b",
+              details: { parameter_size: "70.6B", family: "llama" },
+            },
+            {
+              name: "qwen3-embedding:4b",
+              details: { parameter_size: "4B", family: "qwen" },
+            },
+          ],
+        };
+
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockOllamaResponse,
+        } as unknown as Response);
+
+        const res = await service.listCompatibleAiModels({ provider: "ollama" });
+
+        expect(res.provider).toBe("ollama");
+        expect(res.inferenceModels.length).toBe(3);
+        expect(res.embeddingModels.length).toBe(1);
+
+        // 4b -> economy
+        const qwen4b = res.inferenceModels.find((m) => m.id === "qwen3.5:4b");
+        expect(qwen4b?.tier).toBe("economy");
+        expect(qwen4b?.costTier).toBe(1);
+
+        // 14b -> balanced
+        const qwen14b = res.inferenceModels.find((m) => m.id === "qwen2.5:14b");
+        expect(qwen14b?.tier).toBe("balanced");
+        expect(qwen14b?.costTier).toBe(2);
+
+        // 70b -> performance
+        const llama70b = res.inferenceModels.find((m) => m.id === "llama3:70b");
+        expect(llama70b?.tier).toBe("performance");
+        expect(llama70b?.costTier).toBe(3);
+
+        // embedding qwen -> 2560 dims
+        expect(res.embeddingModels[0].id).toBe("qwen3-embedding:4b");
+        expect(res.embeddingModels[0].defaultDimension).toBe(2560);
+
+        fetchSpy.mockRestore();
+      });
+    });
   });
 });
+

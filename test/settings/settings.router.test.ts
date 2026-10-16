@@ -263,4 +263,61 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       }
     });
   });
+
+  describe("POST /api/admin/settings/ai/models", () => {
+    it("rechaza la consulta de modelos si el usuario no es admin (403)", async () => {
+      currentRole = "agent";
+      const res = await request(app)
+        .post("/api/admin/settings/ai/models")
+        .send({ provider: "gemini" });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("retorna la lista de modelos de Gemini categorizados por costo/potencia sin exponer la API key", async () => {
+      currentRole = "admin";
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => ({
+          models: [
+            {
+              name: "models/gemini-2.5-flash",
+              displayName: "Gemini 2.5 Flash",
+              supportedGenerationMethods: ["generateContent"],
+            },
+            {
+              name: "models/gemini-2.0-flash-lite",
+              displayName: "Gemini 2.0 Flash Lite",
+              supportedGenerationMethods: ["generateContent"],
+            },
+            {
+              name: "models/text-embedding-004",
+              displayName: "Text Embedding 004",
+              supportedGenerationMethods: ["embedContent"],
+            },
+          ],
+        }),
+      })) as any;
+
+      try {
+        const res = await request(app)
+          .post("/api/admin/settings/ai/models")
+          .send({ provider: "gemini", apiKey: "AIzaCustomLiveKey" });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.provider).toBe("gemini");
+        expect(res.body.data.inferenceModels).toHaveLength(2);
+        expect(res.body.data.embeddingModels).toHaveLength(1);
+
+        // Seguridad: Cero fugas de credenciales en la respuesta
+        expect(JSON.stringify(res.body)).not.toContain("AIzaCustomLiveKey");
+        expect(res.body.data.apiKey).toBeUndefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });
+

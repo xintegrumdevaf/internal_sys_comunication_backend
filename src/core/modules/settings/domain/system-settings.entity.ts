@@ -102,3 +102,30 @@ export interface TestConnectionResult {
   warning?: boolean;
   details?: Record<string, unknown>;
 }
+
+/**
+ * Clasificación y metadatos de modelos de IA compatibles para inferencia o embeddings.
+ */
+export type AiModelType = "inference" | "embedding";
+export type AiModelTier = "economy" | "balanced" | "performance" | "specialized";
+
+export interface AiModelInfo {
+  id: string;
+  name: string;
+  provider: "gemini" | "ollama";
+  type: AiModelType;
+  tier: AiModelTier;
+  tierLabel: string;
+  description?: string;
+  recommended?: boolean;
+  costTier: 1 | 2 | 3;
+  contextWindow?: number;
+  defaultDimension?: number;
+}
+
+export interface ListAiModelsResult {
+  provider: "gemini" | "ollama";
+  inferenceModels: AiModelInfo[];
+  embeddingModels: AiModelInfo[];
+}
+

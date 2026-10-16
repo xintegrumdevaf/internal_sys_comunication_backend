@@ -93,6 +93,26 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   });
 
   /**
+   * POST /api/admin/settings/ai/models
+   * Consulta en tiempo real los modelos disponibles directamente desde la API del proveedor
+   * (Google Gemini u Ollama) categorizados por costo, rendimiento y tipo.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/ai/models", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      const result = await settingsService.listCompatibleAiModels(req.body);
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+
+  /**
    * POST /api/admin/settings/test-channels
    * Prueba en vivo las credenciales del canal de mensajería (Meta Cloud API o Zernio).
    * Exclusivo para administradores.
