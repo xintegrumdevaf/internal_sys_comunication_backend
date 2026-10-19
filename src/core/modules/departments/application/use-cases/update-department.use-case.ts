@@ -64,6 +64,18 @@ export class UpdateDepartmentUseCase {
 
     if (input.patch.cases && Array.isArray(input.patch.cases)) {
       const slug = updated.slug;
+
+      // Sincronizar casos: eliminar los que existían pero fueron quitados del formulario
+      const existingCases = await this.deps.departmentRepo.listRoutings(department.id);
+      const incomingIds = new Set(
+        input.patch.cases.filter((c) => c.id).map((c) => c.id!),
+      );
+      for (const existing of existingCases) {
+        if (!incomingIds.has(existing.id)) {
+          await this.deps.departmentRepo.deleteRouting(existing.id);
+        }
+      }
+
       for (const item of input.patch.cases) {
         const normalizedLabel = item.label
           .normalize("NFD")
