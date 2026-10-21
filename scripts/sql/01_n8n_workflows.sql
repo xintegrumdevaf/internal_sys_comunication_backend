@@ -41,39 +41,31 @@ COMMIT; -- O haz ROLLBACK si algo no quedó bien.
 
 
 -- ----------------------------------------------------------------------------
--- 3. ACTUALIZACIÓN INDIVIDUAL POR ACCIÓN
+-- 3. ACTUALIZACIÓN INDIVIDUAL POR ACCIÓN (LOS 4 WORKFLOWS ACTIVOS EN N8N)
 -- ----------------------------------------------------------------------------
+-- 1. Validar cliente y contratos en CRM / Google Sheets:
 UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/find-client-contract', updated_at = NOW()
+SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/find-client-contract', active = true, updated_at = NOW()
 WHERE action = 'VALIDATE_CLIENT';
 
+-- 2. Consultar saldo / deuda en Google Sheets:
 UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/check-balance', updated_at = NOW()
+SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/check-balance', active = true, updated_at = NOW()
 WHERE action = 'CHECK_BALANCE';
 
+-- 3. Registrar comprobante de pago:
 UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/do-diagnostic', updated_at = NOW()
-WHERE action = 'DIAGNOSTIC';
-
-UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/continue-diagnostic', updated_at = NOW()
-WHERE action = 'CONTINUE_DIAGNOSTIC';
-
-UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/record-payment', updated_at = NOW()
+SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/record-payment', active = true, updated_at = NOW()
 WHERE action = 'RECORD_PAYMENT';
 
+-- 4. Solicitud de cuenta bancaria:
 UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/apply-bank-account', updated_at = NOW()
+SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/apply-bank-account', active = true, updated_at = NOW()
 WHERE action = 'APPLY_BANK_ACCOUNT';
 
-UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/webhook/query-knowledge-base', updated_at = NOW()
-WHERE action = 'QUERY_KNOWLEDGE_BASE';
-
-UPDATE n8n_workflow_registry
-SET url = 'http://n8n-hf0cquxxn2xkitg4aiyb8zyh.187.77.20.87.sslip.io/form/cargar-documentos', updated_at = NOW()
-WHERE action = 'UPLOAD_RAG_DOCUMENT';
+-- NOTA: Las siguientes acciones corren NATIVAMENTE en Node.js (Microservicio MikroTik y RAG pgvector):
+-- - DIAGNOSTIC / CONTINUE_DIAGNOSTIC (CompositeActionGateway -> MikrotikDiagnosticAdapter)
+-- - QUERY_KNOWLEDGE_BASE / UPLOAD_RAG_DOCUMENT (RagService nativo con pgvector y embeddings directos)
 
 
 -- ----------------------------------------------------------------------------
