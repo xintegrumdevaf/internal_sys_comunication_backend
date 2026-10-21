@@ -3,16 +3,21 @@ import type { Logger } from "../../../../../shared/logging/logger";
 import type { SystemSettingsRepositoryPort } from "../ports/system-settings.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import { DomainError } from "../../../../../shared/errors/domain-errors";
 import {
   type WhatsAppChannelSettings,
   type AiProviderSettings,
   type SystemSetupStatus,
   type TestConnectionResult,
+  type AiModelInfo,
+  type ListAiModelsResult,
+  type AiModelTier,
   WhatsAppChannelSettingsSchema,
   AiProviderSettingsSchema,
   maskSecret,
   mergeSecret,
 } from "../../domain/system-settings.entity";
+
 
 const CHANNEL_SETTINGS_KEY = "channels.whatsapp";
 const AI_SETTINGS_KEY = "ai.provider";
@@ -530,4 +535,262 @@ export class SystemSettingsService {
       }
     }
   }
+
+  /**
+   * Consulta dinámicamente los modelos compatibles directamente desde la API del proveedor
+   * (Google Gemini o Ollama), categorizados por costo, potencia y tipo (inferencia o embeddings).
+   * Resguarda secretos: nunca expone la API key en texto plano ni requiere reenviarla si ya existe.
+   */
+  async listCompatibleAiModels(input?: {
+    provider?: "gemini" | "ollama";
+    apiKey?: string;
+    baseUrl?: string;
+  }): Promise<ListAiModelsResult> {
+    const current = await this.getAiSettings();
+    const provider = input?.provider ?? current.provider;
+
+    if (provider === "gemini") {
+      const apiKey = mergeSecret(input?.apiKey, current.geminiApiKey);
+      if (!apiKey || apiKey.trim() === "") {
+        throw new DomainError("VALIDATION_ERROR", "API Key de Gemini no configurada");
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`;
+        const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+          const msg = errData?.error?.message || `HTTP ${res.status}`;
+          throw new DomainError("AI_ERROR", `Error de Gemini API: ${msg}`);
+        }
+
+        interface RawGeminiModel {
+          name: string;
+          displayName?: string;
+          description?: string;
+          supportedGenerationMethods?: string[];
+          inputTokenLimit?: number;
+          outputTokenLimit?: number;
+        }
+
+        const data = (await res.json()) as { models?: RawGeminiModel[] };
+        const rawList = data.models || [];
+
+        const inferenceModels: AiModelInfo[] = [];
+        const embeddingModels: AiModelInfo[] = [];
+
+        for (const m of rawList) {
+          const id = m.name.replace(/^models\//, "");
+          const methods = m.supportedGenerationMethods || [];
+
+          // Excluir modelos internos, legacy obsoletos o que no aplican a texto/NLU
+          if (
+            id.startsWith("imagen") ||
+            id.startsWith("aqa") ||
+            id.startsWith("tts") ||
+            id.startsWith("whisper") ||
+            id.includes("gecko") ||
+            id.includes("embedding-001") ||
+            id === "gemini-1.0-pro"
+          ) {
+            continue;
+          }
+
+          // Clasificación de Inferencia
+          if (methods.includes("generateContent")) {
+            let tier: AiModelTier = "balanced";
+            let tierLabel = "Rápido y Balanceado";
+            let costTier: 1 | 2 | 3 = 2;
+            let recommended = false;
+
+            if (id.includes("flash-lite") || id.includes("8b")) {
+              tier = "economy";
+              tierLabel = "Ultra Económico (Más barato)";
+              costTier = 1;
+            } else if (id.includes("pro") || id.includes("ultra")) {
+              tier = "performance";
+              tierLabel = "Más Potente (Máximo razonamiento)";
+              costTier = 3;
+            } else if (id.includes("2.5-flash")) {
+              tier = "balanced";
+              tierLabel = "Recomendado (Rápido y Óptimo)";
+              costTier = 2;
+              recommended = true;
+            } else if (id.includes("flash")) {
+              tier = "economy";
+              tierLabel = "Económico y Rápido";
+              costTier = 1;
+            }
+
+            inferenceModels.push({
+              id,
+              name: m.displayName || id,
+              provider: "gemini",
+              type: "inference",
+              tier,
+              tierLabel,
+              description: m.description,
+              recommended,
+              costTier,
+              contextWindow: m.inputTokenLimit,
+            });
+          }
+
+          // Clasificación de Embeddings
+          if (methods.includes("embedContent") || methods.includes("batchEmbedContents")) {
+            const isDefault = id === "text-embedding-004";
+            embeddingModels.push({
+              id,
+              name: m.displayName || id,
+              provider: "gemini",
+              type: "embedding",
+              tier: isDefault ? "balanced" : "specialized",
+              tierLabel: isDefault ? "Estándar Google (768 dims, Recomendado)" : "Embeddings Google (768 dims)",
+              description: m.description,
+              recommended: isDefault,
+              costTier: 1,
+              defaultDimension: 768,
+            });
+          }
+        }
+
+        inferenceModels.sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return a.costTier - b.costTier;
+        });
+
+        embeddingModels.sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return 0;
+        });
+
+        return {
+          provider: "gemini",
+          inferenceModels,
+          embeddingModels,
+        };
+      } catch (err: unknown) {
+        if (err instanceof DomainError) throw err;
+        throw new DomainError(
+          "AI_ERROR",
+          `No se pudieron obtener modelos de Gemini: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else {
+      // Ollama
+      const baseUrl = (input?.baseUrl || current.ollamaBaseUrl || "http://localhost:11434").replace(/\/$/, "");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+
+      try {
+        const url = `${baseUrl}/api/tags`;
+        const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+
+        if (!res.ok) {
+          throw new DomainError("AI_ERROR", `Ollama respondió HTTP ${res.status}`);
+        }
+
+        interface RawOllamaModel {
+          name: string;
+          model?: string;
+          details?: {
+            parameter_size?: string;
+            family?: string;
+            quantization_level?: string;
+          };
+        }
+
+        const data = (await res.json()) as { models?: RawOllamaModel[] };
+        const rawList = data.models || [];
+
+        const inferenceModels: AiModelInfo[] = [];
+        const embeddingModels: AiModelInfo[] = [];
+
+        for (const m of rawList) {
+          const id = m.name;
+          const lower = id.toLowerCase();
+          const paramSize = m.details?.parameter_size || "";
+
+          if (lower.includes("embed") || lower.includes("bge") || lower.includes("minilm")) {
+            let dim = 768;
+            if (lower.includes("qwen")) dim = 2560;
+            else if (lower.includes("bge-m3")) dim = 1024;
+            else if (lower.includes("minilm")) dim = 384;
+
+            embeddingModels.push({
+              id,
+              name: id,
+              provider: "ollama",
+              type: "embedding",
+              tier: "balanced",
+              tierLabel: `Embeddings Local (${dim} dims)`,
+              costTier: 1,
+              recommended: lower.includes("qwen3-embedding") || lower.includes("bge-m3"),
+              defaultDimension: dim,
+            });
+          } else {
+            const match = paramSize.match(/^(\d+(?:\.\d+)?)/);
+            const paramValue = match?.[1];
+            const numParams = paramValue ? parseFloat(paramValue) : 0;
+
+            let tier: AiModelTier = "balanced";
+            let tierLabel = `Equilibrado (${paramSize || "Estándar"})`;
+            let costTier: 1 | 2 | 3 = 2;
+            let recommended = false;
+
+            if (numParams > 0 && numParams <= 5) {
+              tier = "economy";
+              tierLabel = `Ligero (${paramSize}) / Bajo consumo VRAM`;
+              costTier = 1;
+              if (lower.includes("qwen3.5:4b") || lower.includes("qwen2.5:3b")) recommended = true;
+            } else if (numParams > 16) {
+              tier = "performance";
+              tierLabel = `Alta Potencia (${paramSize}) / Requiere GPU dedicada`;
+              costTier = 3;
+            } else {
+              tier = "balanced";
+              tierLabel = `Equilibrado (${paramSize || "7B-14B"})`;
+              costTier = 2;
+              if (lower.includes("qwen2.5:7b") || lower.includes("llama3")) recommended = true;
+            }
+
+            inferenceModels.push({
+              id,
+              name: id,
+              provider: "ollama",
+              type: "inference",
+              tier,
+              tierLabel,
+              recommended,
+              costTier,
+            });
+          }
+        }
+
+        inferenceModels.sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return a.costTier - b.costTier;
+        });
+
+        return {
+          provider: "ollama",
+          inferenceModels,
+          embeddingModels,
+        };
+      } catch (err: unknown) {
+        if (err instanceof DomainError) throw err;
+        throw new DomainError(
+          "AI_ERROR",
+          `No se pudieron obtener modelos de Ollama (${baseUrl}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
 }
+

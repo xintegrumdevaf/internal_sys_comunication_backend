@@ -68,7 +68,7 @@
       "id": "set-unauth-qkb",
       "name": "Unauthorized Body",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         512,
         288

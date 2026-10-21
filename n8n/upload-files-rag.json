@@ -16,7 +16,7 @@
       "id": "form-rag",
       "name": "Cargar documentos",
       "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.6,
+      "typeVersion": 2.5,
       "position": [
         0,
         0

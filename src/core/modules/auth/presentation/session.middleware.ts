@@ -27,7 +27,9 @@ export function createSessionMiddleware(deps: SessionMiddlewareDeps) {
     req.agent = null;
     req.sessionToken = null;
 
-    const token = parseCookies(req.header("cookie"))[SESSION_COOKIE_NAME];
+    const authHeader = req.header("authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+    const token = bearerToken || parseCookies(req.header("cookie"))[SESSION_COOKIE_NAME];
     if (!token) {
       next();
       return;

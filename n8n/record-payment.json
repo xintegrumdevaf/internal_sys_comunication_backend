@@ -66,7 +66,7 @@
       "id": "set-unauth-rp",
       "name": "Unauthorized Body",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         440,
         220
@@ -266,7 +266,7 @@
       "id": "set-ok-rp",
       "name": "Format Recorded",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         1760,
         -200
@@ -281,7 +281,7 @@
       "id": "set-err-rp",
       "name": "Format Cached Or Error",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         1100,
         40

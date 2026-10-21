@@ -71,7 +71,7 @@
         192
       ],
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5
+      "typeVersion": 3.4
     },
     {
       "parameters": {
@@ -227,8 +227,7 @@
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate"
+    "executionOrder": "v1"
   },
   "staticData": null,
   "meta": null,

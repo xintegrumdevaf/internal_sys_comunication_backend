@@ -68,7 +68,7 @@
       "id": "set-unauth-ba",
       "name": "Unauthorized Body",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         448,
         208
@@ -133,7 +133,7 @@
       "id": "set-ok-ba",
       "name": "Format Success",
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5,
+      "typeVersion": 3.4,
       "position": [
         880,
         -48

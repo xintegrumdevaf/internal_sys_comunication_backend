@@ -138,8 +138,7 @@
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false,
-    "binaryMode": "separate"
+    "availableInMCP": false
   },
   "staticData": null,
   "pinData": {},

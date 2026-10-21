@@ -71,7 +71,7 @@
         180
       ],
       "type": "n8n-nodes-base.set",
-      "typeVersion": 3.5
+      "typeVersion": 3.4
     },
     {
       "id": "resp-unauth-cd",

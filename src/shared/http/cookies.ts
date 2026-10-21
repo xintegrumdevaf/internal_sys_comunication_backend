@@ -38,10 +38,11 @@ export function parseCookies(header: string | undefined): Record<string, string>
  * desarrollo.
  */
 export function sessionCookieOptions(env: Env, ttlSeconds: number): CookieOptions {
+  const isHttps = env.APP_PUBLIC_URL?.startsWith("https://") ?? false;
   return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    sameSite: isHttps ? "none" : "lax",
+    secure: isHttps,
     path: "/",
     maxAge: ttlSeconds * 1000,
   };
