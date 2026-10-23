@@ -193,6 +193,7 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
         appendEvent: async () => {},
         listEvents: async () => [],
         countActiveCasesByAgent: async () => ({}),
+        getDashboardMetrics: async () => ({} as any),
       };
 
       const arbitration = new CaseArbitrationService(caseRepoFake, silentLogger, routingService);
@@ -229,6 +230,7 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
           appendEvent: async () => {},
           listEvents: async () => [],
           countActiveCasesByAgent: async () => ({}),
+          getDashboardMetrics: async () => ({} as any),
         },
         silentLogger,
         routingService,

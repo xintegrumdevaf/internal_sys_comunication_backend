@@ -45,4 +45,5 @@ export interface DepartmentRepositoryPort {
   updateRouting(id: string, input: UpdateDepartmentCaseRoutingInput): Promise<DepartmentCaseRouting>;
   deleteRouting(id: string): Promise<void>;
   findRoutingByIntent(intentKey: string): Promise<DepartmentCaseRouting | null>;
+  countActiveCasesByDepartment(): Promise<Record<string, number>>;
 }

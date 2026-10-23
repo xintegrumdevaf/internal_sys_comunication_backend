@@ -6,6 +6,16 @@ export type AnalyticsOverviewDto = {
   avgResolutionTimeMinutes: number | null;
   avgQueueWaitTimeSeconds: number | null;
   escalationRate: number; // Porcentaje (0 - 100)
+  escalatedCases?: number;
+  unassignedCases?: number;
+  unattendedCases?: number;
+};
+
+export type DepartmentDistributionItem = {
+  departmentId: string;
+  departmentName: string;
+  count: number;
+  percentage: number;
 };
 
 export type WorkflowDistributionItem = {
@@ -31,6 +41,7 @@ export type CasesDistributionDto = {
   byWorkflow: WorkflowDistributionItem[];
   byFinalStatus: FinalStatusDistributionItem[];
   topEscalationReasons: EscalationReasonItem[];
+  byDepartment?: DepartmentDistributionItem[];
 };
 
 export type WorkflowDropOffItem = {
@@ -70,6 +81,9 @@ export type AgentPerformanceDto = {
   avgCordialityScore: number | null; // 0 - 100
   criticalAlertsCount: number; // findings high
   openCoachingNotesCount: number; // notas no reconocidas
+  // SLA y espera en vivo
+  unattendedActiveCases?: number; // Casos asignados activos donde el cliente espera respuesta
+  maxPendingWaitMinutes?: number | null; // El caso que lleva más minutos esperando respuesta humana
 };
 
 export type InfrastructureAlertDto = {

@@ -4,15 +4,19 @@ import type { DepartmentRepositoryPort } from "../ports/department.repository.po
 
 export type DepartmentWithCases = Department & {
   cases: DepartmentCaseRouting[];
+  activeCases: number;
+  active_cases: number;
+  casesCount: number;
 };
 
 export class ListDepartmentsUseCase {
   constructor(private readonly departmentRepo: DepartmentRepositoryPort) {}
 
   async execute(): Promise<DepartmentWithCases[]> {
-    const [departments, routings] = await Promise.all([
+    const [departments, routings, activeCasesMap] = await Promise.all([
       this.departmentRepo.list(),
       this.departmentRepo.listRoutings(),
+      this.departmentRepo.countActiveCasesByDepartment(),
     ]);
 
     const routingsByDept = new Map<string, DepartmentCaseRouting[]>();
@@ -22,9 +26,15 @@ export class ListDepartmentsUseCase {
       routingsByDept.set(r.departmentId, list);
     }
 
-    return departments.map((d) => ({
-      ...d,
-      cases: routingsByDept.get(d.id) ?? [],
-    }));
+    return departments.map((d) => {
+      const activeCases = activeCasesMap[d.id] ?? 0;
+      return {
+        ...d,
+        cases: routingsByDept.get(d.id) ?? [],
+        activeCases,
+        active_cases: activeCases,
+        casesCount: activeCases,
+      };
+    });
   }
 }

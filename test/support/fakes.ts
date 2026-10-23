@@ -472,6 +472,10 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
     return false;
   }
 
+  async countActiveCasesByDepartment(): Promise<Record<string, number>> {
+    return {};
+  }
+
   async listRoutings(departmentId?: string): Promise<DepartmentCaseRouting[]> {
     const all = [...this.routings.values()];
     if (departmentId) return all.filter((r) => r.departmentId === departmentId);

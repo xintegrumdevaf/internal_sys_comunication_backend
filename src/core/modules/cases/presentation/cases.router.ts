@@ -76,7 +76,10 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
     try {
       const agent = requireAuth(req);
       const userId = (typeof req.query.userId === "string" && req.query.userId) || agent.id;
-      const data = await deps.getDashboard.execute(userId);
+      const data = await deps.getDashboard.execute({
+        actor: agent,
+        targetUserId: userId,
+      });
       res.json({ data });
     } catch (error) {
       next(error);

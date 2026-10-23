@@ -163,6 +163,24 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
     return parseInt(rows[0]!.count, 10) > 0;
   }
 
+  async countActiveCasesByDepartment(): Promise<Record<string, number>> {
+    const query = `
+      SELECT COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) AS department_id,
+             COUNT(*)::int AS active_cases
+      FROM "case" c
+      WHERE c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE', 'WAITING_USER')
+      GROUP BY 1;
+    `;
+    const { rows } = await this.pool.query<{ department_id: string | null; active_cases: number }>(query);
+    const map: Record<string, number> = {};
+    for (const row of rows) {
+      if (row.department_id) {
+        map[row.department_id] = Number(row.active_cases);
+      }
+    }
+    return map;
+  }
+
   // --- Enrutamiento de casos e intenciones ---
 
   async listRoutings(departmentId?: string): Promise<DepartmentCaseRouting[]> {

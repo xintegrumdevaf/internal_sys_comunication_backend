@@ -8,6 +8,8 @@ import type {
   CaseAggregate,
   CaseRepositoryPort,
   CreateCaseInput,
+  DashboardMetricsInput,
+  DashboardMetricsResult,
 } from "../../src/core/modules/cases/application/ports/case.repository.port";
 import type {
   ExecuteActionParams,
@@ -207,6 +209,27 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
       }
     }
     return result;
+  }
+
+  async getDashboardMetrics(input: DashboardMetricsInput): Promise<DashboardMetricsResult> {
+    const all = [...this.cases.values()];
+    const myCases = all.filter((c) => c.assignedAgentId === input.targetUserId);
+    const active = all.filter((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
+    const myActive = myCases.filter((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
+    const waiting = myCases.filter((c) => c.status === "WAITING_USER");
+    const unassigned = all.filter((c) => c.status === "ESCALATED" && !c.assignedAgentId);
+
+    return {
+      openConversations: all.length > 0 ? all.length : 1,
+      myAssignedCases: myActive.length,
+      escalatedPending: unassigned.length,
+      unassignedQueue: unassigned.length,
+      waitingUser: waiting.length,
+      unattendedCases: myActive.length,
+      departmentCases: active.length,
+      teamLoad: [],
+      departmentBreakdown: [],
+    };
   }
 }
 
