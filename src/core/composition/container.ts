@@ -666,10 +666,8 @@ export function createContainer(): Container {
     logger: casesLogger,
   });
   const getDashboard = new GetDashboardUseCase({
-    conversationRepo,
     caseRepo,
     agentRepo,
-    escalationRepo,
   });
 
   // --- Analíticas operativas y gerenciales (Admin / Managers) ---

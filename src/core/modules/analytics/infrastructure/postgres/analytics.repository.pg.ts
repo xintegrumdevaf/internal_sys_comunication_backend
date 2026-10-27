@@ -25,7 +25,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                c.status,
                c.created_at,
                c.updated_at,
-               c.department_id,
+               COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) AS department_id,
                EXISTS (
                  SELECT 1 FROM escalation e WHERE e.case_id = c.id
                ) AS was_escalated,
@@ -34,7 +34,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                ) AS had_human_agent
         FROM "case" c
         WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
       ),
       queue_waits AS (
         SELECT EXTRACT(EPOCH FROM (
@@ -48,13 +48,21 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         FROM escalation e
         JOIN "case" c ON c.id = e.case_id
         WHERE e.created_at >= $1 AND e.created_at <= $2
-          AND ($3::uuid[] IS NULL OR e.department_id = ANY($3::uuid[]))
+          AND ($3::uuid[] IS NULL OR COALESCE(e.department_id, c.department_id) = ANY($3::uuid[]))
       )
       SELECT
         COUNT(*)::int AS total_cases,
         (SELECT COUNT(*)::int FROM "case" c_live
          WHERE c_live.status IN ('NEW', 'ACTIVE', 'WAITING_USER', 'PAUSED', 'ESCALATED', 'HUMAN_ACTIVE')
-           AND ($3::uuid[] IS NULL OR c_live.department_id = ANY($3::uuid[]))) AS active_cases,
+           AND ($3::uuid[] IS NULL OR COALESCE(c_live.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_live.id LIMIT 1)) = ANY($3::uuid[]))) AS active_cases,
+        (SELECT COUNT(*)::int FROM "case" c_live
+         WHERE c_live.status = 'ESCALATED' AND c_live.assigned_agent_id IS NULL
+           AND ($3::uuid[] IS NULL OR COALESCE(c_live.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_live.id LIMIT 1)) = ANY($3::uuid[]))) AS unassigned_cases,
+        (SELECT COUNT(*)::int FROM "case" c_live
+         JOIN conversation conv ON conv.id = c_live.conversation_id
+         WHERE c_live.status IN ('ESCALATED', 'HUMAN_ACTIVE') AND c_live.assigned_agent_id IS NOT NULL
+           AND (conv.unread_count > 0 OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c_live.id AND m.author = 'agent'))
+           AND ($3::uuid[] IS NULL OR COALESCE(c_live.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_live.id LIMIT 1)) = ANY($3::uuid[]))) AS unattended_cases,
         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_cases,
         COUNT(*) FILTER (WHERE status = 'COMPLETED' AND NOT was_escalated AND NOT had_human_agent)::int AS bot_completed_cases,
         COUNT(*) FILTER (WHERE was_escalated)::int AS escalated_cases,
@@ -71,6 +79,8 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
     const completedCases = Number(r.completed_cases ?? 0);
     const botCompletedCases = Number(r.bot_completed_cases ?? 0);
     const escalatedCases = Number(r.escalated_cases ?? 0);
+    const unassignedCases = Number(r.unassigned_cases ?? 0);
+    const unattendedCases = Number(r.unattended_cases ?? 0);
 
     const botContainmentRate = completedCases > 0
       ? Math.round((botCompletedCases / completedCases) * 1000) / 10
@@ -96,6 +106,9 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       avgResolutionTimeMinutes,
       avgQueueWaitTimeSeconds,
       escalationRate,
+      escalatedCases,
+      unassignedCases,
+      unattendedCases,
     };
   }
 
@@ -109,7 +122,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       SELECT c.workflow_type, COUNT(*)::int AS count
       FROM "case" c
       WHERE c.created_at >= $1 AND c.created_at <= $2
-        AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
       GROUP BY c.workflow_type
       ORDER BY count DESC;
     `;
@@ -120,7 +133,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       SELECT c.status, COUNT(*)::int AS count
       FROM "case" c
       WHERE c.created_at >= $1 AND c.created_at <= $2
-        AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
       GROUP BY c.status
       ORDER BY count DESC;
     `;
@@ -132,12 +145,26 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       FROM escalation e
       JOIN "case" c ON c.id = e.case_id
       WHERE e.created_at >= $1 AND e.created_at <= $2
-        AND ($3::uuid[] IS NULL OR e.department_id = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR COALESCE(e.department_id, c.department_id) = ANY($3::uuid[]))
       GROUP BY e.reason
       ORDER BY count DESC
       LIMIT 5;
     `;
     const reasonsResult = await this.pool.query(reasonsQuery, [filter.from, filter.to, scopedDept]);
+
+    // 4. By Department
+    const departmentQuery = `
+      SELECT COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) AS department_id,
+             d.name AS department_name,
+             COUNT(*)::int AS count
+      FROM "case" c
+      LEFT JOIN department d ON d.id = COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1))
+      WHERE c.created_at >= $1 AND c.created_at <= $2
+        AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+      GROUP BY 1, 2
+      ORDER BY count DESC;
+    `;
+    const departmentResult = await this.pool.query(departmentQuery, [filter.from, filter.to, scopedDept]);
 
     const totalCases = statusResult.rows.reduce((acc, row) => acc + Number(row.count), 0);
     const totalEscalations = reasonsResult.rows.reduce((acc, row) => acc + Number(row.count), 0);
@@ -159,6 +186,12 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         count: Number(row.count),
         percentage: totalEscalations > 0 ? Math.round((Number(row.count) / totalEscalations) * 1000) / 10 : 0,
       })),
+      byDepartment: departmentResult.rows.map((row) => ({
+        departmentId: row.department_id || "unassigned",
+        departmentName: row.department_name || "Sin Departamento",
+        count: Number(row.count),
+        percentage: totalCases > 0 ? Math.round((Number(row.count) / totalCases) * 1000) / 10 : 0,
+      })),
     };
   }
 
@@ -173,7 +206,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                c.status,
                c.created_at,
                c.updated_at,
-               c.department_id,
+               COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) AS department_id,
                EXISTS (
                  SELECT 1 FROM escalation e WHERE e.case_id = c.id
                ) AS was_escalated,
@@ -182,7 +215,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                ) AS had_human_agent
         FROM "case" c
         WHERE c.created_at >= $1 AND c.created_at <= $2
-          AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
       )
       SELECT
         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_cases,
@@ -209,7 +242,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       FROM workflow_instance wi
       JOIN "case" c ON c.id = wi.case_id
       WHERE c.created_at >= $1 AND c.created_at <= $2
-        AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
         AND (
           EXISTS (SELECT 1 FROM escalation e WHERE e.case_id = c.id)
           OR c.status IN ('EXPIRED', 'CANCELLED')
@@ -227,7 +260,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       FROM escalation e
       JOIN "case" c ON c.id = e.case_id
       WHERE e.created_at >= $1 AND e.created_at <= $2
-        AND ($3::uuid[] IS NULL OR e.department_id = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR COALESCE(e.department_id, c.department_id) = ANY($3::uuid[]))
         AND (e.department_id IS NULL OR e.reason ILIKE '%unclear%' OR e.reason ILIKE '%unsupported%');
     `;
     const triageResult = await this.pool.query(triageQuery, [filter.from, filter.to, scopedDept]);
@@ -280,13 +313,20 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         FROM "case" c
         WHERE c.status IN ('ESCALATED', 'HUMAN_ACTIVE')
           AND c.assigned_agent_id IS NOT NULL
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
         GROUP BY c.assigned_agent_id
       ),
       assigned_counts AS (
-        SELECT c.assigned_agent_id AS agent_id, COUNT(*)::int AS count
+        SELECT c.assigned_agent_id AS agent_id, COUNT(DISTINCT c.id)::int AS count
         FROM "case" c
+        LEFT JOIN workflow_event we ON we.case_id = c.id AND we.type IN ('CASE_ASSIGNED', 'CASE_CLAIMED', 'HUMAN_ASSIGNED')
         WHERE c.assigned_agent_id IS NOT NULL
-          AND c.created_at >= $1 AND c.created_at <= $2
+          AND (
+            (we.occurred_at >= $1 AND we.occurred_at <= $2)
+            OR (c.updated_at >= $1 AND c.updated_at <= $2)
+            OR (c.created_at >= $1 AND c.created_at <= $2)
+          )
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
         GROUP BY c.assigned_agent_id
       ),
       completed_stats AS (
@@ -307,6 +347,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         WHERE c.status = 'COMPLETED'
           AND c.assigned_agent_id IS NOT NULL
           AND c.updated_at >= $1 AND c.updated_at <= $2
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
         GROUP BY c.assigned_agent_id
       ),
       transferred_counts AS (
@@ -332,12 +373,37 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                      cc.created_at
                    )
                  )) * 1000
-               ) FILTER (WHERE cc.assigned_agent_id IS NOT NULL)::float AS avg_reply_ms
+               ) FILTER (
+                 WHERE cc.assigned_agent_id IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1 FROM message m
+                     WHERE (m.case_id = cc.id OR (m.conversation_id = cc.conversation_id AND m.agent_id = cc.assigned_agent_id))
+                       AND m.author = 'agent'
+                   )
+               )::float AS avg_reply_ms
         FROM "case" cc
-        WHERE cc.status = 'COMPLETED'
-          AND cc.assigned_agent_id IS NOT NULL
-          AND cc.updated_at >= $1 AND cc.updated_at <= $2
+        WHERE cc.assigned_agent_id IS NOT NULL
+          AND (
+            (cc.updated_at >= $1 AND cc.updated_at <= $2)
+            OR (cc.created_at >= $1 AND cc.created_at <= $2)
+          )
+          AND ($3::uuid[] IS NULL OR COALESCE(cc.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = cc.id LIMIT 1)) = ANY($3::uuid[]))
         GROUP BY cc.assigned_agent_id
+      ),
+      unattended_in_progress AS (
+        SELECT c.assigned_agent_id AS agent_id,
+               COUNT(*)::int AS unattended_count,
+               MAX(EXTRACT(EPOCH FROM (now() - conv.last_activity_at)) / 60)::float AS max_wait_minutes
+        FROM "case" c
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE c.status IN ('ESCALATED', 'HUMAN_ACTIVE')
+          AND c.assigned_agent_id IS NOT NULL
+          AND (
+            conv.unread_count > 0 
+            OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent')
+          )
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+        GROUP BY c.assigned_agent_id
       ),
       quality_stats AS (
         SELECT qr.agent_id,
@@ -366,7 +432,9 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         frs.avg_reply_ms,
         qs.avg_score AS avg_cordiality,
         COALESCE(qs.critical_alerts_count, 0)::int AS critical_alerts_count,
-        COALESCE(qs.open_notes_count, 0)::int AS open_notes_count
+        COALESCE(qs.open_notes_count, 0)::int AS open_notes_count,
+        COALESCE(uip.unattended_count, 0)::int AS unattended_active_cases,
+        uip.max_wait_minutes
       FROM scoped_agents sa
       LEFT JOIN active_now an ON an.agent_id = sa.id
       LEFT JOIN assigned_counts ac ON ac.agent_id = sa.id
@@ -374,6 +442,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       LEFT JOIN transferred_counts tc ON tc.agent_id = sa.id
       LEFT JOIN first_reply_stats frs ON frs.agent_id = sa.id
       LEFT JOIN quality_stats qs ON qs.agent_id = sa.id
+      LEFT JOIN unattended_in_progress uip ON uip.agent_id = sa.id
       ORDER BY sa.name ASC;
     `;
 
@@ -416,6 +485,10 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         avgCordialityScore,
         criticalAlertsCount: Number(r.critical_alerts_count ?? 0),
         openCoachingNotesCount: Number(r.open_notes_count ?? 0),
+        unattendedActiveCases: Number(r.unattended_active_cases ?? 0),
+        maxPendingWaitMinutes: r.max_wait_minutes !== null && r.max_wait_minutes !== undefined
+          ? Math.round(Number(r.max_wait_minutes))
+          : null,
       };
     });
   }

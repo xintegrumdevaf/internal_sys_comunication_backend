@@ -193,10 +193,8 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
       logger: silentLogger,
     });
     const getDashboard = new GetDashboardUseCase({
-      conversationRepo,
       caseRepo,
       agentRepo,
-      escalationRepo,
     });
     const takeControl = new TakeControlUseCase({
       conversationRepo,

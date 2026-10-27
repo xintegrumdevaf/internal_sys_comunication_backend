@@ -1,61 +1,94 @@
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
-import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
-import type { EscalationRepositoryPort } from "../../../escalation/application/ports/escalation.repository.port";
+import type { Agent } from "../../../departments/domain/agent.entity";
 
 export type DashboardDto = {
   userId: string;
+  role: "agent" | "manager" | "admin";
   openConversations: number;
   myAssignedCases: number;
   escalatedPending: number;
   waitingUser: number;
+  unattendedCases: number;
+  departmentCases?: number;
+  unassignedQueue?: number;
+  teamLoad?: Array<{ agentId: string; agentName: string; activeCases: number }>;
+  departmentBreakdown?: Array<{ departmentId: string | null; departmentName: string; activeCases: number }>;
 };
 
+export type GetDashboardInput =
+  | string
+  | {
+      actor: Agent;
+      targetUserId?: string;
+    };
+
 /**
- * KPIs mínimos para el agente autenticado (03_API_CONTRACT.md §C.1 dashboard).
+ * Cockpit operativo O(1) para el usuario autenticado (03_API_CONTRACT.md §C.1 dashboard).
+ * Ejecuta métricas segmentadas por rol (agent, manager, admin) en una sola pasada de base de datos.
  */
 export class GetDashboardUseCase {
   constructor(
     private readonly deps: {
-      conversationRepo: ConversationRepositoryPort;
       caseRepo: CaseRepositoryPort;
       agentRepo: AgentRepositoryPort;
-      escalationRepo: EscalationRepositoryPort;
     },
   ) {}
 
-  async execute(userId: string): Promise<DashboardDto> {
-    const agent = await this.deps.agentRepo.findById(userId);
-    if (!agent) {
+  async execute(input: GetDashboardInput): Promise<DashboardDto> {
+    let actor: Agent | null = null;
+    let targetUserId = "";
+
+    if (typeof input === "string") {
+      actor = await this.deps.agentRepo.findById(input);
+      targetUserId = input;
+    } else {
+      actor = input.actor;
+      targetUserId = input.targetUserId ?? input.actor.id;
+    }
+
+    if (!actor) {
       return {
-        userId,
+        userId: targetUserId,
+        role: "agent",
         openConversations: 0,
         myAssignedCases: 0,
         escalatedPending: 0,
         waitingUser: 0,
+        unattendedCases: 0,
       };
     }
 
-    const conversations = await this.deps.conversationRepo.list({ status: "open" });
-    let myAssignedCases = 0;
-    let waitingUser = 0;
-
-    for (const conv of conversations) {
-      if (!conv.activeCaseId) continue;
-      const aggregate = await this.deps.caseRepo.findById(conv.activeCaseId);
-      if (!aggregate) continue;
-      if (aggregate.case.assignedAgentId === userId) myAssignedCases += 1;
-      if (aggregate.case.status === "WAITING_USER") waitingUser += 1;
+    let departmentIds: string[] = [];
+    if (actor.role === "manager") {
+      const memberships = await this.deps.agentRepo.listMembershipDepartmentIds(actor.id);
+      const scoped = new Set<string>(memberships);
+      if (actor.primaryDepartmentId) {
+        scoped.add(actor.primaryDepartmentId);
+      }
+      departmentIds = [...scoped];
     }
 
-    const pending = await this.deps.escalationRepo.list({ status: "PENDING" });
+    const metrics = await this.deps.caseRepo.getDashboardMetrics({
+      actorId: actor.id,
+      role: actor.role,
+      targetUserId,
+      departmentIds,
+      primaryDepartmentId: actor.primaryDepartmentId ?? null,
+    });
 
     return {
-      userId,
-      openConversations: conversations.length,
-      myAssignedCases,
-      escalatedPending: pending.length,
-      waitingUser,
+      userId: targetUserId,
+      role: actor.role,
+      openConversations: metrics.openConversations,
+      myAssignedCases: metrics.myAssignedCases,
+      escalatedPending: metrics.escalatedPending,
+      waitingUser: metrics.waitingUser,
+      unattendedCases: metrics.unattendedCases,
+      departmentCases: metrics.departmentCases,
+      unassignedQueue: metrics.unassignedQueue,
+      teamLoad: metrics.teamLoad,
+      departmentBreakdown: metrics.departmentBreakdown,
     };
   }
 }

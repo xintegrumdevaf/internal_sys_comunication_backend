@@ -75,4 +75,30 @@ export interface CaseRepositoryPort {
    * con menor carga del departamento. Devuelve 0 para los ids sin casos.
    */
   countActiveCasesByAgent(agentIds: string[]): Promise<Record<string, number>>;
+
+  /**
+   * Métricas de inicio O(1) agregadas por rol (agent, manager, admin)
+   * ejecutadas en una sola pasada en base de datos.
+   */
+  getDashboardMetrics(input: DashboardMetricsInput): Promise<DashboardMetricsResult>;
 }
+
+export type DashboardMetricsInput = {
+  actorId: string;
+  role: "agent" | "manager" | "admin";
+  targetUserId: string;
+  departmentIds: string[];
+  primaryDepartmentId: string | null;
+};
+
+export type DashboardMetricsResult = {
+  openConversations: number;
+  myAssignedCases: number;
+  escalatedPending: number;
+  waitingUser: number;
+  unattendedCases: number;
+  departmentCases?: number;
+  unassignedQueue?: number;
+  teamLoad?: Array<{ agentId: string; agentName: string; activeCases: number }>;
+  departmentBreakdown?: Array<{ departmentId: string | null; departmentName: string; activeCases: number }>;
+};

@@ -11,6 +11,8 @@ import type {
   CaseAggregate,
   CaseRepositoryPort,
   CreateCaseInput,
+  DashboardMetricsInput,
+  DashboardMetricsResult,
 } from "../../application/ports/case.repository.port";
 
 import { sanitizeForPostgresJson } from "../../../../../shared/db/sanitize-json";
@@ -355,5 +357,191 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       result[row.assigned_agent_id] = Number(row.count);
     }
     return result;
+  }
+
+  async getDashboardMetrics(input: DashboardMetricsInput): Promise<DashboardMetricsResult> {
+    if (input.role === "agent") {
+      const query = `
+        WITH agent_cases AS (
+          SELECT c.id, c.status, conv.unread_count,
+                 EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
+          FROM "case" c
+          JOIN conversation conv ON conv.id = c.conversation_id
+          WHERE c.assigned_agent_id = $1::uuid
+            AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'WAITING_USER')
+        ),
+        open_convs AS (
+          SELECT COUNT(*)::int AS count
+          FROM conversation conv
+          WHERE conv.status = 'open'
+            AND EXISTS (
+              SELECT 1 FROM "case" c WHERE c.id = conv.active_case_id AND c.assigned_agent_id = $1::uuid
+            )
+        ),
+        dept_escalations AS (
+          SELECT COUNT(*)::int AS count
+          FROM escalation e
+          WHERE e.status = 'PENDING'
+            AND ($2::uuid IS NULL OR e.department_id = $2::uuid)
+        )
+        SELECT
+          COALESCE((SELECT count FROM open_convs), 0)::int AS open_conversations,
+          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
+          COALESCE((SELECT count FROM dept_escalations), 0)::int AS escalated_pending,
+          COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
+          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases
+        FROM agent_cases;
+      `;
+      const { rows } = await this.pool.query(query, [input.targetUserId, input.primaryDepartmentId]);
+      const r = rows[0] ?? {};
+      return {
+        openConversations: Number(r.open_conversations ?? 0),
+        myAssignedCases: Number(r.my_assigned_cases ?? 0),
+        escalatedPending: Number(r.escalated_pending ?? 0),
+        waitingUser: Number(r.waiting_user ?? 0),
+        unattendedCases: Number(r.unattended_cases ?? 0),
+      };
+    }
+
+    if (input.role === "manager") {
+      const deptIds = input.departmentIds && input.departmentIds.length > 0 ? input.departmentIds : null;
+      const query = `
+        WITH dept_scope AS (
+          SELECT unnest($2::uuid[]) AS dept_id
+        ),
+        dept_cases AS (
+          SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.unread_count,
+                 EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
+          FROM "case" c
+          JOIN conversation conv ON conv.id = c.conversation_id
+          WHERE (
+            ($2::uuid[] IS NOT NULL AND c.department_id IN (SELECT dept_id FROM dept_scope))
+            OR c.department_id IS NULL
+          )
+          AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'WAITING_USER', 'ACTIVE')
+        ),
+        dept_open_convs AS (
+          SELECT COUNT(*)::int AS count
+          FROM conversation conv
+          JOIN "case" c ON c.id = conv.active_case_id
+          WHERE conv.status = 'open'
+            AND (
+              ($2::uuid[] IS NOT NULL AND c.department_id IN (SELECT dept_id FROM dept_scope))
+              OR c.department_id IS NULL
+            )
+        ),
+        dept_escalations AS (
+          SELECT COUNT(*)::int AS count
+          FROM escalation e
+          WHERE e.status = 'PENDING'
+            AND (
+              ($2::uuid[] IS NOT NULL AND e.department_id IN (SELECT dept_id FROM dept_scope))
+              OR e.department_id IS NULL
+            )
+        ),
+        agent_loads AS (
+          SELECT a.id AS agent_id, a.name AS agent_name,
+                 COUNT(c.id)::int AS active_cases
+          FROM agent a
+          LEFT JOIN "case" c ON c.assigned_agent_id = a.id AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE')
+          WHERE a.active = true
+            AND (
+              $2::uuid[] IS NULL
+              OR a.primary_department_id IN (SELECT dept_id FROM dept_scope)
+              OR EXISTS (
+                SELECT 1 FROM agent_membership am
+                WHERE am.agent_id = a.id AND am.department_id IN (SELECT dept_id FROM dept_scope)
+              )
+            )
+          GROUP BY a.id, a.name
+          ORDER BY active_cases DESC, a.name ASC
+        )
+        SELECT
+          COALESCE((SELECT count FROM dept_open_convs), 0)::int AS open_conversations,
+          COALESCE((SELECT COUNT(*)::int FROM dept_cases WHERE assigned_agent_id = $1::uuid AND status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
+          COALESCE((SELECT count FROM dept_escalations), 0)::int AS escalated_pending,
+          COALESCE((SELECT count FROM dept_escalations), 0)::int AS unassigned_queue,
+          COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
+          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE')), 0)::int AS department_cases,
+          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
+          COALESCE((SELECT json_agg(json_build_object('agentId', agent_id, 'agentName', agent_name, 'activeCases', active_cases)) FROM agent_loads), '[]'::json) AS team_load
+        FROM dept_cases;
+      `;
+      const { rows } = await this.pool.query(query, [input.targetUserId, deptIds]);
+      const r = rows[0] ?? {};
+      return {
+        openConversations: Number(r.open_conversations ?? 0),
+        myAssignedCases: Number(r.my_assigned_cases ?? 0),
+        escalatedPending: Number(r.escalated_pending ?? 0),
+        unassignedQueue: Number(r.unassigned_queue ?? 0),
+        waitingUser: Number(r.waiting_user ?? 0),
+        departmentCases: Number(r.department_cases ?? 0),
+        unattendedCases: Number(r.unattended_cases ?? 0),
+        teamLoad: (r.team_load as Array<{ agentId: string; agentName: string; activeCases: number }>) ?? [],
+      };
+    }
+
+    // Role === "admin"
+    const query = `
+      WITH all_active_cases AS (
+        SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.unread_count,
+               EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
+        FROM "case" c
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'WAITING_USER', 'ACTIVE')
+      ),
+      all_open_convs AS (
+        SELECT COUNT(*)::int AS count
+        FROM conversation conv
+        WHERE conv.status = 'open'
+      ),
+      all_escalations AS (
+        SELECT COUNT(*)::int AS count
+        FROM escalation e
+        WHERE e.status = 'PENDING'
+      ),
+      dept_breakdown AS (
+        SELECT d.id AS department_id, d.name AS department_name,
+               COUNT(c.id)::int AS active_cases
+        FROM department d
+        LEFT JOIN "case" c ON c.department_id = d.id AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE', 'WAITING_USER')
+        WHERE d.active = true
+        GROUP BY d.id, d.name
+        ORDER BY active_cases DESC, d.name ASC
+      )
+      SELECT
+        COALESCE((SELECT count FROM all_open_convs), 0)::int AS open_conversations,
+        COALESCE((SELECT COUNT(*)::int FROM all_active_cases WHERE assigned_agent_id = $1::uuid AND status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
+        COALESCE((SELECT count FROM all_escalations), 0)::int AS escalated_pending,
+        COALESCE((SELECT count FROM all_escalations), 0)::int AS unassigned_queue,
+        COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
+        COALESCE(COUNT(*), 0)::int AS department_cases,
+        COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
+        COALESCE((SELECT json_agg(json_build_object(
+          'id', department_id,
+          'departmentId', department_id,
+          'department_id', department_id,
+          'name', department_name,
+          'departmentName', department_name,
+          'department_name', department_name,
+          'activeCases', active_cases,
+          'active_cases', active_cases,
+          'count', active_cases,
+          'casesCount', active_cases
+        )) FROM dept_breakdown), '[]'::json) AS department_breakdown
+      FROM all_active_cases;
+    `;
+    const { rows } = await this.pool.query(query, [input.targetUserId]);
+    const r = rows[0] ?? {};
+    return {
+      openConversations: Number(r.open_conversations ?? 0),
+      myAssignedCases: Number(r.my_assigned_cases ?? 0),
+      escalatedPending: Number(r.escalated_pending ?? 0),
+      unassignedQueue: Number(r.unassigned_queue ?? 0),
+      waitingUser: Number(r.waiting_user ?? 0),
+      departmentCases: Number(r.department_cases ?? 0),
+      unattendedCases: Number(r.unattended_cases ?? 0),
+      departmentBreakdown: (r.department_breakdown as Array<{ departmentId: string | null; departmentName: string; activeCases: number }>) ?? [],
+    };
   }
 }
