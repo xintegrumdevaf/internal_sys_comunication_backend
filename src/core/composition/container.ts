@@ -147,6 +147,14 @@ import { supportInternetWorkflow } from "../modules/cases/application/engine/def
 import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
 import { createGeneralInquiryWorkflow } from "../modules/cases/application/engine/definitions/general-inquiry.workflow";
 import { createHomeRelocationWorkflow } from "../modules/cases/application/engine/definitions/home-relocation.workflow";
+import {
+  createSalesWorkflow,
+  salesPackagesWorkflow,
+} from "../modules/cases/application/engine/definitions/sales.workflow";
+import { CoverageRepositoryPg } from "../modules/coverage/infrastructure/postgres/coverage.repository.pg";
+import { KmlParserService } from "../modules/coverage/application/services/kml-parser.service";
+import { CoverageService } from "../modules/coverage/application/services/coverage.service";
+import { createCoverageRouter } from "../modules/coverage/presentation/coverage.router";
 import { DepartmentResolverService } from "../modules/cases/application/services/department-resolver.service";
 import { CaseArbitrationService } from "../modules/cases/application/services/case-arbitration.service";
 import { ExpirationService } from "../modules/cases/application/services/expiration.service";
@@ -251,6 +259,7 @@ export type Container = {
   expirationService: ExpirationService;
   quickReplyCatalogService?: QuickReplyCatalogService;
   systemSettingsService: SystemSettingsService;
+  coverageService: CoverageService;
   shutdown: () => Promise<void>;
 };
 
@@ -448,17 +457,25 @@ export function createContainer(): Container {
     settingsService: systemSettingsService,
   });
 
-  // --- Motor de workflow (Etapa 2 + RAG unificado) ---
-  // SALES_PACKAGES ya no existe como workflow separado: sales.packages y sales.upgrade
-  // son respondidos por GENERAL_INQUIRY via RAG. Solo si el cliente quiere contratar/mejorar
-  // tras recibir la info → GENERAL_INQUIRY escala a ventas.
+  // --- Cobertura geográfica KML y Factibilidad Técnica ---
+  const coverageRepo = new CoverageRepositoryPg(pgPool);
+  const kmlParserService = new KmlParserService();
+  const coverageService = new CoverageService(coverageRepo, kmlParserService);
+  void coverageService.init().catch((err) => {
+    logger.warn({ err }, "Inicialización de CoverageService falló al arrancar");
+  });
+
+  // --- Motor de workflow (Etapa 2 + RAG unificado + Cobertura de Ventas) ---
   const generalInquiryWorkflow = createGeneralInquiryWorkflow(ragService);
   const homeRelocationWorkflow = createHomeRelocationWorkflow(ragService);
+  const salesWorkflow = createSalesWorkflow(ragService, coverageService);
   const workflowEngine = new WorkflowEngine([
     supportInternetWorkflow,
     billingBalanceWorkflow,
     generalInquiryWorkflow,
     homeRelocationWorkflow,
+    salesWorkflow,
+    salesPackagesWorkflow,
   ]);
   const departmentResolver = new DepartmentResolverService(departmentRepo, departmentRoutingService);
   const arbitrationService = new CaseArbitrationService(caseRepo, casesLogger, departmentRoutingService);
@@ -1073,6 +1090,7 @@ export function createContainer(): Container {
       syncCustomerIsp,
     }),
   );
+  app.use(createCoverageRouter({ coverageService }));
 
   app.use(createErrorHandler(logger));
 
@@ -1088,5 +1106,5 @@ export function createContainer(): Container {
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };
 
-  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, systemSettingsService, shutdown };
+  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, systemSettingsService, coverageService, shutdown };
 }

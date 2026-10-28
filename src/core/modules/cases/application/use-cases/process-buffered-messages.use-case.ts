@@ -72,10 +72,9 @@ export class ProcessBufferedMessagesUseCase {
       }
       if (!targetCase) {
         const cases = await this.deps.caseRepo.listByConversation(conversationId);
-        const recentCases = [...cases].reverse();
         targetCase =
-          recentCases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
-          recentCases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+          cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
           null;
       }
 
@@ -676,6 +675,17 @@ export class ProcessBufferedMessagesUseCase {
         continue;
       }
 
+      if (type === "location" || (message.filename && /([-+]?\d{1,2}\.\d+)\s*,\s*([-+]?\d{1,3}\.\d+)/.test(message.filename))) {
+        const coords = message.filename || (message.body?.match(/([-+]?\d{1,2}\.\d+)\s*,\s*([-+]?\d{1,3}\.\d+)/)?.[0]);
+        if (coords) {
+          parts.push(`Ubicación GPS: ${coords}`);
+        }
+        if (message.body && !message.body.startsWith("Ubicación GPS:") && message.body !== "📍 Location") {
+          parts.push(message.body);
+        }
+        continue;
+      }
+
       if (message.body.trim()) parts.push(message.body.trim());
     }
 
@@ -1002,11 +1012,15 @@ function seedPurposeEntities(
   if (intent === "billing.balance") {
     return { ...entities, billingPurpose: "balance" };
   }
-  // sales.upgrade → GENERAL_INQUIRY con flag wantsUpgrade para ofrecer especialista post-RAG
-  if (intent === "sales.upgrade") {
-    return { ...entities, wantsUpgrade: true };
+  if (intent === "sales.new_contract") {
+    return { ...entities, salesPurpose: "sales" };
   }
-  // sales.packages → GENERAL_INQUIRY puro — la question ya viene en entities desde el NLU
+  if (intent === "sales.plans") {
+    return { ...entities, salesPurpose: "plans" };
+  }
+  if (intent === "sales.upgrade") {
+    return { ...entities, wantsUpgrade: true, salesPurpose: "upgrade" };
+  }
   return entities;
 }
 
@@ -1018,6 +1032,18 @@ function seedInitialContext(workflowType: string, intent: string): CaseContext {
       data: {
         ...base.data,
         purpose: intent === "billing.record_payment" ? "record_payment" : "balance",
+      },
+    };
+  }
+  if (base.workflowType === "SALES" || base.workflowType === "SALES_PACKAGES") {
+    let purpose: "sales" | "plans" | "upgrade" = "sales";
+    if (intent === "sales.upgrade") purpose = "upgrade";
+    else if (intent === "sales.plans") purpose = "plans";
+    return {
+      ...base,
+      data: {
+        ...base.data,
+        purpose,
       },
     };
   }

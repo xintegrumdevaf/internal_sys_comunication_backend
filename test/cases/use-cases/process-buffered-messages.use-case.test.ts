@@ -6,7 +6,7 @@ import { DepartmentResolverService } from "../../../src/core/modules/cases/appli
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
 import { billingBalanceWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
-import { salesPackagesWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/sales-packages.workflow";
+import { salesWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/sales.workflow";
 import type {
   Interpretation,
   InterpretationPort,
@@ -50,7 +50,7 @@ function buildScenario() {
   const engine = new WorkflowEngine([
     supportInternetWorkflow,
     billingBalanceWorkflow,
-    salesPackagesWorkflow,
+    salesWorkflow,
   ]);
   const gateway = new N8nGatewayFake({
     VALIDATE_CLIENT: () => ({

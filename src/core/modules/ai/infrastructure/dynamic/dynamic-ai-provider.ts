@@ -46,12 +46,26 @@ export class DynamicAiProvider implements AIProviderPort {
 
   async transcribeAudio(mediaUrl: string, mimeType: string): Promise<{ transcript: string }> {
     const provider = await this.getActiveProvider();
-    return provider.transcribeAudio(mediaUrl, mimeType);
+    try {
+      return await provider.transcribeAudio(mediaUrl, mimeType);
+    } catch (error) {
+      if (provider !== this.geminiProvider) {
+        return this.geminiProvider.transcribeAudio(mediaUrl, mimeType);
+      }
+      throw error;
+    }
   }
 
   async extractReceiptData(mediaUrl: string, mimeType: string): Promise<ReceiptData> {
     const provider = await this.getActiveProvider();
-    return provider.extractReceiptData(mediaUrl, mimeType);
+    try {
+      return await provider.extractReceiptData(mediaUrl, mimeType);
+    } catch (error) {
+      if (provider !== this.geminiProvider) {
+        return this.geminiProvider.extractReceiptData(mediaUrl, mimeType);
+      }
+      throw error;
+    }
   }
 
   async analyzeAgentConversation(input: AnalyzeAgentConversationInput): Promise<QualityAnalysis> {

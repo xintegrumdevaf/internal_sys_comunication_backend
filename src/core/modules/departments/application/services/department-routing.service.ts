@@ -79,7 +79,10 @@ export class DepartmentRoutingService {
     if (prefix) {
       const byPrefix = this.cache.find((r) => {
         if (!r.intentKey.toLowerCase().startsWith(`${prefix}.`)) return false;
-        if (catalogWorkflow && r.workflowType.toUpperCase() !== catalogWorkflow.toUpperCase()) return false;
+        if (catalogWorkflow && r.workflowType.toUpperCase() !== catalogWorkflow.toUpperCase()) {
+          const isSalesFamily = prefix === "sales" && (r.workflowType === "SALES" || r.workflowType === "GENERAL_INQUIRY" || r.workflowType === "SALES_PACKAGES");
+          if (!isSalesFamily) return false;
+        }
         return true;
       });
       if (byPrefix) return byPrefix;
@@ -104,6 +107,7 @@ export class DepartmentRoutingService {
       HOME_RELOCATION: ["traslados", "traslado", "soporte", "support", "atencion"],
       BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos", "cuentas"],
       SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico", "averias"],
+      SALES: ["sales", "ventas", "comercial", "planes"],
       SALES_PACKAGES: ["sales", "ventas", "comercial", "planes"],
       GENERAL_INQUIRY: ["general", "atencion", "atencion-al-cliente", "recepcion"],
       billing: ["cartera", "billing", "facturacion", "cobros", "pagos"],
@@ -135,6 +139,7 @@ export class DepartmentRoutingService {
         HOME_RELOCATION: ["traslado", "traslados", "mudanza", "soporte", "support"],
         BILLING_BALANCE: ["cartera", "factura", "cobro", "pago", "billing", "saldo", "deuda"],
         SUPPORT_INTERNET: ["soporte", "tecnico", "support", "internet", "averia"],
+        SALES: ["venta", "comercial", "sales", "plan"],
         SALES_PACKAGES: ["venta", "comercial", "sales", "plan"],
         GENERAL_INQUIRY: ["general", "atencion", "recepcion"],
       };

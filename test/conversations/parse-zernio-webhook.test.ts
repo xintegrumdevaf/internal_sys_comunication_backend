@@ -103,6 +103,37 @@ describe("parseZernioWebhookPayload", () => {
     const messages = await parseZernioWebhookPayload(payload);
     expect(messages).toHaveLength(0);
   });
+
+  it("extrae correctamente ubicacion reenviada con metadata.location y senderPhoneNumber", async () => {
+    const payload = {
+      id: "evt_loc",
+      event: "message.received",
+      message: {
+        id: "msg_loc_1",
+        conversationId: "conv_xyz",
+        platformMessageId: "wamid.LOC123",
+        direction: "incoming",
+        message: "📍 Location",
+        senderPhoneNumber: "+593 99 857 6466",
+        senderName: "Jean",
+        metadata: {
+          location: {
+            latitude: -0.2661031,
+            longitude: -78.4977984,
+          },
+        },
+      },
+    };
+
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.waPhone).toBe("593998576466");
+    expect(normalized!.externalId).toBe("wamid.LOC123");
+    expect(normalized!.type).toBe("location");
+    expect(normalized!.filename).toBe("-0.2661031,-78.4977984");
+    expect(normalized!.mediaId).toBe("https://maps.google.com/?q=-0.2661031,-78.4977984");
+    expect(normalized!.body).toContain("Ubicación GPS: -0.2661031, -78.4977984");
+  });
 });
 
 describe("verifyZernioSignature", () => {

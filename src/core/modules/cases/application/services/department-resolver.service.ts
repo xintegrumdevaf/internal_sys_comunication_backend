@@ -27,6 +27,7 @@ export class DepartmentResolverService {
       HOME_RELOCATION: ["traslados", "traslado", "soporte", "support", "atencion"],
       BILLING_BALANCE: ["cartera", "billing", "facturacion", "cobros", "pagos"],
       SUPPORT_INTERNET: ["support", "soporte", "soporte-tecnico", "tecnico"],
+      SALES: ["sales", "ventas", "comercial"],
       SALES_PACKAGES: ["sales", "ventas", "comercial"],
       GENERAL_INQUIRY: ["general", "atencion", "atencion-al-cliente"],
       billing: ["cartera", "billing", "facturacion", "cobros", "pagos"],

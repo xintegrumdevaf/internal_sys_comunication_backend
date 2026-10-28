@@ -29,14 +29,24 @@ export const INTENT_CATALOG = [
     description: "envía o menciona un comprobante de pago",
   },
   {
-    intent: "sales.packages",
-    workflowType: "GENERAL_INQUIRY",
-    description: "pregunta por planes/paquetes/precios/velocidades — sirve por RAG; si quiere contratar → escala a ventas",
+    intent: "sales.new_contract",
+    workflowType: "SALES",
+    description: "quiere contratar o instalar el servicio nuevo de internet",
+  },
+  {
+    intent: "sales.plans",
+    workflowType: "SALES",
+    description: "pregunta por planes, precios, velocidades, paquetes o promociones",
   },
   {
     intent: "sales.upgrade",
+    workflowType: "SALES",
+    description: "quiere cambiar/mejorar su plan o aumentar velocidad",
+  },
+  {
+    intent: "sales.packages",
     workflowType: "GENERAL_INQUIRY",
-    description: "quiere cambiar/mejorar su plan — RAG informa, luego escala a ventas si confirma",
+    description: "(compatibilidad previa) planes y contratación",
   },
   {
     intent: "support.service_cancellation",

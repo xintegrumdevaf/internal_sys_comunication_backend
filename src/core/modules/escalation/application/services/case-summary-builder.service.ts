@@ -120,8 +120,9 @@ function describeProblem(workflowType: string, reason?: string, results?: Record
       return "Solicitud de traslado / cambio de domicilio";
     case "BILLING_BALANCE":
       return "Cliente consulta o gestiona facturación";
+    case "SALES":
     case "SALES_PACKAGES":
-      return "Cliente consulta paquetes / ventas";
+      return "Cliente consulta o solicita contratación de ventas";
     case "UNCLASSIFIED":
       return "Solicitud sin clasificar (triage)";
     default:

@@ -111,6 +111,18 @@ export function resolveReplyTemplate(input: {
       templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\nPor favor indícame cuál de ellos presenta el inconveniente (responde con el número 1, 2... o selecciónalo).`;
     } else if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
       templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
+    } else if (
+      outcome.nextState === "WAITING_USER_LOCATION" &&
+      typeof contextData.address === "string" &&
+      contextData.address.trim().length > 0
+    ) {
+      const addr = contextData.address.trim();
+      const coverage = contextData.coverage as { hasCoverage?: boolean; reason?: string } | undefined;
+      if (coverage && !coverage.hasCoverage) {
+        templateHint = `Revisamos la dirección que nos indicaste en "${addr}", pero actualmente no identificamos cobertura directa en ese sector en nuestros mapas de red de fibra óptica. Para verificar con total precisión si tu domicilio está en el límite de alguna zona con servicio, ¿podrías compartirnos tu ubicación GPS por WhatsApp o confirmarnos si deseas consultar otra dirección?`;
+      } else {
+        templateHint = `Recibimos tu dirección en "${addr}". Para verificar la factibilidad y cobertura exacta de fibra óptica en tu zona, por favor compártenos tu ubicación de WhatsApp 📎 o indícanos alguna referencia cercana.`;
+      }
     } else if (friendlyMissingFields && friendlyMissingFields.length > 0) {
       templateHint = `Aún necesitamos ${friendlyMissingFields.join(" y ")}. ${templateHint}`;
     }

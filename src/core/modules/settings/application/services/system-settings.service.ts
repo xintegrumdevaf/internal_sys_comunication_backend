@@ -558,15 +558,6 @@ export class SystemSettingsService {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 12000);
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`;
-        const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
-
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-          const msg = errData?.error?.message || `HTTP ${res.status}`;
-          throw new DomainError("AI_ERROR", `Error de Gemini API: ${msg}`);
-        }
-
         interface RawGeminiModel {
           name: string;
           displayName?: string;
@@ -576,53 +567,99 @@ export class SystemSettingsService {
           outputTokenLimit?: number;
         }
 
-        const data = (await res.json()) as { models?: RawGeminiModel[] };
-        const rawList = data.models || [];
+        const rawList: RawGeminiModel[] = [];
+        let nextPageToken: string | undefined = undefined;
+
+        // Paginación completa para devolver el 100% de los modelos accesibles por la API Key
+        do {
+          const pageParam: string = nextPageToken ? `&pageToken=${encodeURIComponent(nextPageToken)}` : "";
+          const url: string = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100${pageParam}`;
+          const res = await fetch(url, { signal: controller.signal });
+
+          if (!res.ok) {
+            const errData = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+            const msg = errData?.error?.message || `HTTP ${res.status}`;
+            throw new DomainError("AI_ERROR", `Error de Gemini API: ${msg}`);
+          }
+
+          const data = (await res.json()) as { models?: RawGeminiModel[]; nextPageToken?: string };
+          if (data.models && Array.isArray(data.models)) {
+            rawList.push(...data.models);
+          }
+          nextPageToken = data.nextPageToken;
+        } while (nextPageToken);
+
+        clearTimeout(timer);
 
         const inferenceModels: AiModelInfo[] = [];
         const embeddingModels: AiModelInfo[] = [];
 
         for (const m of rawList) {
           const id = m.name.replace(/^models\//, "");
+          const lowerId = id.toLowerCase();
+          const lowerDesc = (m.description || "").toLowerCase();
+          const lowerDisplay = (m.displayName || "").toLowerCase();
           const methods = m.supportedGenerationMethods || [];
 
-          // Excluir modelos internos, legacy obsoletos o que no aplican a texto/NLU
-          if (
-            id.startsWith("imagen") ||
-            id.startsWith("aqa") ||
-            id.startsWith("tts") ||
-            id.startsWith("whisper") ||
-            id.includes("gecko") ||
-            id.includes("embedding-001") ||
-            id === "gemini-1.0-pro"
-          ) {
+          // Excluir modelos deprecados u obsoletos
+          const isDeprecated =
+            lowerDesc.includes("deprecated") ||
+            lowerDisplay.includes("deprecated") ||
+            lowerId.includes("gemini-1.0") ||
+            lowerId.includes("gemini-pro-vision");
+
+          if (isDeprecated) {
             continue;
           }
 
           // Clasificación de Inferencia
           if (methods.includes("generateContent")) {
             let tier: AiModelTier = "balanced";
-            let tierLabel = "Rápido y Balanceado";
+            let tierLabel = "Equilibrado";
             let costTier: 1 | 2 | 3 = 2;
             let recommended = false;
 
-            if (id.includes("flash-lite") || id.includes("8b")) {
-              tier = "economy";
-              tierLabel = "Ultra Económico (Más barato)";
-              costTier = 1;
-            } else if (id.includes("pro") || id.includes("ultra")) {
-              tier = "performance";
-              tierLabel = "Más Potente (Máximo razonamiento)";
+            const fullText = `${id} ${m.displayName || ""} ${m.description || ""}`.toLowerCase();
+
+            const isImage =
+              fullText.includes("image") ||
+              fullText.includes("banana") ||
+              fullText.includes("imagen") ||
+              fullText.includes("picture") ||
+              fullText.includes("diffusion");
+
+            const isAudio =
+              fullText.includes("tts") ||
+              fullText.includes("audio") ||
+              fullText.includes("voice") ||
+              fullText.includes("speech") ||
+              fullText.includes("sound");
+
+            if (isImage) {
+              tier = "specialized";
+              tierLabel = "Generación de Imágenes (Multimedia)";
               costTier = 3;
-            } else if (id.includes("2.5-flash")) {
+            } else if (isAudio) {
+              tier = "specialized";
+              tierLabel = "Audio y Voz / TTS";
+              costTier = 2;
+            } else if (lowerId.includes("flash-lite") || lowerId.includes("8b")) {
+              tier = "economy";
+              tierLabel = "Ultra Ligero y Económico (Flash-Lite)";
+              costTier = 1;
+            } else if (lowerId.includes("pro") || lowerId.includes("ultra")) {
+              tier = "performance";
+              tierLabel = "Máxima Potencia / Razonamiento Avanzado (Pro)";
+              costTier = 3;
+            } else if (lowerId.includes("2.5-flash") || lowerId.includes("2.0-flash")) {
               tier = "balanced";
               tierLabel = "Recomendado (Rápido y Óptimo)";
               costTier = 2;
               recommended = true;
-            } else if (id.includes("flash")) {
-              tier = "economy";
-              tierLabel = "Económico y Rápido";
-              costTier = 1;
+            } else if (lowerId.includes("flash")) {
+              tier = "balanced";
+              tierLabel = "Rápido y Equilibrado (Flash)";
+              costTier = 2;
             }
 
             inferenceModels.push({
@@ -660,7 +697,16 @@ export class SystemSettingsService {
         inferenceModels.sort((a, b) => {
           if (a.recommended && !b.recommended) return -1;
           if (!a.recommended && b.recommended) return 1;
-          return a.costTier - b.costTier;
+          const tierPriority: Record<AiModelTier, number> = {
+            balanced: 1,
+            performance: 2,
+            economy: 3,
+            specialized: 4,
+          };
+          const pA = tierPriority[a.tier] || 99;
+          const pB = tierPriority[b.tier] || 99;
+          if (pA !== pB) return pA - pB;
+          return a.name.localeCompare(b.name);
         });
 
         embeddingModels.sort((a, b) => {
@@ -738,12 +784,18 @@ export class SystemSettingsService {
             const paramValue = match?.[1];
             const numParams = paramValue ? parseFloat(paramValue) : 0;
 
+            const isVision = lower.includes("vl") || lower.includes("vision") || lower.includes("llava");
+
             let tier: AiModelTier = "balanced";
             let tierLabel = `Equilibrado (${paramSize || "Estándar"})`;
             let costTier: 1 | 2 | 3 = 2;
             let recommended = false;
 
-            if (numParams > 0 && numParams <= 5) {
+            if (isVision) {
+              tier = "specialized";
+              tierLabel = `Multimodal / Visión (${paramSize || "Imágenes + Texto"})`;
+              costTier = 2;
+            } else if (numParams > 0 && numParams <= 5) {
               tier = "economy";
               tierLabel = `Ligero (${paramSize}) / Bajo consumo VRAM`;
               costTier = 1;
@@ -756,7 +808,9 @@ export class SystemSettingsService {
               tier = "balanced";
               tierLabel = `Equilibrado (${paramSize || "7B-14B"})`;
               costTier = 2;
-              if (lower.includes("qwen2.5:7b") || lower.includes("llama3")) recommended = true;
+              if (lower.includes("qwen3.5:9b") || lower.includes("gemma4") || lower.includes("qwen2.5:7b")) {
+                recommended = true;
+              }
             }
 
             inferenceModels.push({

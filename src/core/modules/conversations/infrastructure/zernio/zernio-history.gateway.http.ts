@@ -29,7 +29,14 @@ type RawMessage = {
   createdAt?: string;
   sentAt?: string;
   sentVia?: string;
-  metadata?: { sentVia?: string };
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    name?: string;
+    address?: string;
+    url?: string;
+  };
+  metadata?: Record<string, unknown>;
   attachments?: Array<{
     type?: string;
     url?: string;
@@ -253,10 +260,12 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
           senderName: item.senderName || null,
           senderPhoneNumber: item.senderPhoneNumber || null,
           createdAt: item.createdAt || item.sentAt || new Date().toISOString(),
-          sentVia: item.sentVia || item.metadata?.sentVia || null,
+          sentVia: item.sentVia || (typeof item.metadata?.sentVia === "string" ? item.metadata.sentVia : null),
           status,
           errorMessage,
           attachments: item.attachments || [],
+          location: item.location || (item.metadata?.location as { latitude?: number; longitude?: number; name?: string; address?: string; url?: string } | undefined),
+          metadata: item.metadata,
         });
       }
 

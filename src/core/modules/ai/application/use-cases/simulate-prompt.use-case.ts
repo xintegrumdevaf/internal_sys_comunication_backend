@@ -277,12 +277,26 @@ export class SimulatePromptUseCase {
           summary:
             "El cliente envía el comprobante o referencia de pago bancario ya efectuado.",
         },
-        "sales.packages": {
+        "sales.new_contract": {
+          title: "Contratación de Servicio Nuevo",
+          department: "Ventas / Comercial",
+          resolutionPath: "🤖 Flujo Comercial (Verificación de Cobertura KML + RAG de Planes)",
+          summary:
+            "El cliente solicita contratar, adquirir o instalar el servicio de internet por primera vez.",
+        },
+        "sales.plans": {
           title: "Consulta de Planes y Precios de Internet",
           department: "Ventas / Comercial",
-          resolutionPath: "📚 Asistente de Base de Conocimiento (RAG Comercial)",
+          resolutionPath: "🤖 Flujo Comercial (Verificación de Cobertura KML + RAG de Planes)",
           summary:
             "El cliente solicita velocidades, promociones o planes de fibra óptica para su hogar o empresa.",
+        },
+        "sales.packages": {
+          title: "Consulta de Planes y Precios (Alias)",
+          department: "Ventas / Comercial",
+          resolutionPath: "🤖 Flujo Comercial (Verificación de Cobertura KML + RAG de Planes)",
+          summary:
+            "El cliente solicita velocidades, promociones o planes de fibra óptica.",
         },
         "sales.upgrade": {
           title: "Contratación o Aumento de Plan (Upgrade)",

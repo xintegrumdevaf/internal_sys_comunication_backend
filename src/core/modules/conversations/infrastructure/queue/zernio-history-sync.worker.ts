@@ -199,19 +199,60 @@ export class ZernioHistorySyncWorker {
       }
 
       const firstAttachment = msg.attachments?.[0];
-      const type =
+      let type =
         firstAttachment?.type || (msg.attachments && msg.attachments.length > 0 ? "image" : "text");
+      let body = msg.message || (firstAttachment ? `[${type}]` : "");
+      let mediaId: string | null = firstAttachment?.url ?? null;
+      let mimeType: string | null = firstAttachment?.mimeType ?? null;
+      let filename: string | null = firstAttachment?.filename ?? null;
+
+      // Detección de ubicación geográfica en historial de Zernio
+      const metaLoc = (msg.metadata?.location || msg.location) as Record<string, unknown> | undefined;
+      const parseNum = (val: unknown): number | undefined => {
+        if (typeof val === "number" && !Number.isNaN(val)) return val;
+        if (typeof val === "string" && val.trim()) {
+          const n = Number.parseFloat(val.trim());
+          if (!Number.isNaN(n)) return n;
+        }
+        return undefined;
+      };
+
+      const latCandidate =
+        parseNum(metaLoc?.latitude) ??
+        parseNum(metaLoc?.lat) ??
+        parseNum(msg.location?.latitude);
+      const lngCandidate =
+        parseNum(metaLoc?.longitude) ??
+        parseNum(metaLoc?.lng) ??
+        parseNum(metaLoc?.lon) ??
+        parseNum(msg.location?.longitude);
+
+      if (latCandidate !== undefined && lngCandidate !== undefined) {
+        type = "location";
+        const locName = typeof metaLoc?.name === "string" ? metaLoc.name : undefined;
+        const locAddress = typeof metaLoc?.address === "string" ? metaLoc.address : undefined;
+        const googleMapsUrl =
+          (typeof metaLoc?.url === "string" ? metaLoc.url : undefined) ||
+          `https://maps.google.com/?q=${latCandidate},${lngCandidate}`;
+        const parts: string[] = [`Ubicación GPS: ${latCandidate}, ${lngCandidate}`];
+        if (locName) parts.push(locName);
+        if (locAddress && locAddress !== locName) parts.push(locAddress);
+        parts.push(googleMapsUrl);
+        body = parts.join(" - ");
+        filename = `${latCandidate},${lngCandidate}`;
+        mediaId = googleMapsUrl;
+      }
 
       const result = await this.messageRepo.insertHistorical({
         conversationId: conv.id,
         direction,
         author,
         externalId: msg.id,
-        body: msg.message || (firstAttachment ? `[${type}]` : ""),
+        body,
         type,
-        mediaId: firstAttachment?.url ?? null,
-        mimeType: firstAttachment?.mimeType ?? null,
-        filename: firstAttachment?.filename ?? null,
+        mediaId,
+        mimeType,
+        filename,
         status: msg.status,
         errorMessage: msg.errorMessage,
         createdAt: msgDate,

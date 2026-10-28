@@ -311,6 +311,74 @@ describe("Zernio Historical Sync Architecture", () => {
       expect(finalProgress?.finishedAt).not.toBeNull();
     });
 
+    it("procesa mensaje de ubicacion geografica mapeando type=location y coordenadas", async () => {
+      const historicalMessages = [
+        {
+          id: "wamid.loc-1",
+          conversationId: "z-conv-loc",
+          message: "📍 Location",
+          direction: "incoming" as const,
+          senderId: "593998576466",
+          createdAt: "2026-05-15T10:00:00.000Z",
+          metadata: {
+            location: {
+              latitude: -0.2661031,
+              longitude: -78.4977984,
+            },
+          },
+        },
+      ];
+
+      const mockHistoryGateway: ZernioHistoryPort = {
+        fetchAllConversations: vi.fn().mockResolvedValue([]),
+        fetchMessagesForConversation: vi.fn().mockResolvedValue(historicalMessages),
+      };
+
+      const worker = new ZernioHistorySyncWorker(
+        fakeRedis as any,
+        mockHistoryGateway,
+        conversationRepo,
+        messageRepo,
+        fakeLogger,
+      );
+
+      const progress = {
+        jobId: "test-job-loc",
+        status: "IN_PROGRESS" as const,
+        totalConversations: 1,
+        processedConversations: 0,
+        failedConversations: 0,
+        totalMessagesImported: 0,
+        totalMessagesSkipped: 0,
+        currentPhone: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        errors: [],
+      };
+      await fakeRedis.set(ZERNIO_HISTORY_STATUS_KEY, JSON.stringify(progress));
+      await fakeRedis.rpush(
+        ZERNIO_HISTORY_QUEUE_KEY,
+        JSON.stringify({
+          jobId: "test-job-loc",
+          zernioConversationId: "z-conv-loc",
+          participantId: "593998576466",
+          participantName: "Jean",
+          attempt: 1,
+        }),
+      );
+
+      await worker.processQueue();
+
+      const conv = await conversationRepo.findByWaPhone("593998576466");
+      expect(conv).not.toBeNull();
+      const messages = await messageRepo.listByConversation(conv!.id);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.type).toBe("location");
+      expect(messages[0]?.filename).toBe("-0.2661031,-78.4977984");
+      expect(messages[0]?.mediaId).toBe("https://maps.google.com/?q=-0.2661031,-78.4977984");
+      expect(messages[0]?.body).toContain("Ubicación GPS: -0.2661031, -78.4977984");
+    });
+
     it("reintenta conversaciones que fallan y aisla errores sin corromper el progreso", async () => {
       const mockHistoryGateway: ZernioHistoryPort = {
         fetchAllConversations: vi.fn().mockResolvedValue([]),
