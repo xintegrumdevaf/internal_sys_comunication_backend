@@ -588,6 +588,8 @@ export function createContainer(): Container {
     departmentRepo,
     auditRepo,
     logger: escalationLogger,
+    messageRepo,
+    broadcaster,
   });
   const disableAutomation = new DisableAutomationUseCase({
     caseRepo,
@@ -682,6 +684,11 @@ export function createContainer(): Container {
     departmentRepo,
     auditRepo,
     logger: casesLogger,
+    autoAssign: autoAssignAgent,
+    escalationRepo,
+    broadcaster,
+    messageRepo,
+    agentRepo,
   });
   const getDashboard = new GetDashboardUseCase({
     caseRepo,
@@ -773,6 +780,7 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
     agentRepo,
+    messageRepo,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);

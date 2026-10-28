@@ -11,6 +11,9 @@ import type { DepartmentRepositoryPort } from "../../../departments/application/
 import type { EscalationRepositoryPort } from "../ports/escalation.repository.port";
 import { resolveActingAgent } from "./agent-case-auth";
 
+import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
+
 export type AssignCaseDeps = {
   caseRepo: CaseRepositoryPort;
   escalationRepo: EscalationRepositoryPort;
@@ -18,6 +21,8 @@ export type AssignCaseDeps = {
   departmentRepo: DepartmentRepositoryPort;
   auditRepo: AuditRepositoryPort;
   logger: Logger;
+  messageRepo?: MessageRepositoryPort;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 /**
@@ -118,6 +123,27 @@ export class AssignCaseUseCase {
       actorId: actor.id,
       metadata: { assignedAgentId: target.id, departmentId },
     });
+
+    if (this.deps.messageRepo) {
+      const systemText = input.reassign
+        ? `Caso reasignado a ${target.name} por ${actor.name}.`
+        : `Caso asignado a ${target.name} por ${actor.name}.`;
+      const sysMsg = await this.deps.messageRepo.insertOutbound({
+        conversationId: aggregate.case.conversationId,
+        author: "system",
+        body: systemText,
+        caseId: aggregate.case.id,
+        agentId: actor.id,
+        status: "sent",
+      });
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_SENT",
+        conversationId: aggregate.case.conversationId,
+        messageId: sysMsg.id,
+        author: "system",
+      });
+    }
+
     this.deps.logger.info(
       { caseId: aggregate.case.id, assignedAgentId: target.id, actorId: actor.id },
       "caso asignado",

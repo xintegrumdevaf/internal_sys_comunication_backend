@@ -11,6 +11,14 @@ export type AutoAssignAgentDeps = {
   maxActiveCasesPerAgent?: number;
 };
 
+export type AutoAssignOptions = {
+  /**
+   * Si es true, si no hay agentes con autoAssignEnabled=true, busca entre los agentes
+   * activos del departamento (evitando que el caso quede desatendido si hay personal operativo).
+   */
+  fallbackToAnyActive?: boolean;
+};
+
 /**
  * Elige el agente humano que debe recibir un caso recién escalado dentro de
  * un departamento. Reglas:
@@ -30,7 +38,10 @@ export type AutoAssignAgentDeps = {
 export class AutoAssignAgentService {
   constructor(private readonly deps: AutoAssignAgentDeps) {}
 
-  async pickAgentForDepartment(departmentId: string): Promise<Agent | null> {
+  async pickAgentForDepartment(
+    departmentId: string,
+    options?: AutoAssignOptions,
+  ): Promise<Agent | null> {
     const allAgents = await this.deps.agentRepo.list();
     const roleEligible = allAgents.filter(
       (a) => a.active && a.autoAssignEnabled && (a.role === "agent" || a.role === "manager"),
@@ -44,6 +55,20 @@ export class AutoAssignAgentService {
       }
       const belongs = await this.deps.agentRepo.belongsToDepartment(agent.id, departmentId);
       if (belongs) eligible.push(agent);
+    }
+
+    if (eligible.length === 0 && options?.fallbackToAnyActive) {
+      const activeStaff = allAgents.filter(
+        (a) => a.active && (a.role === "agent" || a.role === "manager"),
+      );
+      for (const agent of activeStaff) {
+        if (agent.primaryDepartmentId === departmentId) {
+          eligible.push(agent);
+          continue;
+        }
+        const belongs = await this.deps.agentRepo.belongsToDepartment(agent.id, departmentId);
+        if (belongs) eligible.push(agent);
+      }
     }
     if (eligible.length === 0) return null;
 

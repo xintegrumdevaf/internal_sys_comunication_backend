@@ -7,6 +7,8 @@ import type { RealtimeBroadcaster } from "../../../realtime/application/realtime
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
 
+import type { MessageRepositoryPort } from "../ports/message.repository.port";
+
 /**
  * Un agente toma control de la conversación (03_API_CONTRACT.md §C.2 take-control):
  * reclama el caso activo (o el más reciente no terminal, o crea uno nuevo de atención directa)
@@ -21,6 +23,7 @@ export class TakeControlUseCase {
       logger: Logger;
       broadcaster?: RealtimeBroadcaster;
       agentRepo?: AgentRepositoryPort;
+      messageRepo?: MessageRepositoryPort;
     },
   ) {}
 
@@ -100,6 +103,28 @@ export class TakeControlUseCase {
     });
     await this.deps.caseRepo.appendEvent(caseId, "AUTOMATION_DISABLED", { reason: "TAKE_CONTROL" });
     await this.deps.conversationRepo.setActiveCaseId(conversation.id, caseId);
+
+    if (this.deps.messageRepo) {
+      let agentName = "Agente";
+      if (this.deps.agentRepo) {
+        const agent = await this.deps.agentRepo.findById(input.agentUserId);
+        if (agent) agentName = agent.name;
+      }
+      const sysMsg = await this.deps.messageRepo.insertOutbound({
+        conversationId: conversation.id,
+        author: "system",
+        body: `${agentName} tomó el control de la conversación.`,
+        caseId,
+        agentId: input.agentUserId,
+        status: "sent",
+      });
+      this.deps.broadcaster?.publish({
+        type: "MESSAGE_SENT",
+        conversationId: conversation.id,
+        messageId: sysMsg.id,
+        author: "system",
+      });
+    }
 
     this.deps.broadcaster?.publish({
       type: "CASE_CLAIMED",
