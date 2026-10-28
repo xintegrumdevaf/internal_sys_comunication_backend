@@ -62,13 +62,21 @@ function renderTemplate(template: string, vars: Record<string, unknown>): string
 }
 
 function hasUnresolvedPlaceholders(text: string): boolean {
-  return /\$\{[\w.]+\}/.test(text) || /\{\{[\w.]+\}\}/.test(text);
+  return (
+    /\$\{[\w.]+\}/.test(text) ||
+    /\{\{[\w.]+\}\}/.test(text) ||
+    /\[\s*(?:clientName|clientFirstName|nombre|cliente|name)\s*\]/i.test(text)
+  );
 }
 
 function cleanResidualPlaceholders(text: string): string {
   return text
     .replace(/\$\{\s*[\w.]+\s*\}/g, "")
     .replace(/\{\{\s*[\w.]+\s*\}\}/g, "")
+    .replace(/\[\s*(?:clientName|clientFirstName|nombre|cliente|name)\s*\]/gi, "")
+    .replace(/<\s*(?:clientName|clientFirstName|nombre|cliente|name)\s*>/gi, "")
+    .replace(/\bHola\s*,\s*/gi, "Hola, ")
+    .replace(/\bBuenas\s+(?:tardes|noches|días)\s*,\s*/gi, "Buenas, ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

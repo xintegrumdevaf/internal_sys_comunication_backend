@@ -211,7 +211,7 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
 
   async listByConversation(conversationId: string): Promise<Case[]> {
     const { rows } = await this.pool.query<CaseRow>(
-      `SELECT * FROM "case" WHERE conversation_id = $1 ORDER BY created_at ASC`,
+      `SELECT * FROM "case" WHERE conversation_id = $1 ORDER BY created_at DESC`,
       [conversationId],
     );
     return rows.map(mapCaseRow);

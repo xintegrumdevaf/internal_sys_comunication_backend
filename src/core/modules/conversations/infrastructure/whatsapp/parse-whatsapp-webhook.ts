@@ -28,6 +28,14 @@ type WhatsAppInteractiveReply = {
   list_reply?: { id: string; title: string; description?: string };
 };
 
+type WhatsAppLocationObject = {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  url?: string;
+};
+
 type WhatsAppInboundMessage = {
   from: string;
   id: string;
@@ -39,6 +47,7 @@ type WhatsAppInboundMessage = {
   video?: WhatsAppMediaObject;
   document?: WhatsAppDocumentObject;
   interactive?: WhatsAppInteractiveReply;
+  location?: WhatsAppLocationObject;
   edit?: WhatsAppEditObject;
 };
 
@@ -155,6 +164,30 @@ function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | n
       return {
         ...base,
         body: replyBody,
+        mediaId: null,
+        mimeType: null,
+        caption: null,
+        filename: null,
+      };
+    }
+    case "location": {
+      const loc = raw.location;
+      const lat = loc?.latitude;
+      const lng = loc?.longitude;
+      const parts: string[] = [];
+      if (lat !== undefined && lng !== undefined) {
+        parts.push(`Ubicación GPS: ${lat}, ${lng}`);
+      }
+      if (loc?.name) parts.push(loc.name);
+      if (loc?.address) parts.push(loc.address);
+      if (loc?.url) parts.push(loc.url);
+      const locationBody =
+        parts.join(" - ") ||
+        (lat !== undefined && lng !== undefined ? `${lat}, ${lng}` : "Ubicación compartida");
+      return {
+        ...base,
+        type: "location",
+        body: locationBody,
         mediaId: null,
         mimeType: null,
         caption: null,

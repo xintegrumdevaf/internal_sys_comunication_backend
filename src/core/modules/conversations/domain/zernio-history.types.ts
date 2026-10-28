@@ -29,6 +29,14 @@ export interface ZernioHistoricalMessage {
   status?: MessageStatus;
   errorMessage?: string | null;
   attachments?: ZernioHistoricalMessageAttachment[];
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    name?: string;
+    address?: string;
+    url?: string;
+  };
+  metadata?: Record<string, unknown>;
 }
 
 export interface ZernioSyncJob {

@@ -65,7 +65,7 @@ export function inferWorkflowType(
     combined.includes("sales") ||
     intentKey.toLowerCase().startsWith("sales.")
   ) {
-    return "SALES_PACKAGES";
+    return "SALES";
   }
 
   return existingWorkflowType?.trim() || "GENERAL_INQUIRY";

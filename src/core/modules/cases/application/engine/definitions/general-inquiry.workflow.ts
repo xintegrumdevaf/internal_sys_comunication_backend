@@ -79,13 +79,16 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     // 2. Si la AI determino que es un saludo (isGreeting) o no extrajo ninguna pregunta de negocio:
     const rawText = typeof text === "string" ? text.trim() : "";
     const isRawGreetingOnly =
-      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos)[!.\s]*$/i.test(rawText);
+      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos|qu[eé]\s+tal|hola\s+que\s+tal)[!.\s]*$/i.test(rawText);
+
+    const greetingStripped = rawText
+      .replace(/^(hola|buenas(\s+tardes|\s+d[ií]as|\s+noches)?|saludos|qu[eé]\s+tal|buenos\s+d[ií]as)[!.,\s]*/i, "")
+      .trim();
 
     const isGreeting =
-      entities?.isGreeting === true ||
-      entities?.is_greeting === true ||
       isRawGreetingOnly ||
-      (!hasExplicitQuestion && !entities?.location);
+      ((entities?.isGreeting === true || entities?.is_greeting === true) && greetingStripped.length <= 3) ||
+      (!hasExplicitQuestion && !entities?.location && greetingStripped.length <= 3);
 
     if (isGreeting) {
       const greetingPhrase = getGreetingPhrase(typeof text === "string" ? text : "");
@@ -107,9 +110,11 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
         : (entities!.answer as string).trim()
       : typeof entities?.location === "string"
         ? `¿Tienen cobertura en ${entities.location}?`
-        : typeof text === "string"
-          ? text.trim()
-          : data.question || "";
+        : greetingStripped.length > 3
+          ? greetingStripped
+          : typeof text === "string"
+            ? text.trim()
+            : data.question || "";
 
     // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias", "listo muchas gracias mas tarde le pago"):
     // responder amablemente y completar el caso sin consultar RAG ni escalar a un asesor.

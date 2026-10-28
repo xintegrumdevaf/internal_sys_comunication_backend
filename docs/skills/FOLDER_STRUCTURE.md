@@ -100,7 +100,7 @@ isp-platform/
 │           │   │   └── contexts/
 │           │   │       ├── support-internet.context.ts
 │           │   │       ├── billing-balance.context.ts
-│           │   │       └── sales-packages.context.ts
+│           │   │       └── sales.context.ts
 │           │   ├── application/
 │           │   │   ├── ports/
 │           │   │   │   ├── case.repository.port.ts
@@ -112,7 +112,7 @@ isp-platform/
 │           │   │   │   └── definitions/
 │           │   │   │       ├── support-internet.workflow.ts
 │           │   │   │       ├── billing-balance.workflow.ts  (Etapa 8)
-│           │   │   │       └── sales-packages.workflow.ts   (Etapa 8)
+│           │   │   │       └── sales.workflow.ts            (Etapa 8)
 │           │   │   ├── services/
 │           │   │   │   ├── case-arbitration.service.ts    ← 02_STATE_MACHINE.md §4
 │           │   │   │   └── expiration.service.ts          ← 02_STATE_MACHINE.md §8
@@ -194,4 +194,4 @@ isp-platform/
 - `n8n/` (los tres workflows exportados) se llena en la Etapa 4-5, en paralelo al desarrollo de la API — se exportan desde la instancia de n8n local (`docker-compose.yml`) y se versionan en el repo para poder reimportarlos en producción.
 - `core/modules/escalation` nace en la Etapa 6.
 - `core/modules/realtime` nace en la Etapa 7.
-- Workflows adicionales (`billing-balance`, `sales-packages`) en la Etapa 8, siguiendo el mismo patrón de `support-internet.workflow.ts` sin tocar `workflow-engine.ts`.
+- Workflows adicionales (`billing-balance`, `sales`) en la Etapa 8, siguiendo el mismo patrón de `support-internet.workflow.ts` sin tocar `workflow-engine.ts`.

@@ -35,9 +35,10 @@ export function buildInterpretMessagePrompt(
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
     ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
-    : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional, y consultas sobre planes o servicios) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida. IMPORTANTE: Si el cliente envía un mensaje de agradecimiento o cortesía indicando que pagará más tarde (ej: "Listo muchas gracias mas tarde le pago", "Gracias luego transfiero", "Ok muchas gracias", "Listo gracias"), clasifica SIEMPRE como CANCEL o general.inquiry con intent="general.inquiry" y question="<texto del cliente>". NUNCA clasificar como billing.balance ni billing.record_payment. El cliente NO está pidiendo su saldo de nuevo ni adjuntando un comprobante, solo está cerrando la atención.
-- sales.packages: sinónimo de general.inquiry cuando el cliente consulta sobre planes, paquetes, precios o velocidades de internet sin ser cliente activo o sin indicar que quiere contratar/cambiar. Se clasifica igual que general.inquiry.
-- sales.upgrade: el cliente YA recibió información o YA es cliente y quiere contratar, cambiar o mejorar su plan. En este caso, además de responder, el sistema ofrecerá conectarlo con un especialista de ventas.
+    : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida.
+- sales.new_contract: el cliente manifiesta intención explícita de contratar, adquirir, solicitar instalación o dar de alta el servicio nuevo de internet (ej: "Hola, me gustaría contratar el servicio", "quiero contratar", "deseo adquirir internet").
+- sales.plans: consulta sobre planes, paquetes, precios, tarifas, promociones o velocidades de internet (ej: "¿Qué planes tienen?", "¿Cuánto cuesta el de 500 megas?", "precios de planes").
+- sales.upgrade: el cliente YA cuenta con el servicio o ya recibió información previa y solicita mejorar, aumentar velocidad o cambiar a un plan superior.
 ${staticRelocationAndCatalog}`;
 
   const system = `Eres un módulo de interpretación de lenguaje para el sistema de atención automatizada de un proveedor de internet (ISP) en Ecuador. Tu ÚNICA función es analizar el mensaje del cliente y devolver una interpretación estructurada.
@@ -93,6 +94,14 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   Si el caso activo es de traslado de domicilio (HOME_RELOCATION) y está esperando la nueva dirección, referencias o ubicación:
   → Clasifica SIEMPRE como type="ANSWER" con intent="support.home_relocation".
   → Extrae en \`entities\`: \`newAddress\` (dirección), \`references\` (referencias físicas como cerca de la escuela, frente a, etc.) y \`mapLocation\` (link, ubicación o coordenadas). Si la dirección y referencias vienen juntas, extrae ambas.
+- CONTRATACIÓN NUEVA Y CONSULTA DE PLANES (FLUJO SALES):
+  - Si el cliente manifiesta intención explícita de CONTRATAR o instalar el servicio nuevo (ej: "Hola, me gustaría contratar el servicio", "quiero contratar", "deseo adquirir internet", "me interesa contratar"):
+    → Clasifica como intent="sales.new_contract".
+  - Si el cliente CONSULTA o pregunta por planes, precios, velocidades o promociones (ej: "¿Qué planes tienen?", "¿Cuánto cuesta el internet?", "precios de planes"):
+    → Clasifica como intent="sales.plans".
+  - Si el caso activo es de ventas (SALES) y está esperando la dirección o ubicación del domicilio:
+    → Clasifica SIEMPRE como type="ANSWER" con el intent activo (ej: intent="sales.new_contract" o "sales.plans").
+    → Extrae en \`entities\`: \`address\` (dirección textual o sector), \`mapLocation\` (link de mapa o texto de ubicación), y si vienen coordenadas numéricas o "Ubicación GPS: <lat>, <lng>", extrae \`latitude\` y \`longitude\` numéricas.
 - RECLAMOS DE FACTURACIÓN O DISPUTAS DE COBRO:
   Si el cliente reclama por valores cobrados incorrectamente, disputas de facturas o cobros indebidos:
   → Clasifica SIEMPRE como intent="billing.dispute".
@@ -130,8 +139,8 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 1. Mensaje: "¿Dónde se encuentran sus oficinas?"
    → {"type":"NEW_INTENT","intent":"general.inquiry","entities":{"question":"¿Dónde se encuentran sus oficinas?"},"confidence":0.95}
 
-2. Mensaje: "¿Qué paquetes de internet tienen?"
-   → {"type":"NEW_INTENT","intent":"sales.packages","entities":{"question":"¿Qué paquetes de internet tienen?"},"confidence":0.95}
+2. Mensaje: "Hola, que tal, me gustaría contratar el servicio"
+   → {"type":"NEW_INTENT","intent":"sales.new_contract","entities":{"question":"Contratación de servicio nuevo de internet"},"confidence":0.95}
 
 3. Mensaje: "yo no tengo el servicio, lo tiene mi familiar" (Caso activo: SUPPORT_INTERNET pidiendo cédula)
    → {"type":"CONTINUE","intent":"support.internet","entities":{},"confidence":0.90}
@@ -142,11 +151,11 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 5. Mensaje: "¿a donde puedo contactar, no me puedes ayudar tu?" (Caso activo: SUPPORT_INTERNET)
    → {"type":"CONTINUE","intent":"support.internet","entities":{},"confidence":0.95}
 
-6. Mensaje: "¿Cuánto cuesta el de 500 megas?"
-   → {"type":"NEW_INTENT","intent":"sales.packages","entities":{"question":"¿Cuánto cuesta el plan de 500 Mbps?","speed":"500"},"confidence":0.95}
+6. Mensaje: "¿Qué planes de internet tienen?" (o "¿Cuánto cuesta el de 500 megas?")
+   → {"type":"NEW_INTENT","intent":"sales.plans","entities":{"question":"¿Qué planes de internet tienen?","speed":"500"},"confidence":0.95}
 
-7. Mensaje: "Quiero contratar el plan de 500 megas" (o "Quiero mejorar mi plan")
-   → {"type":"NEW_INTENT","intent":"sales.upgrade","entities":{"question":"Quiero contratar el plan de 500 Mbps","speed":"500"},"confidence":0.90}
+7. Mensaje: "Quiero mejorar mi plan a 500 megas" (o "Quiero aumentar mi velocidad")
+   → {"type":"NEW_INTENT","intent":"sales.upgrade","entities":{"question":"Aumento de velocidad a 500 Mbps","speed":"500"},"confidence":0.90}
 
 8. Mensaje: "Vivo en Yanuncay" (después de hablar de cobertura/planes)
    → {"type":"CONTINUE","intent":"general.inquiry","entities":{"location":"Yanuncay","question":"Cobertura en Yanuncay"},"confidence":0.90}

@@ -1,4 +1,5 @@
 import { DomainError } from "../../../../../shared/errors/domain-errors";
+import { env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type {
   AIProviderPort,
@@ -320,7 +321,15 @@ export class GeminiAdapter implements AIProviderPort {
 
   private async downloadMediaAsBase64(url: string): Promise<string> {
     try {
-      const response = await fetch(url);
+      const headers: Record<string, string> = {};
+      const zernioApiKey = env.ZERNIO_API_KEY;
+      if (url.includes("zernio") && zernioApiKey) {
+        headers["Authorization"] = `Bearer ${zernioApiKey}`;
+      }
+      let response = await fetch(url, { headers });
+      if (!response.ok && Object.keys(headers).length > 0) {
+        response = await fetch(url);
+      }
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -339,7 +348,7 @@ export class GeminiAdapter implements AIProviderPort {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      let apiKey = this.config.apiKey;
+      let apiKey = this.config.apiKey || env.GEMINI_API_KEY || "";
       let model = this.config.model;
 
       if (this.settingsService) {
@@ -350,6 +359,10 @@ export class GeminiAdapter implements AIProviderPort {
         } catch {
           // Fallback a config inicial
         }
+      }
+
+      if (!model || model === "gemini-2.5-flash" || model === "gemini-2.5-flash-lite") {
+        model = "gemini-3.5-flash";
       }
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;

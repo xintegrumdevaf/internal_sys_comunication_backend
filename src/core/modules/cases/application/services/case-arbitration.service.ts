@@ -55,10 +55,7 @@ export class CaseArbitrationService {
       return { action: "CLARIFY" };
     }
 
-    let targetWorkflowType = mapIntentToWorkflowType(interpretation.intent);
-    if (!targetWorkflowType && dynamicRouting) {
-      targetWorkflowType = dynamicRouting.workflowType;
-    }
+    const targetWorkflowType = dynamicRouting?.workflowType || mapIntentToWorkflowType(interpretation.intent);
     const activeAggregate = await this.caseRepo.findActiveByConversation(conversationId);
     const meetsConfidence = interpretation.confidence >= confidenceThreshold(interpretation.intent);
 
@@ -144,7 +141,7 @@ export class CaseArbitrationService {
     // - Si esta en ESCALATED sin agente asignado (pool/triage sin reclamar), y llega un NEW_INTENT valido
     //   con alta confianza, permitir activar el workflow automatizado para recopilar la informacion del cliente.
     const allCases = await this.caseRepo.listByConversation(conversationId);
-    const pendingHumanCase = [...allCases].reverse().find(
+    const pendingHumanCase = allCases.find(
       (c) => (c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") && !this.expirationService.isExpired(c),
     );
     if (pendingHumanCase) {

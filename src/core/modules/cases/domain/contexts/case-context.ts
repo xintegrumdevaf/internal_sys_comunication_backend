@@ -1,6 +1,6 @@
 import type { SupportInternetContext } from "./support-internet.context";
 import type { BillingBalanceContext } from "./billing-balance.context";
-import type { SalesPackagesContext } from "./sales-packages.context";
+import type { SalesContext } from "./sales.context";
 import type { GeneralInquiryContext } from "./general-inquiry.context";
 import type { HomeRelocationContext } from "./home-relocation.context";
 import type { CaseEngineMeta } from "./engine-meta";
@@ -36,8 +36,8 @@ export type CaseContext =
       data: BillingBalanceContext;
     } & ContextCommon)
   | ({
-      workflowType: "SALES_PACKAGES";
-      data: SalesPackagesContext;
+      workflowType: "SALES" | "SALES_PACKAGES";
+      data: SalesContext;
     } & ContextCommon)
   | ({
       workflowType: "HOME_RELOCATION";
@@ -58,8 +58,9 @@ export function emptyContextFor(workflowType: CaseContext["workflowType"]): Case
       return { workflowType, data: {} };
     case "BILLING_BALANCE":
       return { workflowType, data: {} };
+    case "SALES":
     case "SALES_PACKAGES":
-      return { workflowType, data: {} };
+      return { workflowType: "SALES", data: {} };
     case "HOME_RELOCATION":
       return { workflowType, data: {} };
     case "UNCLASSIFIED":

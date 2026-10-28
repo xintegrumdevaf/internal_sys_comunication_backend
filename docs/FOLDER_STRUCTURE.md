@@ -101,7 +101,7 @@ isp-platform/
 │           │   │   └── contexts/
 │           │   │       ├── support-internet.context.ts
 │           │   │       ├── billing-balance.context.ts
-│           │   │       ├── sales-packages.context.ts
+│           │   │       ├── sales.context.ts
 │           │   │       └── general-inquiry.context.ts
 │           │   ├── application/
 │           │   │   ├── ports/
@@ -114,7 +114,7 @@ isp-platform/
 │           │   │   │   └── definitions/
 │           │   │   │       ├── support-internet.workflow.ts
 │           │   │   │       ├── billing-balance.workflow.ts  (Etapa 8)
-│           │   │   │       └── sales-packages.workflow.ts   (Etapa 8)
+│           │   │   │       └── sales.workflow.ts            (Etapa 8)
 │           │   │   ├── services/
 │           │   │   │   ├── case-arbitration.service.ts        ← 02_STATE_MACHINE.md §4
 │           │   │   │   ├── department-resolver.service.ts     ← tabla workflow_type→department_id, 02_STATE_MACHINE.md §9
@@ -252,5 +252,5 @@ isp-platform/
 - `core/modules/ai` (interpretación/composición vía `AIProviderPort`) nace en la Etapa 5.
 - `core/modules/escalation` nace en la Etapa 6, con soporte de triage/claim.
 - `core/modules/realtime` nace en la Etapa 7.
-- Workflows adicionales (`billing-balance`, `sales-packages`) en la Etapa 8, siguiendo el mismo patrón de `support-internet.workflow.ts` sin tocar `workflow-engine.ts` ni `ai-provider.port.ts`.
+- Workflows adicionales (`billing-balance`, `sales`) en la Etapa 8, siguiendo el mismo patrón de `support-internet.workflow.ts` sin tocar `workflow-engine.ts` ni `ai-provider.port.ts`.
 - `core/modules/quality` (supervisión de calidad de atenciones humanas) nace en la Etapa 10; extiende `AIProviderPort` con `analyzeAgentConversation` sin romper adapters existentes.
