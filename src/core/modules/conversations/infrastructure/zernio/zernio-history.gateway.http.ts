@@ -5,6 +5,7 @@ import type {
   ZernioHistoricalConversation,
   ZernioHistoricalMessage,
 } from "../../domain/zernio-history.types";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 import type { ZernioHistoryPort } from "../../application/ports/zernio-history.port";
 
 type RawConversation = {
@@ -58,29 +59,59 @@ type RawMessage = {
 
 export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
   private resolvedAccountId: string | null = null;
-  private readonly baseUrl: string;
+  private lastInputAccountId: string | null = null;
+  private readonly defaultBaseUrl: string;
 
   constructor(
     private readonly env: Env,
     private readonly logger: Logger,
+    private readonly settingsService?: SystemSettingsService,
   ) {
-    this.baseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
-    if (this.env.ZERNIO_ACCOUNT_ID && /^[a-f\d]{24}$/i.test(this.env.ZERNIO_ACCOUNT_ID.trim())) {
+    this.defaultBaseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+    if (this.env.ZERNIO_ACCOUNT_ID && /^[a-f\d]{20,32}$/i.test(this.env.ZERNIO_ACCOUNT_ID.trim())) {
       this.resolvedAccountId = this.env.ZERNIO_ACCOUNT_ID.trim();
+      this.lastInputAccountId = this.resolvedAccountId;
     }
   }
 
-  private async getAccountId(): Promise<string> {
-    if (this.resolvedAccountId) {
-      return this.resolvedAccountId;
+  private async resolveConfig(): Promise<{ baseUrl: string; apiKey: string; accountId: string }> {
+    let baseUrl = this.defaultBaseUrl;
+    let apiKey = this.env.ZERNIO_API_KEY || "";
+    let accountId = this.env.ZERNIO_ACCOUNT_ID?.trim() || "";
+
+    if (this.settingsService) {
+      try {
+        const s = await this.settingsService.getChannelSettings();
+        if (s.zernioBaseUrl) baseUrl = s.zernioBaseUrl.replace(/\/$/, "");
+        if (s.zernioApiKey) apiKey = s.zernioApiKey;
+        if (s.zernioAccountId) accountId = s.zernioAccountId.trim();
+      } catch {
+        // Fallback a env
+      }
     }
 
-    const inputId = this.env.ZERNIO_ACCOUNT_ID?.trim();
-    const url = `${this.baseUrl}/accounts`;
+    return { baseUrl, apiKey, accountId };
+  }
+
+  private async getActiveConfig(): Promise<{ accountId: string; apiKey: string; baseUrl: string }> {
+    const config = await this.resolveConfig();
+    if (this.resolvedAccountId && this.lastInputAccountId === config.accountId) {
+      return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
+    }
+
+    const inputId = config.accountId;
+    this.lastInputAccountId = inputId;
+
+    if (inputId && /^[a-f\d]{20,32}$/i.test(inputId)) {
+      this.resolvedAccountId = inputId;
+      return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
+    }
+
+    const url = `${config.baseUrl}/accounts`;
 
     const res = await this.fetchWithRetry(url, {
       headers: {
-        Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
     });
 
@@ -114,7 +145,7 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
     }
 
     this.resolvedAccountId = matched._id;
-    return this.resolvedAccountId;
+    return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
   }
 
   private async fetchWithRetry(url: string, init?: RequestInit, retries = 3): Promise<Response> {
@@ -145,13 +176,13 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
   }
 
   async fetchAllConversations(): Promise<ZernioHistoricalConversation[]> {
-    const accountId = await this.getAccountId();
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
     const conversations: ZernioHistoricalConversation[] = [];
     let cursor: string | null = null;
     let hasMore = true;
 
     while (hasMore) {
-      let url = `${this.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`;
+      let url = `${baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`;
       if (cursor) {
         url += `&cursor=${encodeURIComponent(cursor)}`;
       }
@@ -159,7 +190,7 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
       this.logger.debug({ url, cursor }, "Obteniendo pagina de conversaciones de Zernio");
       const res = await this.fetchWithRetry(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       });
 
@@ -197,13 +228,13 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
   }
 
   async fetchMessagesForConversation(zernioConversationId: string): Promise<ZernioHistoricalMessage[]> {
-    const accountId = await this.getAccountId();
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
     const messages: ZernioHistoricalMessage[] = [];
     let cursor: string | null = null;
     let hasMore = true;
 
     while (hasMore) {
-      let url = `${this.baseUrl}/inbox/conversations/${encodeURIComponent(zernioConversationId)}/messages?accountId=${encodeURIComponent(accountId)}&limit=100`;
+      let url = `${baseUrl}/inbox/conversations/${encodeURIComponent(zernioConversationId)}/messages?accountId=${encodeURIComponent(accountId)}&limit=100`;
       if (cursor) {
         url += `&cursor=${encodeURIComponent(cursor)}`;
       }
@@ -211,7 +242,7 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
       this.logger.debug({ zernioConversationId, cursor }, "Obteniendo pagina de mensajes de Zernio");
       const res = await this.fetchWithRetry(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       });
 

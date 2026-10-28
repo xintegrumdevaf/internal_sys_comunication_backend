@@ -10,6 +10,7 @@ import type {
   SubmitTemplateInput,
   SubmitTemplateResult,
 } from "../../application/ports/meta-templates-gateway.port";
+import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 type ZernioTemplateResponse = {
   success?: boolean;
@@ -25,29 +26,59 @@ type ZernioTemplateResponse = {
 
 export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   private resolvedAccountId: string | null = null;
-  private readonly baseUrl: string;
+  private lastInputAccountId: string | null = null;
+  private readonly defaultBaseUrl: string;
 
   constructor(
     private readonly env: Env,
     private readonly logger: Logger,
+    private readonly settingsService?: SystemSettingsService,
   ) {
-    this.baseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
-    if (this.env.ZERNIO_ACCOUNT_ID && /^[a-f\d]{24}$/i.test(this.env.ZERNIO_ACCOUNT_ID.trim())) {
+    this.defaultBaseUrl = (this.env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+    if (this.env.ZERNIO_ACCOUNT_ID && /^[a-f\d]{20,32}$/i.test(this.env.ZERNIO_ACCOUNT_ID.trim())) {
       this.resolvedAccountId = this.env.ZERNIO_ACCOUNT_ID.trim();
+      this.lastInputAccountId = this.resolvedAccountId;
     }
   }
 
-  private async getAccountId(): Promise<string> {
-    if (this.resolvedAccountId) {
-      return this.resolvedAccountId;
+  private async resolveConfig(): Promise<{ baseUrl: string; apiKey: string; accountId: string }> {
+    let baseUrl = this.defaultBaseUrl;
+    let apiKey = this.env.ZERNIO_API_KEY || "";
+    let accountId = this.env.ZERNIO_ACCOUNT_ID?.trim() || "";
+
+    if (this.settingsService) {
+      try {
+        const s = await this.settingsService.getChannelSettings();
+        if (s.zernioBaseUrl) baseUrl = s.zernioBaseUrl.replace(/\/$/, "");
+        if (s.zernioApiKey) apiKey = s.zernioApiKey;
+        if (s.zernioAccountId) accountId = s.zernioAccountId.trim();
+      } catch {
+        // Fallback a env
+      }
     }
 
-    const inputId = this.env.ZERNIO_ACCOUNT_ID?.trim();
-    const url = `${this.baseUrl}/accounts`;
+    return { baseUrl, apiKey, accountId };
+  }
+
+  private async getActiveConfig(): Promise<{ accountId: string; apiKey: string; baseUrl: string }> {
+    const config = await this.resolveConfig();
+    if (this.resolvedAccountId && this.lastInputAccountId === config.accountId) {
+      return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
+    }
+
+    const inputId = config.accountId;
+    this.lastInputAccountId = inputId;
+
+    if (inputId && /^[a-f\d]{20,32}$/i.test(inputId)) {
+      this.resolvedAccountId = inputId;
+      return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
+    }
+
+    const url = `${config.baseUrl}/accounts`;
 
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
     });
 
@@ -81,11 +112,11 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
     }
 
     this.resolvedAccountId = matched._id;
-    return this.resolvedAccountId;
+    return { accountId: this.resolvedAccountId, apiKey: config.apiKey, baseUrl: config.baseUrl };
   }
 
   async submitTemplate(template: SubmitTemplateInput): Promise<SubmitTemplateResult> {
-    const accountId = await this.getAccountId();
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
     const components: Array<Record<string, unknown>> = [];
 
     if (template.headerType && template.headerType !== "NONE") {
@@ -153,14 +184,14 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
       });
     }
 
-    const url = `${this.baseUrl}/whatsapp/templates`;
+    const url = `${baseUrl}/whatsapp/templates`;
 
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           accountId,
@@ -200,13 +231,13 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   }
 
   async fetchTemplateStatus(metaTemplateId: string): Promise<FetchTemplateStatusResult> {
-    const accountId = await this.getAccountId();
-    const url = `${this.baseUrl}/whatsapp/templates/id/${encodeURIComponent(metaTemplateId)}?accountId=${encodeURIComponent(accountId)}`;
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
+    const url = `${baseUrl}/whatsapp/templates/id/${encodeURIComponent(metaTemplateId)}?accountId=${encodeURIComponent(accountId)}`;
 
     try {
       const response = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       });
 
@@ -241,14 +272,14 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   }
 
   async deleteTemplate(metaTemplateId: string, _name: string): Promise<boolean> {
-    const accountId = await this.getAccountId();
-    const url = `${this.baseUrl}/whatsapp/templates/id/${encodeURIComponent(metaTemplateId)}?accountId=${encodeURIComponent(accountId)}`;
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
+    const url = `${baseUrl}/whatsapp/templates/id/${encodeURIComponent(metaTemplateId)}?accountId=${encodeURIComponent(accountId)}`;
 
     try {
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       });
 
@@ -266,13 +297,13 @@ export class ZernioTemplatesGatewayHttp implements MetaTemplatesGatewayPort {
   }
 
   async fetchAllTemplates(): Promise<RemoteTemplateItem[]> {
-    const accountId = await this.getAccountId();
-    const url = `${this.baseUrl}/whatsapp/templates?accountId=${encodeURIComponent(accountId)}`;
+    const { accountId, apiKey, baseUrl } = await this.getActiveConfig();
+    const url = `${baseUrl}/whatsapp/templates?accountId=${encodeURIComponent(accountId)}`;
 
     try {
       const response = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.env.ZERNIO_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       });
 

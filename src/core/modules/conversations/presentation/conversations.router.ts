@@ -10,6 +10,7 @@ import type { TakeControlUseCase } from "../application/use-cases/take-control.u
 import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
+import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
 
 export type ConversationsRouterDeps = {
   listConversations: ListConversationsUseCase;
@@ -19,6 +20,7 @@ export type ConversationsRouterDeps = {
   markAsRead: MarkConversationAsReadUseCase;
   caseRepo: CaseRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
+  settingsService?: SystemSettingsService;
 };
 
 const statusSchema = z.enum(["open", "pending", "resolved", "closed"]).optional();
@@ -217,8 +219,17 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
-        const zernioApiKey = env.ZERNIO_API_KEY || "sk_35ec3e10ad46d2d4cc17d81bb3bdeae2e9a00d57205d948be1128cb69e1f68b4";
-        const zernioAccountId = env.ZERNIO_ACCOUNT_ID || "6aa4073f726ebfe037d9f9d1";
+        let zernioApiKey = env.ZERNIO_API_KEY || "sk_35ec3e10ad46d2d4cc17d81bb3bdeae2e9a00d57205d948be1128cb69e1f68b4";
+        let zernioAccountId = env.ZERNIO_ACCOUNT_ID || "6aa4073f726ebfe037d9f9d1";
+        if (deps.settingsService) {
+          try {
+            const s = await deps.settingsService.getChannelSettings();
+            if (s.zernioApiKey) zernioApiKey = s.zernioApiKey;
+            if (s.zernioAccountId) zernioAccountId = s.zernioAccountId.trim();
+          } catch {
+            // fallback a env
+          }
+        }
         const headers: Record<string, string> = {};
         if (zernioApiKey && (resolvedUrl.includes("zernio") || env.WHATSAPP_PROVIDER === "zernio")) {
           headers["Authorization"] = `Bearer ${zernioApiKey}`;

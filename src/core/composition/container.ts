@@ -320,7 +320,7 @@ export function createContainer(): Container {
   const metaTemplatesGateway: MetaTemplatesGatewayPort = new DynamicTemplatesGateway(
     systemSettingsService,
     new MetaTemplatesGatewayHttp(env, templatesLogger),
-    new ZernioTemplatesGatewayHttp(env, templatesLogger),
+    new ZernioTemplatesGatewayHttp(env, templatesLogger, systemSettingsService),
   );
 
   // --- Campañas (Campaigns) ---
@@ -869,7 +869,7 @@ export function createContainer(): Container {
   });
 
   // --- Zernio Historical Sync (Worker + Use Cases) ---
-  const zernioHistoryGateway = new ZernioHistoryGatewayHttp(env, conversationsLogger);
+  const zernioHistoryGateway = new ZernioHistoryGatewayHttp(env, conversationsLogger, systemSettingsService);
   const zernioHistorySyncWorker = new ZernioHistorySyncWorker(
     redisClient,
     zernioHistoryGateway,
@@ -943,6 +943,7 @@ export function createContainer(): Container {
       takeControl,
       caseRepo,
       broadcaster,
+      settingsService: systemSettingsService,
     }),
   );
   app.use(

@@ -167,6 +167,38 @@ describe("Zernio Historical Sync Architecture", () => {
       expect(messages[1]?.direction).toBe("outgoing");
       expect(messages[1]?.sentVia).toBe("phone");
     });
+
+    it("utiliza credenciales dinámicas de SystemSettingsService cuando está presente", async () => {
+      const mockSettingsService = {
+        getChannelSettings: vi.fn().mockResolvedValue({
+          provider: "zernio",
+          zernioApiKey: "dynamic-api-key",
+          zernioAccountId: "6ae17617aa3ecea38f2712b",
+          zernioBaseUrl: "https://zernio.custom.io/api/v1",
+        }),
+      } as any;
+
+      const gateway = new ZernioHistoryGatewayHttp(fakeEnv, fakeLogger, mockSettingsService);
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [], pagination: { hasMore: false } }),
+      });
+      global.fetch = mockFetch;
+
+      await gateway.fetchAllConversations();
+
+      expect(mockSettingsService.getChannelSettings).toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://zernio.custom.io/api/v1/inbox/conversations?accountId=6ae17617aa3ecea38f2712b&limit=100",
+        expect.objectContaining({
+          headers: {
+            Authorization: "Bearer dynamic-api-key",
+          },
+        }),
+      );
+    });
   });
 
   describe("StartZernioHistorySyncUseCase & GetZernioHistorySyncStatusUseCase", () => {
