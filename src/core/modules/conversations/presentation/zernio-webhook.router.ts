@@ -28,6 +28,63 @@ export type ZernioWebhookRouterDeps = {
   settingsService?: SystemSettingsService;
 };
 
+export function parseDeliveryError(
+  messageObj: Record<string, unknown> | undefined,
+  body: Record<string, unknown> | undefined,
+): { errorMessage: string; is24hWindow: boolean } {
+  const rawErr =
+    messageObj?.deliveryError ||
+    messageObj?.delivery_error ||
+    messageObj?.error ||
+    body?.deliveryError ||
+    body?.error ||
+    messageObj?.errorMessage;
+
+  let errCode: number | string | undefined;
+  let errDetail = "";
+  let errString = "";
+
+  if (typeof rawErr === "object" && rawErr !== null) {
+    const obj = rawErr as {
+      code?: number | string;
+      details?: string;
+      message?: string;
+      title?: string;
+      explanation?: string;
+    };
+    errCode = obj.code;
+    errDetail = obj.explanation || obj.details || obj.message || obj.title || "";
+    errString = JSON.stringify(rawErr);
+  } else {
+    errString = String(rawErr || "");
+    errDetail = errString;
+  }
+
+  const is24hWindow =
+    String(errCode) === "131047" ||
+    errString.toLowerCase().includes("131047") ||
+    errString.toLowerCase().includes("24 hours") ||
+    errString.toLowerCase().includes("24-hour") ||
+    errString.toLowerCase().includes("re-engagement") ||
+    errString.toLowerCase().includes("customer service window") ||
+    errString.toLowerCase().includes("template");
+
+  if (is24hWindow) {
+    return {
+      errorMessage:
+        "Ventana de 24 horas cerrada: Han transcurrido más de 24h desde el último mensaje del cliente. WhatsApp requiere el envío de una plantilla aprobada (Template) para reabrir la conversación.",
+      is24hWindow: true,
+    };
+  }
+
+  return {
+    errorMessage:
+      errDetail ||
+      "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)",
+    is24hWindow: false,
+  };
+}
+
 /**
  * Endpoint receptor de Webhooks de Zernio (docs/spec/00_OVERVIEW.md regla #1).
  * Responde 200 inmediatamente tras persistir cada mensaje crudo (regla #3);
@@ -126,11 +183,7 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
         req.body?.id;
 
       if (isFailureEvent && recipientRepo && campaignRepo && platformMessageId) {
-        const errorMessage =
-          messageObj?.error?.message ||
-          messageObj?.errorMessage ||
-          req.body?.error ||
-          "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)";
+        const { errorMessage } = parseDeliveryError(messageObj, req.body);
 
         const updatedRecipient = await recipientRepo.updateStatusByExternalId(
           String(platformMessageId),
@@ -154,11 +207,8 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
 
         if (isFailureEvent) {
           newStatus = "failed";
-          errorMessage =
-            messageObj?.error?.message ||
-            messageObj?.errorMessage ||
-            req.body?.error ||
-            "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)";
+          const parsedErr = parseDeliveryError(messageObj, req.body);
+          errorMessage = parsedErr.errorMessage;
         } else if (statusRaw.includes("read") || eventName.includes("read")) {
           newStatus = "read";
         } else if (

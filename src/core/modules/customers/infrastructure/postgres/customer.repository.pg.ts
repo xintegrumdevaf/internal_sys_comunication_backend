@@ -233,8 +233,21 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
   }
 
   async delete(id: string): Promise<boolean> {
-    const { rowCount } = await this.pool.query(`DELETE FROM customer WHERE id = $1`, [id]);
-    return (rowCount ?? 0) > 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`UPDATE conversation SET customer_id = NULL WHERE customer_id = $1`, [id]);
+      await client.query(`DELETE FROM contract WHERE customer_id = $1`, [id]);
+      await client.query(`DELETE FROM customer_tag WHERE customer_id = $1`, [id]);
+      const { rowCount } = await client.query(`DELETE FROM customer WHERE id = $1`, [id]);
+      await client.query("COMMIT");
+      return (rowCount ?? 0) > 0;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async list(filter: ListCustomersFilter): Promise<{ customers: CustomerWithDetails[]; total: number }> {

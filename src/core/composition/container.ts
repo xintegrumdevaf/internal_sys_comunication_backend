@@ -948,6 +948,8 @@ export function createContainer(): Container {
       messageRepo,
       broadcaster,
       settingsService: systemSettingsService,
+      whatsappSender,
+      templateRepo: messageTemplateRepo,
     }),
   );
   app.use(

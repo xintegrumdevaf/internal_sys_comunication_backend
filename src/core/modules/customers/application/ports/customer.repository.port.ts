@@ -23,7 +23,7 @@ export type UpsertContractInput = {
 
 export type CreateCustomerInput = {
   fullName: string;
-  waPhone: string;
+  waPhone?: string | null;
   nationalId?: string | null;
   email?: string | null;
   address?: string | null;

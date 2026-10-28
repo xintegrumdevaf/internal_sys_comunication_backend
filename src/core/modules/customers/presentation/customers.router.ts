@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requireRole } from "../../../../shared/http/require-auth";
+import { requireAuth } from "../../../../shared/http/require-auth";
 import { validationError } from "../../../../shared/errors/domain-errors";
 import type { ListCustomersUseCase } from "../application/use-cases/list-customers.use-case";
 import type { GetCustomerUseCase } from "../application/use-cases/get-customer.use-case";
@@ -22,21 +22,21 @@ export interface CustomersRouterDeps {
 
 const createCustomerSchema = z.object({
   fullName: z.string().trim().min(1, "El nombre del contacto es requerido"),
-  waPhone: z.string().trim().min(6, "El número de WhatsApp es requerido"),
-  nationalId: z.string().trim().optional().nullable(),
+  waPhone: z.string().trim().min(6, "El número de WhatsApp debe tener al menos 6 dígitos").optional().nullable().or(z.literal("")),
+  nationalId: z.string().trim().optional().nullable().or(z.literal("")),
   email: z.string().trim().email("Formato de correo electrónico inválido").optional().nullable().or(z.literal("")),
-  address: z.string().trim().optional().nullable(),
-  notes: z.string().trim().optional().nullable(),
+  address: z.string().trim().optional().nullable().or(z.literal("")),
+  notes: z.string().trim().optional().nullable().or(z.literal("")),
   tagIds: z.array(z.string().uuid()).optional(),
 });
 
 const updateCustomerSchema = z.object({
-  fullName: z.string().trim().min(1).optional(),
-  waPhone: z.string().trim().min(6).optional(),
-  nationalId: z.string().trim().optional().nullable(),
+  fullName: z.string().trim().min(1, "El nombre del contacto es requerido").optional(),
+  waPhone: z.string().trim().min(6, "El número de WhatsApp debe tener al menos 6 dígitos").optional().nullable().or(z.literal("")),
+  nationalId: z.string().trim().optional().nullable().or(z.literal("")),
   email: z.string().trim().email("Formato de correo electrónico inválido").optional().nullable().or(z.literal("")),
-  address: z.string().trim().optional().nullable(),
-  notes: z.string().trim().optional().nullable(),
+  address: z.string().trim().optional().nullable().or(z.literal("")),
+  notes: z.string().trim().optional().nullable().or(z.literal("")),
   tagIds: z.array(z.string().uuid()).optional(),
 });
 
@@ -105,10 +105,24 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
       }
 
-      const cleanEmail = parsed.data.email === "" ? null : parsed.data.email;
+      const cleanEmail = parsed.data.email === "" ? null : (parsed.data.email ?? null);
+      const cleanPhone = parsed.data.waPhone === "" ? null : (parsed.data.waPhone ?? null);
+      const cleanNationalId = parsed.data.nationalId === "" ? null : (parsed.data.nationalId ?? null);
+      const cleanAddress = parsed.data.address === "" ? null : (parsed.data.address ?? null);
+      const cleanNotes = parsed.data.notes === "" ? null : (parsed.data.notes ?? null);
+
+      if (!cleanPhone && !cleanNationalId) {
+        throw validationError("Debes especificar al menos el número de WhatsApp o la cédula del contacto");
+      }
+
       const customer = await deps.createCustomer.execute({
         ...parsed.data,
+        fullName: parsed.data.fullName,
+        waPhone: cleanPhone,
+        nationalId: cleanNationalId,
         email: cleanEmail,
+        address: cleanAddress,
+        notes: cleanNotes,
       });
 
       res.status(201).json({ data: customer });
@@ -130,9 +144,18 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
       }
 
       const cleanEmail = parsed.data.email === "" ? null : parsed.data.email;
+      const cleanPhone = parsed.data.waPhone === "" ? null : parsed.data.waPhone;
+      const cleanNationalId = parsed.data.nationalId === "" ? null : parsed.data.nationalId;
+      const cleanAddress = parsed.data.address === "" ? null : parsed.data.address;
+      const cleanNotes = parsed.data.notes === "" ? null : parsed.data.notes;
+
       const customer = await deps.updateCustomer.execute(req.params.id, {
         ...parsed.data,
         email: cleanEmail,
+        waPhone: cleanPhone,
+        nationalId: cleanNationalId,
+        address: cleanAddress,
+        notes: cleanNotes,
       });
 
       res.json({ data: customer });
@@ -143,11 +166,11 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
 
   /**
    * DELETE /api/customers/:id
-   * Elimina un contacto (requiere rol admin o manager).
+   * Elimina un contacto y sus relaciones asociadas.
    */
   router.delete("/api/customers/:id", async (req, res, next) => {
     try {
-      requireRole(req, ["admin", "manager"]);
+      requireAuth(req);
       await deps.deleteCustomer.execute(req.params.id);
       res.status(204).send();
     } catch (error) {
@@ -180,8 +203,7 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
 
   /**
    * POST /api/customers/:id/conversation
-   * Obtiene o crea la conversación asociada a un contacto para abrir el chat de inmediato,
-   * permitiendo atenderlo aunque la migración de historial esté en curso.
+   * Obtiene o crea la conversación asociada a un contacto para abrir el chat de inmediato.
    */
   router.post("/api/customers/:id/conversation", async (req, res, next) => {
     try {
@@ -198,4 +220,3 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
 
   return router;
 }
-

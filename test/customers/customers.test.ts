@@ -88,7 +88,7 @@ class CustomerRepositoryFake implements CustomerRepositoryPort {
       id: `cust-${Date.now()}-${Math.random()}`,
       nationalId: input.nationalId ?? null,
       fullName: input.fullName,
-      waPhone: input.waPhone,
+      waPhone: input.waPhone ?? null,
       email: input.email ?? null,
       address: input.address ?? null,
       notes: input.notes ?? null,
