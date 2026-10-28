@@ -1,13 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
 import { env } from "../../../../shared/config/env";
-import { validationError } from "../../../../shared/errors/domain-errors";
+import { notFound, validationError } from "../../../../shared/errors/domain-errors";
 import { requireAuth } from "../../../../shared/http/require-auth";
 import type { ListConversationsUseCase } from "../application/use-cases/list-conversations.use-case";
 import type { ListMessagesUseCase } from "../application/use-cases/list-messages.use-case";
 import type { ReplyAsHumanUseCase } from "../application/use-cases/reply-as-human.use-case";
 import type { TakeControlUseCase } from "../application/use-cases/take-control.use-case";
 import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
+import type { ConversationRepositoryPort } from "../application/ports/conversation.repository.port";
+import type { MessageRepositoryPort } from "../application/ports/message.repository.port";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
@@ -19,9 +21,12 @@ export type ConversationsRouterDeps = {
   takeControl: TakeControlUseCase;
   markAsRead: MarkConversationAsReadUseCase;
   caseRepo: CaseRepositoryPort;
+  conversationRepo?: ConversationRepositoryPort;
+  messageRepo?: MessageRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
   settingsService?: SystemSettingsService;
 };
+
 
 const statusSchema = z.enum(["open", "pending", "resolved", "closed"]).optional();
 
@@ -98,6 +103,72 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
       next(error);
     }
   });
+
+  router.get("/api/conversations/:id", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      if (deps.conversationRepo) {
+        const conv = await deps.conversationRepo.findById(req.params.id);
+        if (!conv) {
+          throw notFound(`Conversacion ${req.params.id} no encontrada`);
+        }
+        let activeCaseDto = null;
+        if (caseRepo) {
+          const cases = await caseRepo.listByConversation(conv.id);
+          const active =
+            (conv.activeCaseId ? cases.find((c) => c.id === conv.activeCaseId) : null) ??
+            cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+            cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+            null;
+          if (active) {
+            const autoState = await caseRepo.getAutomationState(active.id);
+            activeCaseDto = {
+              id: active.id,
+              status: active.status,
+              workflowType: active.workflowType,
+              departmentId: active.departmentId,
+              assignedAgentId: active.assignedAgentId,
+              automationEnabled: autoState
+                ? autoState.enabled
+                : active.status !== "HUMAN_ACTIVE" && active.status !== "ESCALATED",
+            };
+          }
+        }
+        let lastPreview = null;
+        if (deps.messageRepo) {
+          const lastMap = await deps.messageRepo.findLastByConversationIds([conv.id]);
+          const last = lastMap.get(conv.id);
+          if (last) {
+            lastPreview = {
+              body: last.body,
+              author: last.author,
+              direction: last.direction,
+              createdAt: last.createdAt,
+            };
+          }
+        }
+        res.json({
+          data: {
+            ...conv,
+            lastMessagePreview: lastPreview,
+            activeCase: activeCaseDto,
+          },
+        });
+        return;
+      }
+
+      // Fallback si no está inyectado conversationRepo directamente
+      const list = await listConversations.execute({});
+      const found = list.find((c) => c.id === req.params.id);
+      if (!found) {
+        throw notFound(`Conversacion ${req.params.id} no encontrada`);
+      }
+      res.json({ data: found });
+    } catch (error) {
+      next(error);
+    }
+  });
+
 
   router.get("/api/conversations/:id/messages", async (req, res, next) => {
     try {

@@ -23,6 +23,9 @@ import { CreateCustomerUseCase } from "../../src/core/modules/customers/applicat
 import { UpdateCustomerUseCase } from "../../src/core/modules/customers/application/use-cases/update-customer.use-case";
 import { DeleteCustomerUseCase } from "../../src/core/modules/customers/application/use-cases/delete-customer.use-case";
 import { SyncCustomerIspUseCase } from "../../src/core/modules/customers/application/use-cases/sync-customer-isp.use-case";
+import { OpenOrCreateCustomerConversationUseCase } from "../../src/core/modules/customers/application/use-cases/open-or-create-conversation.use-case";
+import type { Conversation, ConversationStatus } from "../../src/core/modules/conversations/domain/conversation.entity";
+import type { ConversationRepositoryPort, ListConversationsFilter } from "../../src/core/modules/conversations/application/ports/conversation.repository.port";
 
 class CustomerRepositoryFake implements CustomerRepositoryPort {
   public customers: Customer[] = [];
@@ -270,6 +273,71 @@ class N8nGatewayFake implements N8nGatewayPort {
   }
 }
 
+class ConversationRepositoryFake implements ConversationRepositoryPort {
+  public conversations: Conversation[] = [];
+
+  async findById(id: string): Promise<Conversation | null> {
+    return this.conversations.find((c) => c.id === id) ?? null;
+  }
+  async findByWaPhone(waPhone: string): Promise<Conversation | null> {
+    return this.conversations.find((c) => c.waPhone === waPhone) ?? null;
+  }
+  async findOrCreateByWaPhone(waPhone: string): Promise<Conversation> {
+    let existing = await this.findByWaPhone(waPhone);
+    if (!existing) {
+      existing = {
+        id: `conv-${Date.now()}-${Math.random()}`,
+        waPhone,
+        customerId: null,
+        activeCaseId: null,
+        status: "open",
+        lastActivityAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        waProfileName: null,
+        unreadCount: 0,
+      };
+      this.conversations.push(existing);
+    }
+    return existing;
+  }
+  async touchLastActivity(id: string): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.lastActivityAt = new Date();
+  }
+  async setLastActivityAt(id: string, date: Date): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.lastActivityAt = date;
+  }
+  async incrementUnreadCount(id: string): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.unreadCount = (conv.unreadCount ?? 0) + 1;
+  }
+  async resetUnreadCount(id: string): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.unreadCount = 0;
+  }
+  async list(_filter: ListConversationsFilter): Promise<Conversation[]> {
+    return this.conversations;
+  }
+  async setActiveCaseId(id: string, caseId: string | null): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.activeCaseId = caseId;
+  }
+  async setCustomerId(id: string, customerId: string | null): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.customerId = customerId;
+  }
+  async setWaProfileName(id: string, name: string): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.waProfileName = name;
+  }
+  async setStatus(id: string, status: ConversationStatus): Promise<void> {
+    const conv = await this.findById(id);
+    if (conv) conv.status = status;
+  }
+}
+
 describe("Módulo de Contactos / Clientes (Customers & Contacts)", () => {
   it("crea un nuevo contacto y vincula etiquetas y conversación", async () => {
     const customerRepo = new CustomerRepositoryFake();
@@ -496,4 +564,29 @@ describe("Módulo de Contactos / Clientes (Customers & Contacts)", () => {
       syncCustomerIsp.execute({ customerId: contact.id }),
     ).rejects.toThrow("Se requiere la cédula del titular");
   });
+
+  it("abre o crea la conversación de un contacto para abrir el chat aunque la migración esté en curso", async () => {
+    const customerRepo = new CustomerRepositoryFake();
+    const conversationRepo = new ConversationRepositoryFake();
+
+    const createCustomer = new CreateCustomerUseCase(customerRepo, conversationRepo);
+    const contact = await createCustomer.execute({
+      fullName: "MTD349 - MARIA BELEN VACA ORTIZ",
+      waPhone: "+593 995 311 218",
+    });
+
+    const openOrCreate = new OpenOrCreateCustomerConversationUseCase(customerRepo, conversationRepo);
+    const result = await openOrCreate.execute(contact.id);
+
+    expect(result.conversationId).toBeDefined();
+    expect(result.customerId).toBe(contact.id);
+    expect(result.waPhone).toBe("593995311218");
+    expect(result.status).toBe("open");
+
+    const convInDb = await conversationRepo.findById(result.conversationId);
+    expect(convInDb).not.toBeNull();
+    expect(convInDb?.customerId).toBe(contact.id);
+    expect(convInDb?.waPhone).toBe("593995311218");
+  });
 });
+

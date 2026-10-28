@@ -4,9 +4,13 @@ import type {
   CreateCustomerInput,
   CustomerRepositoryPort,
 } from "../ports/customer.repository.port";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 
 export class CreateCustomerUseCase {
-  constructor(private readonly customerRepo: CustomerRepositoryPort) {}
+  constructor(
+    private readonly customerRepo: CustomerRepositoryPort,
+    private readonly conversationRepo?: ConversationRepositoryPort,
+  ) {}
 
   async execute(input: CreateCustomerInput): Promise<CustomerWithDetails> {
     const cleanPhone = input.waPhone.trim().replace(/\s+/g, "");
@@ -39,6 +43,18 @@ export class CreateCustomerUseCase {
     // Enlazar conversaciones previas de ese número
     await this.customerRepo.linkConversationByPhone(created.id, cleanPhone);
 
+    // Si se cuenta con el repositorio de conversaciones, asegurar que la conversación
+    // exista de inmediato (vacía o recuperada) para que el chat se pueda abrir al instante.
+    if (this.conversationRepo) {
+      const digitsPhone = cleanPhone.replace(/\D/g, "") || cleanPhone;
+      const conv = await this.conversationRepo.findOrCreateByWaPhone(digitsPhone);
+      if (conv.customerId !== created.id) {
+        await this.conversationRepo.setCustomerId(conv.id, created.id);
+      }
+      return (await this.customerRepo.findWithDetailsById(created.id)) ?? created;
+    }
+
     return created;
   }
 }
+

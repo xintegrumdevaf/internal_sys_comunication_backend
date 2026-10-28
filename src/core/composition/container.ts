@@ -60,6 +60,7 @@ import { CreateCustomerUseCase } from "../modules/customers/application/use-case
 import { UpdateCustomerUseCase } from "../modules/customers/application/use-cases/update-customer.use-case";
 import { DeleteCustomerUseCase } from "../modules/customers/application/use-cases/delete-customer.use-case";
 import { SyncCustomerIspUseCase } from "../modules/customers/application/use-cases/sync-customer-isp.use-case";
+import { OpenOrCreateCustomerConversationUseCase } from "../modules/customers/application/use-cases/open-or-create-conversation.use-case";
 import { createCustomersRouter } from "../modules/customers/presentation/customers.router";
 
 import { ConversationRepositoryPg } from "../modules/conversations/infrastructure/postgres/conversation.repository.pg";
@@ -858,7 +859,8 @@ export function createContainer(): Container {
 
   const listCustomers = new ListCustomersUseCase(customerRepo);
   const getCustomer = new GetCustomerUseCase(customerRepo);
-  const createCustomer = new CreateCustomerUseCase(customerRepo);
+  const createCustomer = new CreateCustomerUseCase(customerRepo, conversationRepo);
+  const openOrCreateCustomerConversation = new OpenOrCreateCustomerConversationUseCase(customerRepo, conversationRepo);
   const updateCustomer = new UpdateCustomerUseCase(customerRepo);
   const deleteCustomer = new DeleteCustomerUseCase(customerRepo);
   const syncCustomerIsp = new SyncCustomerIspUseCase({
@@ -942,6 +944,8 @@ export function createContainer(): Container {
       replyAsHuman,
       takeControl,
       caseRepo,
+      conversationRepo,
+      messageRepo,
       broadcaster,
       settingsService: systemSettingsService,
     }),
@@ -1089,6 +1093,7 @@ export function createContainer(): Container {
       updateCustomer,
       deleteCustomer,
       syncCustomerIsp,
+      openOrCreateConversation: openOrCreateCustomerConversation,
     }),
   );
   app.use(createCoverageRouter({ coverageService }));

@@ -8,6 +8,7 @@ import type { CreateCustomerUseCase } from "../application/use-cases/create-cust
 import type { UpdateCustomerUseCase } from "../application/use-cases/update-customer.use-case";
 import type { DeleteCustomerUseCase } from "../application/use-cases/delete-customer.use-case";
 import type { SyncCustomerIspUseCase } from "../application/use-cases/sync-customer-isp.use-case";
+import type { OpenOrCreateCustomerConversationUseCase } from "../application/use-cases/open-or-create-conversation.use-case";
 
 export interface CustomersRouterDeps {
   listCustomers: ListCustomersUseCase;
@@ -16,6 +17,7 @@ export interface CustomersRouterDeps {
   updateCustomer: UpdateCustomerUseCase;
   deleteCustomer: DeleteCustomerUseCase;
   syncCustomerIsp: SyncCustomerIspUseCase;
+  openOrCreateConversation?: OpenOrCreateCustomerConversationUseCase;
 }
 
 const createCustomerSchema = z.object({
@@ -176,5 +178,24 @@ export function createCustomersRouter(deps: CustomersRouterDeps): Router {
     }
   });
 
+  /**
+   * POST /api/customers/:id/conversation
+   * Obtiene o crea la conversación asociada a un contacto para abrir el chat de inmediato,
+   * permitiendo atenderlo aunque la migración de historial esté en curso.
+   */
+  router.post("/api/customers/:id/conversation", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      if (!deps.openOrCreateConversation) {
+        throw new Error("openOrCreateConversation no configurado");
+      }
+      const result = await deps.openOrCreateConversation.execute(req.params.id);
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }
+

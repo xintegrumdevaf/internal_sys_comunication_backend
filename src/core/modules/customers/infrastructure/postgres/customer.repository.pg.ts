@@ -112,9 +112,13 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
   }
 
   async findByWaPhone(waPhone: string): Promise<Customer | null> {
+    const digits = waPhone.replace(/\D/g, "");
     const { rows } = await this.pool.query<CustomerRow>(
-      `SELECT * FROM customer WHERE wa_phone = $1`,
-      [waPhone],
+      `SELECT * FROM customer
+       WHERE wa_phone = $1
+          OR ($2 != '' AND regexp_replace(wa_phone, '\\D', '', 'g') = $2)
+       LIMIT 1`,
+      [waPhone, digits],
     );
     return rows[0] ? mapCustomer(rows[0]) : null;
   }
@@ -348,11 +352,13 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
   }
 
   async linkConversationByPhone(customerId: string, waPhone: string): Promise<void> {
+    const digits = waPhone.replace(/\D/g, "");
     await this.pool.query(
       `UPDATE conversation
        SET customer_id = $1, updated_at = now()
-       WHERE wa_phone = $2 AND (customer_id IS NULL OR customer_id != $1)`,
-      [customerId, waPhone],
+       WHERE (wa_phone = $2 OR ($3 != '' AND regexp_replace(wa_phone, '\\D', '', 'g') = $3))
+         AND (customer_id IS NULL OR customer_id != $1)`,
+      [customerId, waPhone, digits],
     );
   }
 
@@ -366,10 +372,15 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
 
   private async getConversationInfo(customerId: string): Promise<ConversationInfoRow | null> {
     const { rows } = await this.pool.query<ConversationInfoRow>(
-      `SELECT id AS conversation_id, customer_id, wa_profile_name, last_activity_at
-       FROM conversation
-       WHERE customer_id = $1
-       ORDER BY last_activity_at DESC
+      `SELECT conv.id AS conversation_id, c.id AS customer_id, conv.wa_profile_name, conv.last_activity_at
+       FROM customer c
+       JOIN conversation conv ON conv.customer_id = c.id
+         OR (conv.customer_id IS NULL
+             AND c.wa_phone IS NOT NULL
+             AND length(regexp_replace(c.wa_phone, '\\D', '', 'g')) >= 6
+             AND regexp_replace(conv.wa_phone, '\\D', '', 'g') = regexp_replace(c.wa_phone, '\\D', '', 'g'))
+       WHERE c.id = $1
+       ORDER BY conv.last_activity_at DESC
        LIMIT 1`,
       [customerId],
     );
@@ -421,11 +432,16 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
     if (customerIds.length === 0) return map;
 
     const { rows } = await this.pool.query<ConversationInfoRow>(
-      `SELECT DISTINCT ON (customer_id)
-         id AS conversation_id, customer_id, wa_profile_name, last_activity_at
-       FROM conversation
-       WHERE customer_id = ANY($1::uuid[])
-       ORDER BY customer_id, last_activity_at DESC`,
+      `SELECT DISTINCT ON (c.id)
+         conv.id AS conversation_id, c.id AS customer_id, conv.wa_profile_name, conv.last_activity_at
+       FROM customer c
+       JOIN conversation conv ON conv.customer_id = c.id
+         OR (conv.customer_id IS NULL
+             AND c.wa_phone IS NOT NULL
+             AND length(regexp_replace(c.wa_phone, '\\D', '', 'g')) >= 6
+             AND regexp_replace(conv.wa_phone, '\\D', '', 'g') = regexp_replace(c.wa_phone, '\\D', '', 'g'))
+       WHERE c.id = ANY($1::uuid[])
+       ORDER BY c.id, conv.last_activity_at DESC`,
       [customerIds],
     );
 
