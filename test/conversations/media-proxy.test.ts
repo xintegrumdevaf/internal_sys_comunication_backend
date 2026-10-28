@@ -2,17 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import express from "express";
 import request from "supertest";
 import { createConversationsRouter } from "../../src/core/modules/conversations/presentation/conversations.router";
+import { requireAuth } from "../../src/shared/http/require-auth";
 
 vi.mock("../../src/shared/config/env", () => ({
   env: {
     ZERNIO_API_KEY: "zernio-secret-key",
     WHATSAPP_PROVIDER: "zernio",
     WHATSAPP_ACCESS_TOKEN: "meta-access-token",
+    ZERNIO_BASE_URL: "https://zernio.com/api/v1",
   },
 }));
 
 vi.mock("../../src/shared/http/require-auth", () => ({
-  requireAuth: () => ({ id: "agent-1", role: "agent" }),
+  requireAuth: vi.fn(() => ({ id: "agent-1", role: "agent" })),
 }));
 
 describe("ConversationsRouter - /api/media Proxy", () => {
@@ -186,6 +188,58 @@ describe("ConversationsRouter - /api/media Proxy", () => {
         headers: { Authorization: "Bearer zernio-secret-key" },
       }),
     );
+  });
+
+  it("en produccion muestra una imagen historica de Zernio sin cookie de sesion", async () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    vi.mocked(requireAuth).mockImplementation(() => {
+      const error = new Error("Debes iniciar sesion para usar esta funcion") as Error & { type: string };
+      error.type = "AUTHORIZATION_ERROR";
+      throw error;
+    });
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "image/jpeg" }),
+      arrayBuffer: async () => Buffer.from("historical-image"),
+    });
+    global.fetch = mockFetch;
+
+    const router = createConversationsRouter({
+      listConversations: {} as any,
+      listMessages: {} as any,
+      replyAsHuman: {} as any,
+      takeControl: {} as any,
+      markAsRead: {} as any,
+      caseRepo: {} as any,
+    });
+
+    const app = express();
+    app.use(router);
+    app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      res.status(err.type === "AUTHORIZATION_ERROR" ? 403 : 500).json({ error: { type: err.type, message: err.message } });
+    });
+
+    try {
+      const nested = `http://api.example.test/api/media/api/v1/whatsapp/media/1379572820964779`;
+      const ok = await request(app).get(`/api/media?url=${encodeURIComponent(nested)}`);
+      expect(ok.status).toBe(200);
+      expect(ok.headers["content-type"]).toContain("image/jpeg");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://zernio.com/api/v1/whatsapp/media/1379572820964779",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer zernio-secret-key" },
+        }),
+      );
+
+      const denied = await request(app).get(`/api/media?url=${encodeURIComponent("https://evil.example/secret.jpg")}`);
+      expect(denied.status).toBe(403);
+    } finally {
+      process.env.NODE_ENV = previousEnv;
+      vi.mocked(requireAuth).mockImplementation(() => ({ id: "agent-1", role: "agent" }) as never);
+    }
   });
 });
 

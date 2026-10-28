@@ -25,6 +25,53 @@ export type ConversationsRouterDeps = {
 
 const statusSchema = z.enum(["open", "pending", "resolved", "closed"]).optional();
 
+/**
+ * El historial guarda la ruta de Zernio y el front la pide con <img>.
+ * Esa petición es cross-site y no lleva la cookie de sesión.
+ * Si el enlace apunta otra vez a /api/media, se desenvuelve hasta el archivo real.
+ */
+function unwrapOwnMediaTarget(raw: string): string {
+  let current = raw.trim();
+  for (let i = 0; i < 4; i++) {
+    let decoded = current;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      decoded = current;
+    }
+    if (/^https?:\/+[^/]/i.test(decoded)) {
+      decoded = decoded.replace(/^(https?):\/+/, "$1://");
+    }
+    if (!/^https?:\/\//i.test(decoded)) return decoded;
+    let url: URL;
+    try {
+      url = new URL(decoded);
+    } catch {
+      return decoded;
+    }
+    if (!url.pathname.startsWith("/api/media")) return decoded;
+    const nested = url.searchParams.get("url");
+    if (nested) {
+      current = nested;
+      continue;
+    }
+    const rest = decodeURIComponent(url.pathname.replace(/^\/api\/media\/?/, "") + url.search);
+    if (!rest) return decoded;
+    current = rest;
+  }
+  return current;
+}
+
+function isZernioMediaUrl(resolvedUrl: string, baseUrl: string): boolean {
+  try {
+    const host = new URL(resolvedUrl).hostname.toLowerCase();
+    const baseHost = new URL(baseUrl).hostname.toLowerCase();
+    return host === baseHost || host === "zernio.com" || host.endsWith(".zernio.com");
+  } catch {
+    return false;
+  }
+}
+
 const replyBodySchema = z.object({
   body: z.string().min(1),
 });
@@ -153,15 +200,6 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
 
   const handleMediaProxy = async (req: Parameters<Parameters<typeof router.get>[1]>[0], res: Parameters<Parameters<typeof router.get>[1]>[1], next: Parameters<Parameters<typeof router.get>[1]>[2]) => {
     try {
-      if (!req.agent) {
-        try {
-          requireAuth(req);
-        } catch (e) {
-          if (process.env.NODE_ENV === "production" && !req.headers.referer?.includes("localhost")) {
-            throw e;
-          }
-        }
-      }
       const paramTarget = (req.params as Record<string, unknown>).path ?? req.params[0] ?? (req.params as Record<string, unknown>).mediaId;
       let rawTarget = (req.query.url as string) || (Array.isArray(paramTarget) ? paramTarget.join("/") : (paramTarget as string));
       if (!rawTarget) {
@@ -169,6 +207,7 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         return;
       }
 
+      rawTarget = unwrapOwnMediaTarget(rawTarget);
       let decodedTarget = decodeURIComponent(rawTarget);
 
       if (/^https?:\/+[^\/]/i.test(decodedTarget)) {
@@ -219,6 +258,18 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
+        const zernioBase = (env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+        const zernioMedia = isZernioMediaUrl(resolvedUrl, zernioBase);
+        if (!req.agent && !zernioMedia) {
+          try {
+            requireAuth(req);
+          } catch (e) {
+            if (process.env.NODE_ENV === "production" && !req.headers.referer?.includes("localhost")) {
+              throw e;
+            }
+          }
+        }
+
         let zernioApiKey = env.ZERNIO_API_KEY || "sk_35ec3e10ad46d2d4cc17d81bb3bdeae2e9a00d57205d948be1128cb69e1f68b4";
         let zernioAccountId = env.ZERNIO_ACCOUNT_ID || "6aa4073f726ebfe037d9f9d1";
         if (deps.settingsService) {
@@ -231,7 +282,7 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
         const headers: Record<string, string> = {};
-        if (zernioApiKey && (resolvedUrl.includes("zernio") || env.WHATSAPP_PROVIDER === "zernio")) {
+        if (zernioApiKey && zernioMedia) {
           headers["Authorization"] = `Bearer ${zernioApiKey}`;
         }
         let fileRes = await fetch(resolvedUrl, { headers });
@@ -276,6 +327,16 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         const buffer = Buffer.from(await fileRes.arrayBuffer());
         res.send(buffer);
         return;
+      }
+
+      if (!req.agent) {
+        try {
+          requireAuth(req);
+        } catch (e) {
+          if (process.env.NODE_ENV === "production" && !req.headers.referer?.includes("localhost")) {
+            throw e;
+          }
+        }
       }
 
       if (!env.WHATSAPP_ACCESS_TOKEN) {
