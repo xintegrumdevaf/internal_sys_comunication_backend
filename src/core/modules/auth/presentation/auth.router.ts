@@ -30,9 +30,15 @@ const changePasswordBodySchema = z.object({
   newPassword: z.string().min(8),
 });
 
-const availabilityBodySchema = z.object({
-  autoAssignEnabled: z.boolean(),
-});
+const availabilityBodySchema = z
+  .object({
+    autoAssignEnabled: z.boolean().optional(),
+    activeDepartmentIds: z.array(z.string().uuid()).optional(),
+  })
+  .refine(
+    (data) => data.autoAssignEnabled !== undefined || data.activeDepartmentIds !== undefined,
+    { message: "Must provide autoAssignEnabled or activeDepartmentIds" },
+  );
 
 /**
  * docs/spec/06_BACKEND_GAPS.md §1.b — login con credenciales reales.
@@ -94,6 +100,16 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
   router.post("/api/auth/logout", async (req, res, next) => {
     try {
+      if (req.agent) {
+        try {
+          await deps.updateAvailability.execute({
+            agentId: req.agent.id,
+            autoAssignEnabled: false,
+          });
+        } catch {
+          // No bloquea el logout si falla actualizar la disponibilidad
+        }
+      }
       if (req.sessionToken) {
         await deps.logout.execute(req.sessionToken);
       }
@@ -175,6 +191,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       const updated = await deps.updateAvailability.execute({
         agentId: agent.id,
         autoAssignEnabled: parsed.data.autoAssignEnabled,
+        activeDepartmentIds: parsed.data.activeDepartmentIds,
       });
       res.json({ data: toPublicAgentDto(updated) });
     } catch (error) {

@@ -159,6 +159,7 @@ o en error:
 | `GET /api/conversations/:id/messages?limit=&cursor=` | Mensajes de la conversación, orden cronológico, paginado |
 | `GET /api/conversations/:id/cases` | Casos (histórico) de la conversación |
 | `GET /api/conversations/:id/automation` | Estado de automatización del caso activo |
+| `GET /api/media/*` (o `?url=`) | Proxy streaming de media para WhatsApp/Zernio (desenvolvimiento recursivo, inyección dinámica de auth y carga directa en etiquetas `<img>`) |
 | `GET /api/cases/:id` | Detalle del caso: estado, workflow, contexto tipado, automation state |
 | `GET /api/cases/:id/timeline` | `workflow_execution`/`workflow_event` ordenados cronológicamente |
 | `GET /api/cases/:id/summary` | Resumen estructurado — solo si el caso fue escalado o está `HUMAN_ACTIVE` |
@@ -191,7 +192,8 @@ o en error:
 | `POST /api/cases/:id/cancel` `{ reason }` | `CANCELLED` |
 | `POST /api/cases/:id/disable-automation` `{ reason }` | Fuerza `automation.enabled=false` sin escalar |
 | `POST /api/cases/:id/reactivate-automation` | `automation.enabled=true`, conserva `context` |
-| `POST /api/cases/:id/transfer` `{ toDepartmentId, reason }` | Transferencia de departamento, auditada |
+| `POST /api/cases/:id/sync-data` | Sincroniza la ficha completa del cliente (contratos, sector, OLT, PON, serial, IP) y saldo (`VALIDATE_CLIENT` + `CHECK_BALANCE`) |
+| `POST /api/cases/:id/diagnose` | Ejecuta diagnóstico de red en caliente contra MikroTik/OLT (`DIAGNOSTIC`), actualizando telemetría técnica (dBm, runState, MAC) |
 | `PUT /api/admin/n8n-workflows/:action` `{ url, timeoutMs?, maxRetries?, active? }` | Crea/actualiza la entrada del catálogo (`admin` únicamente) — efecto inmediato, sin redeploy |
 | `DELETE /api/admin/n8n-workflows/:action` | Desactiva una entrada del catálogo |
 | `POST /api/quality/reviews` `{ caseId }` | Encola análisis on-demand (`07_QUALITY_SUPERVISION.md` §4.2) — solo `manager`/`admin` con alcance al depto del caso |
@@ -212,6 +214,7 @@ o en error:
 | `PATCH /api/customers/:id` `{ fullName?, waPhone?, nationalId?, email?, address?, notes?, tagIds? }` | Modifica un contacto y actualiza sus etiquetas |
 | `DELETE /api/customers/:id` | Elimina un contacto (`admin`/`manager`) |
 | `POST /api/customers/:id/sync-isp` `{ nationalId? }` | Sincroniza con n8n (`VALIDATE_CLIENT`), guarda contratos y auto-etiqueta por sector |
+| `POST /api/customers/:id/conversation` | Obtiene o crea la conversación asociada a un contacto para abrir el chat de inmediato (incluso con migración en curso) |
 | `POST /api/internal/threads/:id/read` | Marca el hilo como leído para el agente autenticado |
 
 **Autorización de lectura**: cualquier agente autenticado puede leer conversaciones/casos de departamentos `visibility='shared'` (default); solo agentes con `agent_membership` en el departamento pueden leer los `restricted`. El pool de triage (`department_id IS NULL`) solo lo leen `manager`/`admin`.

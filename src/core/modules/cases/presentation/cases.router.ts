@@ -14,6 +14,9 @@ import type { CompleteCaseUseCase } from "../application/use-cases/complete-case
 import type { TransferCaseUseCase } from "../application/use-cases/transfer-case.use-case";
 import type { GetDashboardUseCase } from "../application/use-cases/get-dashboard.use-case";
 import type { ScheduleCaseUseCase } from "../application/use-cases/schedule-case.use-case";
+import type { SyncCaseBalanceUseCase } from "../application/use-cases/sync-case-balance.use-case";
+import type { SyncCaseDataUseCase } from "../application/use-cases/sync-case-data.use-case";
+import type { TriggerCaseDiagnosticUseCase } from "../application/use-cases/trigger-case-diagnostic.use-case";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 
 export type CasesRouterDeps = {
@@ -28,6 +31,9 @@ export type CasesRouterDeps = {
   cancelCase: CancelCaseUseCase;
   transferCase: TransferCaseUseCase;
   scheduleCase?: ScheduleCaseUseCase;
+  syncCaseBalance?: SyncCaseBalanceUseCase;
+  syncCaseData?: SyncCaseDataUseCase;
+  triggerCaseDiagnostic?: TriggerCaseDiagnosticUseCase;
   getDashboard: GetDashboardUseCase;
   broadcaster?: RealtimeBroadcaster;
 };
@@ -349,6 +355,46 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
           conversationId: aggregate.case.conversationId,
         });
       }
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post(["/api/cases/:id/sync-data", "/api/cases/:id/sync-balance"], async (req, res, next) => {
+    try {
+      const agent = requireAuth(req);
+      const caseId = String(req.params.id);
+      if (deps.syncCaseData) {
+        const result = await deps.syncCaseData.execute({
+          caseId,
+          agentUserId: agent.id,
+        });
+        return res.json({ data: result });
+      }
+      if (deps.syncCaseBalance) {
+        const result = await deps.syncCaseBalance.execute({
+          caseId,
+          agentUserId: agent.id,
+        });
+        return res.json({ data: result });
+      }
+      throw new Error("syncCaseData no configurado");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/cases/:id/diagnose", async (req, res, next) => {
+    try {
+      const agent = requireAuth(req);
+      if (!deps.triggerCaseDiagnostic) {
+        throw new Error("triggerCaseDiagnostic no configurado");
+      }
+      const result = await deps.triggerCaseDiagnostic.execute({
+        caseId: req.params.id,
+        agentUserId: agent.id,
+      });
       res.json({ data: result });
     } catch (error) {
       next(error);

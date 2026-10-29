@@ -79,6 +79,7 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
 | `POST` | `/api/conversations/sync-history` | sesión de `role=admin` | Encola en Redis la sincronización de mensajes históricos de Zernio. Body opcional: `{ "days": 30, "limit": 100 }` |
 | `GET` | `/api/conversations/sync-history/status` | sesión (`admin` o `manager`) | Consulta el estado del worker de sincronización (`idle`, `running`, `completed`, `failed`), total sincronizado y errores |
+| `GET` | `/api/media/*` o `?url=` | wildcard o query `?url=` | Proxy de streaming de adjuntos multimedia (WhatsApp y Zernio). Desempaqueta URLs anidadas recursivamente, inyecta credenciales dinámicas de canal e incluye bypass de sesión para etiquetas `<img>` del navegador |
 
 Todas requieren sesión (§1) — el agente que responde/toma control es siempre el de la cookie, nunca uno declarado en el body.
 
@@ -110,6 +111,8 @@ Content-Type: application/json
 | `POST` | `/api/cases/:id/transfer` | `{ "toDepartmentId", "reason" }` | Cambia departamento |
 | `POST` | `/api/cases/:id/disable-automation` | `{ "reason" }` | Apaga bot sin escalar |
 | `POST` | `/api/cases/:id/reactivate-automation` | — (sesión) | Reactiva bot **conservando** el context |
+| `POST` | `/api/cases/:id/sync-data` | — (sesión) | Sincroniza ficha completa de cliente (contratos, sector, OLT, PON, serial, IP) y saldo actual |
+| `POST` | `/api/cases/:id/diagnose` | — (sesión) | Dispara diagnóstico técnico en caliente a MikroTik/OLT (`SUPPORT_INTERNET`) y actualiza telemetría |
 
 Todas requieren sesión — quién ejecuta la acción es siempre el agente de la cookie.
 
@@ -304,11 +307,26 @@ Atajos de respuesta predefinidos con variables dinámicas (`{{nombre}}`, `{{cedu
 | `PUT` | `/api/quick-replies/:id` | `admin` o `manager` | Actualiza una respuesta rápida existente. `manager` solo puede modificar las de su departamento |
 | `DELETE` | `/api/quick-replies/:id` | `admin` o `manager` | Elimina una respuesta rápida |
 
+## 15. Directorio de Contactos y Clientes (/api/customers)
+
+Gestión unificada de clientes del ISP, etiquetado, sincronización con n8n y apertura inmediata de chats operativos:
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/customers` | sesión | Lista paginada de clientes. Query: `search=`, `tagId=`, `hasTags=`, `startDate=`, `endDate=`, `page=`, `limit=` |
+| `GET` | `/api/customers/:id` | sesión | Detalle del cliente: datos de contacto, contratos asociados, etiquetas y conversación vinculada |
+| `POST` | `/api/customers` | sesión | Crea un contacto nuevo y lo vincula automáticamente a su conversación si existe |
+| `PATCH` | `/api/customers/:id` | sesión | Modifica datos del contacto y actualiza sus etiquetas |
+| `DELETE` | `/api/customers/:id` | `admin` o `manager` | Elimina un contacto |
+| `POST` | `/api/customers/:id/sync-isp` | sesión | Sincroniza contratos del cliente consultando a n8n (`VALIDATE_CLIENT`) y auto-asigna etiquetas por sector |
+| `POST` | `/api/customers/:id/conversation` | sesión | Abre o crea al vuelo la conversación de WhatsApp para ese cliente, permitiendo chatear inmediatamente sin esperar que termine la sincronización de historial |
+
 ---
 
-## 15. Qué **no** es HTTP en esta API
+## 16. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.
 
 Detalle: [`03_API_CONTRACT.md`](./spec/03_API_CONTRACT.md) §A y §B.
+

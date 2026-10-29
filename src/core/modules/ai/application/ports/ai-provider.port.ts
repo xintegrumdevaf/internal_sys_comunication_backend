@@ -49,9 +49,11 @@ export type ComposeReplyInput = {
 };
 
 export type ReceiptData = {
+  isReceipt?: boolean;
   amount?: number;
   reference?: string;
   date?: string;
+  description?: string;
 };
 
 export type AnalyzeAgentConversationInput = {

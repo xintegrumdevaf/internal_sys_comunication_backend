@@ -41,7 +41,7 @@ export class ContractRepositoryPg implements ContractRepositoryPort {
   async listActiveByCustomerId(customerId: string): Promise<Contract[]> {
     const { rows } = await this.pool.query<ContractRow>(
       `SELECT * FROM contract
-       WHERE customer_id = $1 AND status = 'active'
+       WHERE customer_id = $1 AND LOWER(status) IN ('active', 'activo')
        ORDER BY created_at ASC`,
       [customerId],
     );

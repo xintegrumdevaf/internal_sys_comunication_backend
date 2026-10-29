@@ -18,6 +18,7 @@ type AgentRow = {
   created_at: Date;
   password_hash: string | null;
   department_ids?: string[];
+  active_department_ids?: string[] | null;
 };
 
 function mapRow(row: AgentRow): Agent {
@@ -28,6 +29,7 @@ function mapRow(row: AgentRow): Agent {
     role: row.role,
     primaryDepartmentId: row.primary_department_id,
     departmentIds: row.department_ids ?? [],
+    activeDepartmentIds: row.active_department_ids ?? undefined,
     active: row.active,
     autoAssignEnabled: row.auto_assign_enabled,
     mustChangePassword: row.must_change_password,
@@ -129,6 +131,10 @@ export class AgentRepositoryPg implements AgentRepositoryPort {
     if (patch.autoAssignEnabled !== undefined) {
       sets.push(`auto_assign_enabled = $${i++}`);
       values.push(patch.autoAssignEnabled);
+    }
+    if (patch.activeDepartmentIds !== undefined) {
+      sets.push(`active_department_ids = $${i++}`);
+      values.push(patch.activeDepartmentIds);
     }
     if (patch.mustChangePassword !== undefined) {
       sets.push(`must_change_password = $${i++}`);

@@ -74,8 +74,9 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
     log: Logger,
   ): Promise<N8nActionResult> {
     const url = this.buildUrl(MIKROTIK_API_PATHS.CLIENT_STATUS);
+    const normalizedSector = normalizeMikrotikSector(params.input.sector);
     const body = {
-      sector: params.input.sector ?? null,
+      sector: normalizedSector || params.input.sector || null,
       ip: params.input.ip ?? null,
     };
 
@@ -92,9 +93,11 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
     log: Logger,
   ): Promise<N8nActionResult> {
     const url = this.buildUrl(MIKROTIK_API_PATHS.DIAGNOSTIC);
+    const normalizedSector = normalizeMikrotikSector(params.input.sector);
+    const normalizedOlt = normalizeMikrotikOlt(params.input.oltName, normalizedSector);
     const body = {
-      sector: params.input.sector ?? null,
-      oltName: params.input.oltName ?? null,
+      sector: normalizedSector || params.input.sector || null,
+      oltName: normalizedOlt || params.input.oltName || null,
       pon: params.input.pon ?? null,
       serial: params.input.serial ?? null,
       conversationId: params.conversationId,
@@ -165,8 +168,20 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
+        let cleanErrorMessage = errorText.slice(0, 150);
+        let errorCode = "EXTERNAL_SERVICE_ERROR";
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed && typeof parsed === "object") {
+            if (typeof parsed.message === "string") cleanErrorMessage = parsed.message;
+            if (typeof parsed.code === "string") errorCode = parsed.code;
+          }
+        } catch {
+          // ignore json parse error
+        }
+
         log.error(
-          { status: response.status, elapsedMs, body: errorText },
+          { status: response.status, elapsedMs, body: errorText, cleanErrorMessage },
           `[diagnostic-api] respuesta HTTP no exitosa para '${action}'`,
         );
 
@@ -174,8 +189,8 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
         return {
           success: false,
           error: {
-            type: isValidation ? "VALIDATION_ERROR" : "EXTERNAL_SERVICE_ERROR",
-            message: `Servicio de diagnostico respondio ${response.status}: ${errorText.slice(0, 150)}`,
+            type: (isValidation ? (errorCode !== "EXTERNAL_SERVICE_ERROR" ? errorCode : "VALIDATION_ERROR") : "EXTERNAL_SERVICE_ERROR") as any,
+            message: cleanErrorMessage,
             retryable: !isValidation,
           },
         };
@@ -256,3 +271,73 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
     }
   }
 }
+
+export function normalizeMikrotikSector(rawSector?: unknown): string {
+  if (typeof rawSector !== "string") return "";
+  let s = rawSector.trim().toLowerCase().replace(/[-_]?(mkt|mtd)$/i, "").trim();
+  if (s.includes("bellavista")) return "bellavista";
+  if (s.includes("pomasqui")) return "pomasqui";
+  if (s.includes("sanantonio")) return "sanAntonio";
+  if (s.includes("pifo")) return "pifo";
+  if (s.includes("calacali")) return "calacali";
+  if (s.includes("totoracocha")) return "totoracocha";
+  if (s.includes("santabarbara") || s.includes("barbara")) return "santaBarbara";
+  return s;
+}
+
+export type KnownSectorTopology = Record<string, string[]>;
+
+export const DEFAULT_NETWORK_TOPOLOGY: KnownSectorTopology = {
+  pomasqui: ["bicentenario", "pomasqui"],
+  sanAntonio: ["kyngtype", "rumicucho", "cDataSoles"],
+  pifo: ["pifo"],
+  calacali: ["calacali"],
+  bellavista: ["bellavista"],
+  totoracocha: ["totoracocha"],
+  santaBarbara: ["santaBarbara"],
+};
+
+export function resolveOltForSector(
+  rawOlt: unknown,
+  rawSector: unknown,
+  topology: KnownSectorTopology = DEFAULT_NETWORK_TOPOLOGY,
+): string {
+  const sector = normalizeMikrotikSector(rawSector);
+  if (!sector) return typeof rawOlt === "string" ? rawOlt.trim() : "";
+
+  const availableOlts = topology[sector];
+  if (!availableOlts || availableOlts.length === 0) {
+    return typeof rawOlt === "string" ? rawOlt.trim() : "";
+  }
+
+  // Regla 1: Si el router/nodo solo tiene 1 OLT registrada, esa es la única físicamente existente
+  if (availableOlts.length === 1) {
+    return availableOlts[0]!;
+  }
+
+  // Regla 2: Si tiene 2 o más OLTs, contrastar e identificar a cuál pertenece según el nombre
+  const oltStr = typeof rawOlt === "string" ? rawOlt.trim() : "";
+  if (!oltStr) return availableOlts[0]!;
+
+  const cleanOlt = oltStr.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Buscar coincidencia directa o parcial
+  for (const candidate of availableOlts) {
+    const cleanCandidate = candidate.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (cleanCandidate === cleanOlt || cleanCandidate.includes(cleanOlt) || cleanOlt.includes(cleanCandidate)) {
+      return candidate;
+    }
+  }
+
+  // Mapeos conocidos de alias de marcas
+  if (cleanOlt.includes("cdata") && availableOlts.includes("cDataSoles")) {
+    return "cDataSoles";
+  }
+  if ((cleanOlt.includes("kingtype") || cleanOlt.includes("kyngtype")) && availableOlts.includes("kyngtype")) {
+    return "kyngtype";
+  }
+
+  return availableOlts[0]!;
+}
+
+export const normalizeMikrotikOlt = resolveOltForSector;

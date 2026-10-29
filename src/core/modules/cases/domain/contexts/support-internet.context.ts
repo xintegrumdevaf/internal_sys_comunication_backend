@@ -132,8 +132,14 @@ export function normalizeTechnicalData(raw: unknown): SupportInternetDiagnosticT
       ? { macAddress: t.mac }
       : typeof t.mac?.mac === "string"
         ? { macAddress: t.mac.mac }
+        : typeof (raw as { macAddress?: unknown })?.macAddress === "string"
+          ? { macAddress: (raw as { macAddress: string }).macAddress }
+          : {}),
+    ...(typeof t.power === "number"
+      ? { opticalPowerDbm: t.power }
+      : typeof (raw as { opticalPowerDbm?: unknown })?.opticalPowerDbm === "number"
+        ? { opticalPowerDbm: (raw as { opticalPowerDbm: number }).opticalPowerDbm }
         : {}),
-    ...(typeof t.power === "number" ? { opticalPowerDbm: t.power } : {}),
     ...(typeof t.state?.runState === "string" ? { runState: t.state.runState } : {}),
     ...(typeof t.state?.adminState === "string" ? { adminState: t.state.adminState } : {}),
     ...(typeof t.state?.channel === "string" ? { channel: t.state.channel } : {}),

@@ -22,6 +22,7 @@ export type UpdateAgentPatch = Partial<{
   role: AgentRole;
   primaryDepartmentId: string | null;
   departmentIds: string[];
+  activeDepartmentIds: string[];
   active: boolean;
   autoAssignEnabled: boolean;
   mustChangePassword: boolean;

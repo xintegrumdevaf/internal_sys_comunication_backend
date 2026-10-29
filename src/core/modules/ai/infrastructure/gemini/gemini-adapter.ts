@@ -191,8 +191,15 @@ export class GeminiAdapter implements AIProviderPort {
     const started = Date.now();
     try {
       const base64Data = await this.downloadMediaAsBase64(mediaUrl);
-      const system = "Sos un extractor de datos de recibos de pago. Analizá la imagen provista y extraé los siguientes campos en formato JSON:\n- amount: el monto total pagado como un número con decimales (por ejemplo, 12500.50).\n- reference: el número de transacción o referencia como texto.\n- date: la fecha de la transacción en formato YYYY-MM-DD.\n\nDevolvé ÚNICAMENTE el objeto JSON correspondiente. Si no lográs identificar alguno de los campos, dejalo como null.";
-      const user = "Extraé los datos del siguiente recibo:";
+      const system = "Sos un analizador y extractor visual de imágenes para una empresa proveedora de internet (ISP). Tu tarea es determinar con precisión si la imagen provista corresponde efectivamente a un comprobante de pago (transferencia bancaria, depósito o recibo de pago de servicios) o si es otro tipo de imagen (por ejemplo: foto de televisor o monitor, foto de router o equipos de red, cables, captura de pantalla de speedtest, foto de una habitación, personas o memes).\n\n" +
+        "Devolvé un único objeto JSON con los siguientes campos:\n" +
+        "- isReceipt: booleano (true únicamente si la imagen es claramente un comprobante de pago, transferencia o depósito; false si es cualquier otra cosa).\n" +
+        "- amount: el monto numérico del pago si es visible (ej: 25.50), o null si no se identifica.\n" +
+        "- reference: el número de comprobante, autorización o transacción como texto, o null si no es visible.\n" +
+        "- date: la fecha de la transacción en formato YYYY-MM-DD, o null si no es visible.\n" +
+        "- description: una descripción muy concisa (máximo 15 palabras) de lo que muestra la imagen (ej: 'foto de televisor encendido en dormitorio', 'foto de router con luces encendidas', 'captura de speedtest').\n\n" +
+        "Devolvé ÚNICAMENTE el JSON correspondiente.";
+      const user = "Analizá el contenido de la siguiente imagen:";
 
       const payload = {
         contents: [
@@ -221,8 +228,8 @@ export class GeminiAdapter implements AIProviderPort {
       const raw = await this.callGemini(payload, this.config.timeoutMs);
       const data = parseReceiptData(raw);
       this.logger.info(
-        { durationMs: Date.now() - started, amount: data.amount, reference: data.reference },
-        "Gemini extraccion de recibo OK",
+        { durationMs: Date.now() - started, isReceipt: data.isReceipt, amount: data.amount, reference: data.reference },
+        "Gemini análisis de imagen y recibo OK",
       );
       return data;
     } catch (error) {
@@ -466,11 +473,18 @@ function parseReceiptData(raw: string): ReceiptData {
   }
 
   const obj = parsed as Record<string, unknown>;
+  const isReceipt = obj.isReceipt === true;
   const amount = obj.amount !== undefined && obj.amount !== null ? Number(obj.amount) : undefined;
+  const reference = typeof obj.reference === "string" || typeof obj.reference === "number" ? String(obj.reference) : undefined;
+  const date = typeof obj.date === "string" ? obj.date : undefined;
+  const description = typeof obj.description === "string" ? obj.description : undefined;
+
   return {
+    isReceipt,
     amount: amount && Number.isFinite(amount) ? amount : undefined,
-    reference: typeof obj.reference === "string" || typeof obj.reference === "number" ? String(obj.reference) : undefined,
-    date: typeof obj.date === "string" ? obj.date : undefined,
+    reference,
+    date,
+    description,
   };
 }
 

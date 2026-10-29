@@ -2,8 +2,8 @@
   "id": "Od3uTkHFVOeQtSs5",
   "name": "check-balance",
   "description": null,
-  "active": true,
-  "activeVersionId": "0c061281-2b9f-42ea-a780-c728c5ef4483",
+  "active": false,
+  "activeVersionId": null,
   "createdAt": "2026-08-19T17:46:42.554Z",
   "updatedAt": "2026-08-20T17:51:21.333Z",
   "isArchived": false,
@@ -55,7 +55,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\n\nreturn [\n  {\n    json: {\n      hasDebt: debt !== \"\",\n      debt: parseFloat((debt || \"0\").replace(\",\", \".\"))\n    }\n  }\n];"
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\nconst debtAmount = parseFloat((debt || \"0\").replace(\",\", \".\"));\n\nreturn [\n  {\n    json: {\n      hasDebt: Number.isFinite(debtAmount) && debtAmount > 0,\n      debt: Number.isFinite(debtAmount) ? debtAmount : 0\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -211,7 +211,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\n\nreturn [\n  {\n    json: {\n      hasDebt: debt !== \"\",\n      debt: parseFloat((debt || \"0\").replace(\",\", \".\"))\n    }\n  }\n];"
+          "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\nconst debtAmount = parseFloat((debt || \"0\").replace(\",\", \".\"));\n\nreturn [\n  {\n    json: {\n      hasDebt: Number.isFinite(debtAmount) && debtAmount > 0,\n      debt: Number.isFinite(debtAmount) ? debtAmount : 0\n    }\n  }\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,

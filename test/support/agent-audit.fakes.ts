@@ -31,6 +31,7 @@ export class AgentRepositoryFake implements AgentRepositoryPort {
       role: partial.role ?? "agent",
       primaryDepartmentId: partial.primaryDepartmentId ?? null,
       departmentIds,
+      activeDepartmentIds: partial.activeDepartmentIds,
       active: partial.active ?? true,
       autoAssignEnabled: partial.autoAssignEnabled ?? false,
       mustChangePassword: partial.mustChangePassword ?? true,

@@ -3,10 +3,13 @@ import { AutoAssignAgentService } from "../../../src/core/modules/escalation/app
 import { CaseRepositoryFake } from "../../cases/fakes";
 import { AgentRepositoryFake } from "../../support/agent-audit.fakes";
 
-function build(maxActiveCasesPerAgent = 6) {
+function build(
+  maxActiveCasesPerAgent = 6,
+  broadcaster?: { isUserConnected: (userId: string) => boolean },
+) {
   const agentRepo = new AgentRepositoryFake();
   const caseRepo = new CaseRepositoryFake();
-  const service = new AutoAssignAgentService({ agentRepo, caseRepo, maxActiveCasesPerAgent });
+  const service = new AutoAssignAgentService({ agentRepo, caseRepo, broadcaster, maxActiveCasesPerAgent });
   return { agentRepo, caseRepo, service };
 }
 
@@ -184,6 +187,89 @@ describe("AutoAssignAgentService (docs/spec/06_BACKEND_GAPS.md §2)", () => {
   it("devuelve null si no hay ningun agente elegible en el departamento", async () => {
     const { service } = build();
     const chosen = await service.pickAgentForDepartment("dept-vacio");
+    expect(chosen).toBeNull();
+  });
+
+  it("excluye a agentes con autoAssignEnabled=true pero desconectados en tiempo real (broadcaster.isUserConnected=false)", async () => {
+    const connectedUsers = new Set<string>();
+    const broadcaster = {
+      isUserConnected: (userId: string) => connectedUsers.has(userId),
+    };
+    const { agentRepo, service } = build(6, broadcaster);
+
+    const offlineAgent = agentRepo.seed({
+      name: "Offline",
+      email: "offline@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: true,
+    });
+
+    const chosen = await service.pickAgentForDepartment("dept-1");
+    expect(chosen).toBeNull();
+
+    // Cuando se conecta a SSE, ya puede recibir casos
+    connectedUsers.add(offlineAgent.id);
+    const chosenAfterConnect = await service.pickAgentForDepartment("dept-1");
+    expect(chosenAfterConnect?.id).toBe(offlineAgent.id);
+  });
+
+  it("asigna al agente conectado si otro agente elegible está desconectado", async () => {
+    const connectedUsers = new Set<string>();
+    const broadcaster = {
+      isUserConnected: (userId: string) => connectedUsers.has(userId),
+    };
+    const { agentRepo, service } = build(6, broadcaster);
+
+    const offlineAgent = agentRepo.seed({
+      name: "Agente Desconectado",
+      email: "offline@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: true,
+    });
+    const onlineAgent = agentRepo.seed({
+      name: "Agente Conectado",
+      email: "online@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: true,
+    });
+
+    // Solo el agente online está conectado a SSE
+    connectedUsers.add(onlineAgent.id);
+
+    const chosen = await service.pickAgentForDepartment("dept-1");
+    expect(chosen?.id).toBe(onlineAgent.id);
+  });
+
+  it("devuelve null si todos los agentes elegibles con autoAssignEnabled están desconectados", async () => {
+    const broadcaster = {
+      isUserConnected: () => false,
+    };
+    const { agentRepo, service } = build(6, broadcaster);
+
+    agentRepo.seed({
+      name: "Agente 1",
+      email: "a1@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: true,
+    });
+    agentRepo.seed({
+      name: "Agente 2",
+      email: "a2@isp.local",
+      role: "agent",
+      primaryDepartmentId: "dept-1",
+      active: true,
+      autoAssignEnabled: true,
+    });
+
+    const chosen = await service.pickAgentForDepartment("dept-1");
     expect(chosen).toBeNull();
   });
 });
