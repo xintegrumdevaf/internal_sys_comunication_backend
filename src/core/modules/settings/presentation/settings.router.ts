@@ -235,7 +235,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         ) as Record<string, any>[];
         if (remoteRouters.length > 0) {
           // Combinar contraseñas/metadatos locales con los routers remotos
-          const merged = remoteRouters.map((rem) => {
+          const merged: Record<string, any>[] = remoteRouters.map((rem): Record<string, any> => {
             const loc = localRouters.find(
               (l) =>
                 l.id === rem.id ||
