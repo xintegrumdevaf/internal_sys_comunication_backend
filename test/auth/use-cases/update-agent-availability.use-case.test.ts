@@ -70,4 +70,48 @@ describe("UpdateAgentAvailabilityUseCase & Auto-Assign Load Balancer", () => {
     const pickedWhenAllDisconnected = await balancer.pickAgentForDepartment(support.id);
     expect(pickedWhenAllDisconnected).toBeNull();
   });
+
+  it("permite a un agente suplente activar/desactivar colas de atencion especificas", async () => {
+    const agentRepo = new AgentRepositoryFake();
+    const caseRepo = new CaseRepositoryFake();
+    const departmentRepo = new DepartmentRepositoryFake();
+
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const sales = departmentRepo.seed({ slug: "sales", name: "Ventas" });
+
+    // Agente cuyo departamento principal es Soporte, pero es suplente en Ventas
+    const substituteAgent = agentRepo.seed({
+      name: "Agente Suplente",
+      email: "suplente@isp.local",
+      role: "agent",
+      primaryDepartmentId: support.id,
+      departmentIds: [sales.id],
+      autoAssignEnabled: true,
+      activeDepartmentIds: [support.id], // Solo atiende Soporte hoy
+    });
+
+    const balancer = new AutoAssignAgentService({
+      agentRepo,
+      caseRepo,
+    });
+
+    // En Ventas NO debe ser elegido porque no tiene activa la cola de Ventas
+    const pickedSalesBefore = await balancer.pickAgentForDepartment(sales.id);
+    expect(pickedSalesBefore).toBeNull();
+
+    // En Soporte SI es elegido porque tiene activa la cola de Soporte
+    const pickedSupport = await balancer.pickAgentForDepartment(support.id);
+    expect(pickedSupport?.id).toBe(substituteAgent.id);
+
+    // Ahora activa su turno de suplente en Ventas
+    const useCase = new UpdateAgentAvailabilityUseCase({ agentRepo, logger: silentLogger });
+    await useCase.execute({
+      agentId: substituteAgent.id,
+      activeDepartmentIds: [support.id, sales.id],
+    });
+
+    // Ahora SI entra al balanceador de Ventas
+    const pickedSalesAfter = await balancer.pickAgentForDepartment(sales.id);
+    expect(pickedSalesAfter?.id).toBe(substituteAgent.id);
+  });
 });

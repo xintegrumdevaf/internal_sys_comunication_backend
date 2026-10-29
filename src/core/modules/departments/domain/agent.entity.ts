@@ -10,6 +10,11 @@ export interface Agent {
    * Departamentos adicionales a los que pertenece el agente (agent_membership).
    */
   departmentIds?: string[];
+  /**
+   * Departamentos especificos en los que el agente esta activo en su turno actual.
+   * Si es undefined o vacio, atiende por defecto en su primaryDepartmentId.
+   */
+  activeDepartmentIds?: string[];
   active: boolean;
   /**
    * Opt-in al pool de auto-asignacion al escalar (`AutoAssignAgentService`).

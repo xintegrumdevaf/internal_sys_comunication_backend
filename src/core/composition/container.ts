@@ -168,6 +168,9 @@ import { UpsertN8nWorkflowUseCase } from "../modules/cases/application/use-cases
 import { DeactivateN8nWorkflowUseCase } from "../modules/cases/application/use-cases/deactivate-n8n-workflow.use-case";
 import { createN8nWorkflowsRouter } from "../modules/cases/presentation/admin/n8n-workflows.router";
 import { ScheduleCaseUseCase } from "../modules/cases/application/use-cases/schedule-case.use-case";
+import { SyncCaseBalanceUseCase } from "../modules/cases/application/use-cases/sync-case-balance.use-case";
+import { SyncCaseDataUseCase } from "../modules/cases/application/use-cases/sync-case-data.use-case";
+import { TriggerCaseDiagnosticUseCase } from "../modules/cases/application/use-cases/trigger-case-diagnostic.use-case";
 import { ScheduledReminderNotifierService } from "../modules/cases/application/services/scheduled-reminder-notifier.service";
 import { createCasesRouter } from "../modules/cases/presentation/cases.router";
 
@@ -559,6 +562,7 @@ export function createContainer(): Container {
   const autoAssignAgent = new AutoAssignAgentService({
     agentRepo,
     caseRepo,
+    broadcaster,
     maxActiveCasesPerAgent: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
   });
   const escalationService = new EscalationService({
@@ -681,6 +685,31 @@ export function createContainer(): Container {
     caseRepo,
     departmentRepo,
     auditRepo,
+    logger: casesLogger,
+  });
+  const syncCaseBalance = new SyncCaseBalanceUseCase({
+    caseRepo,
+    customerRepo,
+    conversationRepo,
+    actionGateway,
+    broadcaster,
+    logger: casesLogger,
+  });
+  const syncCaseData = new SyncCaseDataUseCase({
+    caseRepo,
+    customerRepo,
+    contractRepo,
+    conversationRepo,
+    actionGateway,
+    broadcaster,
+    logger: casesLogger,
+  });
+  const triggerCaseDiagnostic = new TriggerCaseDiagnosticUseCase({
+    caseRepo,
+    contractRepo,
+    conversationRepo,
+    actionGateway,
+    broadcaster,
     logger: casesLogger,
   });
   const getDashboard = new GetDashboardUseCase({
@@ -976,7 +1005,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
-  app.use(createSettingsRouter({ settingsService: systemSettingsService, logger: logger.child({ module: "settings" }) }));
+  app.use(createSettingsRouter({ settingsService: systemSettingsService, logger: logger.child({ module: "settings" }), departmentRepo }));
   app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     "/api/prompts",
@@ -1009,6 +1038,9 @@ export function createContainer(): Container {
       cancelCase,
       transferCase,
       scheduleCase,
+      syncCaseBalance,
+      syncCaseData,
+      triggerCaseDiagnostic,
       getDashboard,
       broadcaster,
     }),

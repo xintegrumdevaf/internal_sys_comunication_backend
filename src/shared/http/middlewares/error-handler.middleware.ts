@@ -31,7 +31,16 @@ export function createErrorHandler(fallbackLogger: Logger): ErrorRequestHandler 
       return;
     }
 
-    log.error({ err, path: req.path }, "unhandled error");
+    const errorPayload =
+      err instanceof AggregateError
+        ? {
+            name: err.name,
+            message: err.message,
+            errors: Array.isArray(err.errors) ? err.errors.map((e) => (e instanceof Error ? e.message : String(e))) : [],
+          }
+        : err;
+
+    log.error({ err: errorPayload, path: req.path }, "unhandled error");
     res.status(500).json({
       error: { type: "EXTERNAL_SERVICE_ERROR", message: "Error interno inesperado" },
     });

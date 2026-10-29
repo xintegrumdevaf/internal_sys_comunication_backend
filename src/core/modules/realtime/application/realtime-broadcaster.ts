@@ -135,6 +135,14 @@ export class RealtimeBroadcaster {
     };
   }
 
+  /**
+   * Indica si el usuario/agente tiene al menos una conexión SSE activa.
+   */
+  isUserConnected(userId: string): boolean {
+    const current = this.subscribers.get(userId);
+    return Boolean(current && current.size > 0);
+  }
+
   publish(event: RealtimeEvent): void {
     for (const set of this.subscribers.values()) {
       for (const sub of set) {

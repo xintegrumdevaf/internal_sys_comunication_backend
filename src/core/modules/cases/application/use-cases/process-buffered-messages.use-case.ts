@@ -147,8 +147,8 @@ export class ProcessBufferedMessagesUseCase {
               ...rawObj,
               balance: hasDebt
                 ? {
-                    amount: bal?.amount ?? bal?.debt ?? 22.58,
-                    debt: bal?.amount ?? bal?.debt ?? 22.58,
+                    amount: bal?.amount ?? bal?.debt ?? undefined,
+                    debt: bal?.amount ?? bal?.debt ?? undefined,
                     hasDebt: true,
                     status: "DEBT",
                     currency: "USD",
@@ -159,7 +159,21 @@ export class ProcessBufferedMessagesUseCase {
         }
       }
 
-      if (hasDocumentAttachment || (messages.some(m => m.type === "image") && (prevHasDebt || Object.keys(receiptEntities).length === 0))) {
+      const hasExtractedReceipt = Boolean(
+        receiptEntities.isReceipt === true ||
+        receiptEntities.amount !== undefined ||
+        receiptEntities.reference !== undefined
+      );
+
+      const textNormalized = text.toLowerCase();
+      const mentionsPayment = /\b(comprobante|recibo|transferencia|deposito|depósito|pago|pague|pagué|pagado)\b/i.test(textNormalized);
+      const hasMedia = messages.some((m) => m.type === "image") || hasDocumentAttachment;
+
+      const isPaymentSubmission =
+        hasMedia &&
+        (hasExtractedReceipt || (mentionsPayment && (prevHasDebt || Boolean(text.match(/\$\s*\d+|\b\d+[\.,]\d{2}\b/)))));
+
+      if (isPaymentSubmission) {
         const billingDeptId = await this.deps.departmentResolver.resolveDepartmentId("BILLING_BALANCE");
         const billingDeptSlug = billingDeptId ? this.deps.departmentResolver.getDepartmentSlug(billingDeptId) : null;
         log.info(
@@ -180,7 +194,7 @@ export class ProcessBufferedMessagesUseCase {
                 ? rawBalance.amount
                 : typeof rawBalance?.debt === "number"
                   ? rawBalance.debt
-                  : 22.58,
+                  : undefined,
           },
           payment: {
             amount: typeof receiptEntities.amount === "number" ? receiptEntities.amount : undefined,
@@ -662,7 +676,12 @@ export class ProcessBufferedMessagesUseCase {
             mediaUrl,
             message.mimeType ?? "image/jpeg",
           );
-          Object.assign(receiptEntities, receipt);
+          if (receipt.isReceipt !== false && (receipt.amount !== undefined || receipt.reference !== undefined)) {
+            Object.assign(receiptEntities, receipt);
+          }
+          if (receipt.description) {
+            parts.push(`[Adjunto imagen: ${receipt.description}]`);
+          }
           if (message.caption) parts.push(message.caption);
           else if (message.body) parts.push(message.body);
         } catch (error) {

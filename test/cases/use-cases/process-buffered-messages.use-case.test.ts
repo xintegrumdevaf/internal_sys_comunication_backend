@@ -576,4 +576,76 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
     expect(lastSent?.body).toBe("Te estamos transfiriendo con un asesor humano.");
   });
+
+  it("no confunde una foto general o de televisión con un comprobante e interpreta correctamente la solicitud de soporte", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "support.internet",
+        entities: { problemDescription: "internet lento" },
+        confidence: 0.95,
+      },
+    ]);
+
+    const fakeAi = new FakeAIProvider();
+    fakeAi.extractReceiptImpl = async () => ({
+      isReceipt: false,
+      amount: undefined,
+      reference: undefined,
+      date: undefined,
+      description: "foto de televisor encendido en habitación",
+    });
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      logger: silentLogger,
+    });
+
+    const imgMsg = messageRepo.seedText(conversation.id, "", { type: "image", mediaId: "media-tv" });
+    const textMsg1 = messageRepo.seedText(conversation.id, "Porfavor para que me ayude con el internet");
+    const textMsg2 = messageRepo.seedText(conversation.id, "Está más lento que la otra vez");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-non-receipt-img",
+      messages: [imgMsg, textMsg1, textMsg2],
+    });
+
+    // 1. NO debe enviar el mensaje de verificación de pago
+    for (const sent of whatsappSender.sent) {
+      expect(sent.body).not.toContain("Estamos verificando tu pago");
+    }
+
+    // 2. Debe haber creado un caso de SUPPORT_INTERNET, NO de BILLING_BALANCE
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
+  });
 });

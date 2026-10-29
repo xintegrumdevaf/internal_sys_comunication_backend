@@ -84,7 +84,7 @@ No todos los workflows de n8n son pasos de un `Case`. Se distinguen tres usos, y
 ### 6.1 `case_action` — pasos de un `WorkflowDefinition`, compartidos entre workflows
 Confirmado con tus flujos reales: `VALIDATE_CLIENT` (`find-client-contract`) y `CHECK_BALANCE` (`check-balance`) son **genéricos** — no saben nada de "soporte" ni de ningún workflow en particular, solo reciben una cédula y devuelven datos. Se registran una sola vez en el catálogo y los usa cualquier `WorkflowDefinition` que los necesite (`SUPPORT_INTERNET` hoy; `BILLING_BALANCE`/`SALES_PACKAGES` más adelante sin duplicar nada).
 
-`DIAGNOSTIC`/`CONTINUE_DIAGNOSTIC` sí son específicos de `SUPPORT_INTERNET` (proxies hacia tu microservicio de diagnóstico), pero siguen siendo `case_action` — la diferencia entre "compartida" y "específica" no es estructural, es solo cuántos `WorkflowDefinition` la referencian.
+> **Aviso de Arquitectura (Desacoplamiento MikroTik):** `DIAGNOSTIC` y `CONTINUE_DIAGNOSTIC` ya **NO se ejecutan en n8n**. Fueron desacoplados directamente al backend mediante `CompositeActionGateway` y `MikrotikDiagnosticAdapter`, comunicándose vía HTTP directo con `internal_sys_api_mikrotik` (`MIKROTIK_SERVICE_URL`).
 
 ### 6.2 `GENERAL_INQUIRY` — Consultas abiertas con RAG Nativo en Backend
 El flujo **`GENERAL_INQUIRY`** atiende consultas abiertas (números de cuenta, ubicación de oficinas, planes, promociones, cobertura general) de forma **100% nativa en el Backend** mediante [`RagService`](../../src/core/modules/ai/application/services/rag.service.ts) (PGVector + Búsqueda Híbrida Vectorial + Síntesis LLM).
@@ -92,13 +92,14 @@ El flujo **`GENERAL_INQUIRY`** atiende consultas abiertas (números de cuenta, u
 - **Sin intermediación de n8n para RAG**: Las consultas a la base de conocimiento y la ingesta de documentos (PDF parsing, chunking, embeddings) se ejecutan directamente en la API en milisegundos.
 - **Escalación**: Si el RAG no encuentra información suficiente (`found: false` o confianza < 60%), el caso no inventa datos y se escala al **Pool de Triage (General)** para que un Administrador o Manager lo revise o reclasifique.
 
-### 6.3 Workflows de integración externa en n8n
-n8n se utiliza **exclusivamente para integraciones y microservicios externos** (MikroTik, CRMs, pasarelas de pago, diagnóstico de red):
-1. `VALIDATE_CLIENT` (consulta de contratos y credenciales por cédula)
-2. `CHECK_BALANCE` (consulta de facturación y deudas en CRM/ERP)
-3. `DIAGNOSTIC` y `CONTINUE_DIAGNOSTIC` (proxy al microservicio técnico de diagnóstico de red)
-4. `RECORD_PAYMENT` (registro y aplicación de pagos/comprobantes)
-5. `APPLY_BANK_ACCOUNT` (solicitud de cuentas bancarias)
+### 6.3 Los 4 Workflows Fijos de integración externa en n8n
+n8n se utiliza **exclusivamente para los 4 flujos fijos de integración con sistemas externos (CRMs, Google Sheets, pasarelas de pago y cuentas bancarias)**:
+1. `VALIDATE_CLIENT` (`find-client-contract` — consulta de contratos y credenciales por cédula)
+2. `CHECK_BALANCE` (`check-balance` — consulta de facturación y saldos)
+3. `RECORD_PAYMENT` (`record-payment` — registro y aplicación de pagos/comprobantes)
+4. `APPLY_BANK_ACCOUNT` (`apply-bank-account` — solicitud de cuentas bancarias asociadas)
+
+*(Diagnóstico MikroTik corre directo en API; RAG corre directo en Backend).*
 
 ## 7. Registro de acciones → URL (catálogo en base de datos, no `.env`)
 
@@ -106,15 +107,13 @@ Tabla `n8n_workflow_registry` (`01_DATA_MODEL.md` §2), gestionable en caliente 
 
 ```sql
 INSERT INTO n8n_workflow_registry (action, category, url, description) VALUES
-  ('VALIDATE_CLIENT',       'case_action',  'https://localhost:5678/webhook/find-client-contract', 'Busca contrato(s) y datos técnicos por cédula; puede devolver más de uno'),
-  ('CHECK_BALANCE',         'case_action',  'https://localhost:5678/webhook/check-balance',         'Consulta saldo/deuda'),
-  ('DIAGNOSTIC',            'case_action',  'https://localhost:5678/webhook/do-diagnostic',         'Diagnóstico técnico inicial (proxy a microservicio propio)'),
-  ('CONTINUE_DIAGNOSTIC',   'case_action',  'https://localhost:5678/webhook/continue-diagnostic',   'Continúa diagnóstico con el mensaje textual del usuario'),
-  ('RECORD_PAYMENT',        'case_action',  'https://localhost:5678/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey)'),
-  ('APPLY_BANK_ACCOUNT',    'case_action',  'https://localhost:5678/webhook/apply-bank-account',    'Devuelve cuentas bancarias para depósito / transferencia');
+  ('VALIDATE_CLIENT',       'case_action',  'http://localhost:5678/webhook/find-client-contract', 'Busca contrato(s) y datos técnicos por cédula; puede devolver más de uno'),
+  ('CHECK_BALANCE',         'case_action',  'http://localhost:5678/webhook/check-balance',         'Consulta saldo/deuda'),
+  ('RECORD_PAYMENT',        'case_action',  'http://localhost:5678/webhook/record-payment',        'Registra un pago (idempotente por idempotencyKey)'),
+  ('APPLY_BANK_ACCOUNT',    'case_action',  'http://localhost:5678/webhook/apply-bank-account',    'Devuelve cuentas bancarias para depósito / transferencia');
 ```
 
-> **Estado local (2026-08-08):** Los 7 `case_action` + `UPLOAD_RAG_DOCUMENT` están construidos y activos en el n8n de `docker-compose`. URLs de producción: `http://localhost:5678/webhook/record-payment`, `…/apply-bank-account`, `…/query-knowledge-base`, y form `http://localhost:5678/form/cargar-documentos`. JSON versionado en `n8n/`. Tablas de efecto: `n8n_recorded_payments` / `n8n_bank_account_requests` (`migrations/0008_n8n_payment_bank_tables.sql`).
+> **Nota de gateway:** `CompositeActionGateway` intercepta `DIAGNOSTIC` y `CONTINUE_DIAGNOSTIC` y los desvía a `MikrotikDiagnosticAdapter` hacia `internal_sys_api_mikrotik`. Solo las acciones listadas arriba van a `n8nGatewayHttp`.
 ### 7.1 Ejemplo — `DIAGNOSTIC` (input en camelCase, el nodo de n8n mapea a `olt_name` al llamar al microservicio)
 ```json
 { "input": { "sector": "pomasqui", "oltName": "bicentenario", "pon": "3", "serial": "D011A66CB67C", "conversationId": "conv_456" } }
@@ -131,15 +130,17 @@ Agregar una acción nueva = una fila nueva (por API o por migración de seed) �
 
 El workflow legacy (`initial-whatsapp-api.json`) tenía `record_full_payment`, `record_incomplete_payment` y `apply_for_bank_accounts` apuntando por error al mismo sub-workflow `Check_Balance`. Al reconstruir cada uno como workflow independiente (§2), cada uno debe tener su propia URL real registrada en `n8n_workflow_registry` y probarse contra el sistema de pagos antes de dar por completa esta pieza.
 
-## 9. Migración de los 4 workflows existentes a la nueva instancia + nuevo contrato
+## 9. Los 4 workflows fijos en n8n + nuevo contrato
 
-Los workflows `find-client-contract`, `check-balance`, `do-diagnostic`, `continue-diagnostic` funcionaban contra la arquitectura anterior (llamadas directas del agente de IA con `$json.body.{campo}` plano). Al importarlos a la instancia nueva de n8n, necesitan **tres ajustes**, no solo reimportarse tal cual:
+Los 4 workflows de n8n (`find-client-contract`, `check-balance`, `record-payment`, `apply-bank-account`) gestionan la comunicación con CRM, Google Sheets y pasarelas de pago.
 
-1. **Recredenciales**: Google Sheets OAuth (`find-client-contract`, `check-balance`) y cualquier credencial de Postgres/Ollama que use el flujo de RAG — los IDs de credencial del JSON exportado no existen en la instancia nueva, hay que recrearlas y reconectar los nodos.
-2. **Rutas de acceso a los datos de entrada**: los nodos que hoy leen `{{ $json.body.id }}` deben leer `{{ $json.body.input.id }}` (o el campo que corresponda) — el nuevo contrato (`03_API_CONTRACT.md` §B) envía los datos de negocio anidados bajo `input`, no en la raíz del body. Revisar cada expresión que referencia `$json.body.*` en los 4 flujos.
-3. **Respuesta envuelta en el formato estándar**: hoy el nodo `Respond to Webhook` devuelve el resultado de `Format data` tal cual (plano). Debe envolverse en `{ success, result, error }` (§10). Esto es el cambio más importante — sin esto, la API no puede distinguir éxito de error de forma consistente entre acciones.
+*(Nota: `do-diagnostic` y `continue-diagnostic` fueron desacoplados a `MikrotikDiagnosticAdapter` para conectarse directamente por HTTP al microservicio `internal_sys_api_mikrotik` en el puerto 3001, sin requerir proxy de n8n).*
 
-**Nota sobre `do-diagnostic`/`continue-diagnostic`**: el `HTTP Request` node de esos dos flujos ya hace el mapeo campo por campo hacia el microservicio de diagnóstico (`sector`, `olt_name`, `pon`, `serial`), así que **no hace falta tocar ese mapeo** — solo el punto 2 de arriba (`$json.body.input.sector` en vez de `$json.body.sector`). El contrato de la API sigue enviando `oltName` en camelCase; el propio nodo ya se encarga de renombrarlo a `olt_name` al llamar al microservicio, así que no hay nada que generalizar ahí más allá de ajustar la ruta de lectura.
+Ajustes necesarios en los 4 flujos de n8n:
+
+1. **Recredenciales**: Google Sheets OAuth (`find-client-contract`, `check-balance`) — reconectar las credenciales si cambia la instancia o expira el token.
+2. **Rutas de acceso a los datos de entrada**: los nodos leen `{{ $json.body.input.id }}` (o el campo correspondiente) bajo `input`, según el contrato estándar (`03_API_CONTRACT.md` §B).
+3. **Respuesta envuelta en el formato estándar**: el nodo `Respond to Webhook` devuelve siempre `{ success, result, error }` (§10).
 
 ## 10. Validación del header interno y manejo de errores explícito por acción
 
