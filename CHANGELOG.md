@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-10-29
+
+### Added
+- **Network Topology Bulk Import (`POST /api/admin/settings/network/import`)**: Enables bulk JSON topology ingestion for MikroTik routers and internal OLTs directly from admin settings without requiring deployment scripts or CI secrets. Supports both `host`/`ip` and `username`/`user` notations with automatic deduplication.
+- **Network Topology Backup Export (`GET /api/admin/settings/network/export`)**: Full network topology export with decrypted vault credentials for authorized administrators, allowing portability and cross-environment migration between development, test, and production.
+- **Sample Topology Template**: Added `docs/network-topology-sample.json` documenting the expected payload structure for bulk network provisioning.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added
