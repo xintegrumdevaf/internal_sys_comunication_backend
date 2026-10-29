@@ -21,6 +21,7 @@ import {
 
 const CHANNEL_SETTINGS_KEY = "channels.whatsapp";
 const AI_SETTINGS_KEY = "ai.provider";
+const NETWORK_TOPOLOGY_KEY = "network.topology";
 
 export class SystemSettingsService {
   private cache = new Map<string, { value: unknown; cachedAt: number }>();
@@ -845,6 +846,48 @@ export class SystemSettingsService {
         );
       }
     }
+  }
+
+  /**
+   * Obtiene la topología de infraestructura de red (Routers MikroTik y OLTs) persistida en BD.
+   */
+  async getNetworkTopology(): Promise<Record<string, any>[]> {
+    const cached = this.cache.get(NETWORK_TOPOLOGY_KEY);
+    if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL_MS) {
+      return cached.value as Record<string, any>[];
+    }
+
+    try {
+      const dbValue = await this.repo.get<unknown>(NETWORK_TOPOLOGY_KEY);
+      const routers = Array.isArray(dbValue)
+        ? (dbValue as Record<string, any>[])
+        : dbValue && typeof dbValue === "object" && Array.isArray((dbValue as { routers?: unknown }).routers)
+          ? (dbValue as { routers: Record<string, any>[] }).routers
+          : [];
+
+      this.cache.set(NETWORK_TOPOLOGY_KEY, { value: routers, cachedAt: Date.now() });
+      return routers;
+    } catch (err) {
+      this.logger.error({ err }, "Error al leer topología de red desde BD; retornando lista vacía");
+      return [];
+    }
+  }
+
+  /**
+   * Persiste la topología de infraestructura de red (Routers MikroTik y OLTs) en BD.
+   */
+  async saveNetworkTopology(
+    routers: Record<string, any>[],
+    updatedBy?: string,
+  ): Promise<void> {
+    const clean = Array.isArray(routers) ? routers : [];
+    await this.repo.set(
+      NETWORK_TOPOLOGY_KEY,
+      clean,
+      "Topología de infraestructura de red (Routers MikroTik y OLTs)",
+      updatedBy,
+    );
+    this.cache.set(NETWORK_TOPOLOGY_KEY, { value: clean, cachedAt: Date.now() });
   }
 }
 
