@@ -14,7 +14,7 @@ export class UpdateCustomerUseCase {
       throw notFound(`Contacto/Cliente con id '${id}' no encontrado`);
     }
 
-    if (input.waPhone !== undefined && input.waPhone !== null) {
+    if (input.waPhone !== undefined && input.waPhone !== null && input.waPhone.trim() !== "") {
       const cleanPhone = input.waPhone.trim().replace(/\s+/g, "");
       const byPhone = await this.customerRepo.findByWaPhone(cleanPhone);
       if (byPhone && byPhone.id !== id) {
@@ -33,11 +33,11 @@ export class UpdateCustomerUseCase {
     const updated = await this.customerRepo.update(id, {
       ...input,
       fullName: input.fullName !== undefined ? input.fullName?.trim() || null : undefined,
-      waPhone: input.waPhone !== undefined ? input.waPhone?.trim().replace(/\s+/g, "") || null : undefined,
-      nationalId: input.nationalId !== undefined ? input.nationalId?.trim() || null : undefined,
-      email: input.email !== undefined ? input.email?.trim() || null : undefined,
-      address: input.address !== undefined ? input.address?.trim() || null : undefined,
-      notes: input.notes !== undefined ? input.notes?.trim() || null : undefined,
+      waPhone: input.waPhone !== undefined ? (input.waPhone?.trim().replace(/\s+/g, "") || null) : undefined,
+      nationalId: input.nationalId !== undefined ? (input.nationalId?.trim() || null) : undefined,
+      email: input.email !== undefined ? (input.email?.trim() || null) : undefined,
+      address: input.address !== undefined ? (input.address?.trim() || null) : undefined,
+      notes: input.notes !== undefined ? (input.notes?.trim() || null) : undefined,
     });
 
     if (!updated) {

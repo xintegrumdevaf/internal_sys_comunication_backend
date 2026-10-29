@@ -5,6 +5,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
+import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
@@ -81,8 +82,42 @@ export class ReplyAsHumanUseCase {
       const active =
         cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
         cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
-        cases[cases.length - 1];
-      if (active) effectiveCaseId = active.id;
+        cases.find((c) => c.status === "NEW");
+      if (active) {
+        effectiveCaseId = active.id;
+      } else {
+        // Si no hay ningún caso en la conversación (ej: contacto nuevo o iniciado por agente),
+        // creamos automáticamente un caso GENERAL_INQUIRY en HUMAN_ACTIVE asignado al agente.
+        let departmentId: string | null = null;
+        if (this.deps.agentRepo) {
+          const agent = await this.deps.agentRepo.findById(input.agentUserId);
+          if (agent && agent.primaryDepartmentId) {
+            departmentId = agent.primaryDepartmentId;
+          }
+        }
+
+        const newCase = await caseRepo.create({
+          conversationId: conversation.id,
+          workflowType: "GENERAL_INQUIRY",
+          departmentId,
+          context: emptyContextFor("GENERAL_INQUIRY"),
+          initialState: "HUMAN_DIRECT",
+          expiresAt: null,
+        });
+        effectiveCaseId = newCase.case.id;
+
+        await caseRepo.setAssignedAgent(effectiveCaseId, input.agentUserId);
+        await caseRepo.applyTransition({
+          caseId: effectiveCaseId,
+          expectedCaseVersion: newCase.case.version,
+          expectedWorkflowVersion: newCase.workflowInstance.version,
+          status: "HUMAN_ACTIVE",
+          context: newCase.case.context,
+          currentState: newCase.workflowInstance.currentState,
+          expiresAt: null,
+        });
+        await conversationRepo.setActiveCaseId(conversation.id, effectiveCaseId);
+      }
     }
 
     const message = await messageRepo.insertOutbound({
@@ -98,7 +133,7 @@ export class ReplyAsHumanUseCase {
 
     if (caseRepo && effectiveCaseId) {
       const automation = await caseRepo.getAutomationState(effectiveCaseId);
-      if (automation?.enabled) {
+      if (automation?.enabled !== false) {
         await caseRepo.setAutomationEnabled(effectiveCaseId, false, {
           reason: "HUMAN_REPLY",
           changedBy: input.agentUserId,

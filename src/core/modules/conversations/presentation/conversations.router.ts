@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { env } from "../../../../shared/config/env";
-import { notFound, validationError } from "../../../../shared/errors/domain-errors";
+import { notFound, validationError, businessError } from "../../../../shared/errors/domain-errors";
 import { requireAuth } from "../../../../shared/http/require-auth";
+import { emptyContextFor } from "../../cases/domain/contexts/case-context";
 import type { ListConversationsUseCase } from "../application/use-cases/list-conversations.use-case";
 import type { ListMessagesUseCase } from "../application/use-cases/list-messages.use-case";
 import type { ReplyAsHumanUseCase } from "../application/use-cases/reply-as-human.use-case";
@@ -10,9 +11,11 @@ import type { TakeControlUseCase } from "../application/use-cases/take-control.u
 import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
 import type { ConversationRepositoryPort } from "../application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../application/ports/message.repository.port";
+import type { WhatsAppSenderPort } from "../application/ports/whatsapp-sender.port";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
+import type { MessageTemplateRepositoryPort } from "../../message-templates/application/ports/message-template.repository.port";
 
 export type ConversationsRouterDeps = {
   listConversations: ListConversationsUseCase;
@@ -25,6 +28,8 @@ export type ConversationsRouterDeps = {
   messageRepo?: MessageRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
   settingsService?: SystemSettingsService;
+  whatsappSender?: WhatsAppSenderPort;
+  templateRepo?: MessageTemplateRepositoryPort;
 };
 
 
@@ -240,6 +245,109 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         messageId: message.id,
         author: "agent",
       });
+      res.status(201).json({ data: message });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  const sendTemplateBodySchema = z.object({
+    templateName: z.string().min(1),
+    languageCode: z.string().optional().default("es"),
+    parameters: z.array(z.string()).optional().default([]),
+  });
+
+  router.post("/api/conversations/:id/template", async (req, res, next) => {
+    try {
+      const agent = requireAuth(req);
+      const parsed = sendTemplateBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
+      }
+
+      if (!deps.whatsappSender) {
+        throw businessError("El canal de WhatsApp no está configurado para envío de plantillas");
+      }
+      if (!deps.conversationRepo || !deps.messageRepo) {
+        throw businessError("Repositorios no disponibles");
+      }
+
+      const conversation = await deps.conversationRepo.findById(req.params.id);
+      if (!conversation) {
+        throw notFound(`Conversación ${req.params.id} no encontrada`);
+      }
+
+      // Obtener el texto de la plantilla si está en el repositorio para previsualización en el mensaje
+      let templateBodyText = `📋 [Plantilla: ${parsed.data.templateName}]`;
+      if (deps.templateRepo) {
+        const tpl = await deps.templateRepo.findByName(parsed.data.templateName);
+        if (tpl?.bodyText) {
+          let replacedText = tpl.bodyText;
+          (parsed.data.parameters || []).forEach((param, idx) => {
+            replacedText = replacedText.replace(new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g"), param);
+          });
+          templateBodyText = replacedText;
+        }
+      }
+
+      const { externalId } = await deps.whatsappSender.sendTemplate(
+        conversation.waPhone,
+        parsed.data.templateName,
+        parsed.data.languageCode,
+        parsed.data.parameters,
+      );
+
+      let effectiveCaseId = conversation.activeCaseId;
+      if (!effectiveCaseId && deps.caseRepo) {
+        const cases = await deps.caseRepo.listByConversation(conversation.id);
+        const active =
+          cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+          cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          cases.find((c) => c.status === "NEW");
+        if (active) {
+          effectiveCaseId = active.id;
+        } else {
+          const newCase = await deps.caseRepo.create({
+            conversationId: conversation.id,
+            workflowType: "GENERAL_INQUIRY",
+            departmentId: null,
+            context: emptyContextFor("GENERAL_INQUIRY"),
+            initialState: "HUMAN_DIRECT",
+            expiresAt: null,
+          });
+          effectiveCaseId = newCase.case.id;
+          await deps.caseRepo.setAssignedAgent(effectiveCaseId, agent.id);
+          await deps.caseRepo.applyTransition({
+            caseId: effectiveCaseId,
+            expectedCaseVersion: newCase.case.version,
+            expectedWorkflowVersion: newCase.workflowInstance.version,
+            status: "HUMAN_ACTIVE",
+            context: newCase.case.context,
+            currentState: newCase.workflowInstance.currentState,
+            expiresAt: null,
+          });
+          await deps.conversationRepo.setActiveCaseId(conversation.id, effectiveCaseId);
+        }
+      }
+
+      const message = await deps.messageRepo.insertOutbound({
+        conversationId: conversation.id,
+        author: "agent",
+        body: templateBodyText,
+        externalId,
+        agentId: agent.id,
+        caseId: effectiveCaseId ?? undefined,
+      });
+
+      await deps.conversationRepo.touchLastActivity(conversation.id);
+
+      deps.broadcaster?.publish({
+        type: "MESSAGE_SENT",
+        conversationId: message.conversationId,
+        messageId: message.id,
+        author: "agent",
+      });
+
       res.status(201).json({ data: message });
     } catch (error) {
       next(error);

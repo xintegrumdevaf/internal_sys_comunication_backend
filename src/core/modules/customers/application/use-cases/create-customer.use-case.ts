@@ -13,12 +13,14 @@ export class CreateCustomerUseCase {
   ) {}
 
   async execute(input: CreateCustomerInput): Promise<CustomerWithDetails> {
-    const cleanPhone = input.waPhone.trim().replace(/\s+/g, "");
+    const cleanPhone = input.waPhone ? input.waPhone.trim().replace(/\s+/g, "") : null;
 
     // Validar teléfono duplicado
-    const existingByPhone = await this.customerRepo.findByWaPhone(cleanPhone);
-    if (existingByPhone) {
-      throw businessError(`Ya existe un contacto con el teléfono ${cleanPhone}`);
+    if (cleanPhone) {
+      const existingByPhone = await this.customerRepo.findByWaPhone(cleanPhone);
+      if (existingByPhone) {
+        throw businessError(`Ya existe un contacto con el teléfono ${cleanPhone}`);
+      }
     }
 
     // Validar cédula duplicada si viene especificada
@@ -40,21 +42,20 @@ export class CreateCustomerUseCase {
       notes: input.notes?.trim() || null,
     });
 
-    // Enlazar conversaciones previas de ese número
-    await this.customerRepo.linkConversationByPhone(created.id, cleanPhone);
+    // Enlazar conversaciones previas de ese numero
+    if (cleanPhone) {
+      await this.customerRepo.linkConversationByPhone(created.id, cleanPhone);
 
-    // Si se cuenta con el repositorio de conversaciones, asegurar que la conversación
-    // exista de inmediato (vacía o recuperada) para que el chat se pueda abrir al instante.
-    if (this.conversationRepo) {
-      const digitsPhone = cleanPhone.replace(/\D/g, "") || cleanPhone;
-      const conv = await this.conversationRepo.findOrCreateByWaPhone(digitsPhone);
-      if (conv.customerId !== created.id) {
-        await this.conversationRepo.setCustomerId(conv.id, created.id);
+      if (this.conversationRepo) {
+        const digitsPhone = cleanPhone.replace(/\D/g, "") || cleanPhone;
+        const conv = await this.conversationRepo.findOrCreateByWaPhone(digitsPhone);
+        if (conv.customerId !== created.id) {
+          await this.conversationRepo.setCustomerId(conv.id, created.id);
+        }
+        return (await this.customerRepo.findWithDetailsById(created.id)) ?? created;
       }
-      return (await this.customerRepo.findWithDetailsById(created.id)) ?? created;
     }
 
     return created;
   }
 }
-

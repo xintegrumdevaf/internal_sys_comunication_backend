@@ -7,6 +7,7 @@ import { MessageRepositoryPg } from "../../src/core/modules/conversations/infras
 import { ReplyAsHumanUseCase } from "../../src/core/modules/conversations/application/use-cases/reply-as-human.use-case";
 import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
 import { AuditRepositoryPg } from "../../src/core/modules/audit/infrastructure/postgres/audit.repository.pg";
+import { CaseRepositoryPg } from "../../src/core/modules/cases/infrastructure/postgres/case.repository.pg";
 import { silentLogger } from "../support/silent-logger";
 
 /** Fake del puerto (docs/skills/testing-strategy.md: fakes, no mocks fragiles). */
@@ -28,6 +29,7 @@ describe("ReplyAsHumanUseCase", () => {
   const conversationRepo = new ConversationRepositoryPg(pool);
   const messageRepo = new MessageRepositoryPg(pool);
   const auditRepo = new AuditRepositoryPg(pool);
+  const caseRepo = new CaseRepositoryPg(pool);
 
   afterAll(async () => {
     await pool.end();
@@ -66,6 +68,45 @@ describe("ReplyAsHumanUseCase", () => {
       [message.id],
     );
     expect(msgRows.rows[0]?.agent_id).toBe(agentUserId);
+  });
+
+  it("crea un caso GENERAL_INQUIRY en HUMAN_ACTIVE si la conversacion no tenia caso previo", async () => {
+    const waPhone = `+59398${randomUUID().replace(/-/g, "").slice(0, 7)}`;
+    const conversation = await conversationRepo.findOrCreateByWaPhone(waPhone);
+    const whatsappSender = new FakeWhatsAppSender();
+    const useCase = new ReplyAsHumanUseCase({
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      auditRepo,
+      caseRepo,
+      logger: silentLogger,
+    });
+    const agentUserId = randomUUID();
+    await pool.query(
+      `INSERT INTO agent (id, name, email, role) VALUES ($1, 'Agent Test 2', $2, 'agent')`,
+      [agentUserId, `agent-${agentUserId.slice(0, 8)}@test.local`],
+    );
+
+    const message = await useCase.execute({
+      conversationId: conversation.id,
+      agentUserId,
+      body: "Hola! En qué te puedo ayudar?",
+    });
+
+    expect(message.caseId).toBeDefined();
+
+    const updatedConv = await conversationRepo.findById(conversation.id);
+    expect(updatedConv?.activeCaseId).toBe(message.caseId);
+
+    const caseAgg = await caseRepo.findById(message.caseId!);
+    expect(caseAgg).not.toBeNull();
+    expect(caseAgg?.case.status).toBe("HUMAN_ACTIVE");
+    expect(caseAgg?.case.workflowType).toBe("GENERAL_INQUIRY");
+    expect(caseAgg?.case.assignedAgentId).toBe(agentUserId);
+
+    const autoState = await caseRepo.getAutomationState(message.caseId!);
+    expect(autoState?.enabled).toBe(false);
   });
 
   it("lanza NOT_FOUND si la conversacion no existe", async () => {
