@@ -323,7 +323,28 @@ Gestión unificada de clientes del ISP, etiquetado, sincronización con n8n y ap
 
 ---
 
-## 16. Qué **no** es HTTP en esta API
+## 16. Configuración de Red e Infraestructura (/api/admin/settings/network)
+
+Endpoints para la gestión de Routers MikroTik y OLTs (administrados por `admin` y gerentes de soporte):
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/admin/settings/network/routers` | `admin` o soporte | Lista todos los routers y sus OLTs vinculadas |
+| `POST` | `/api/admin/settings/network/routers` | `admin` o soporte | Crea un router individual (`{ name, sector, ip, port, user, password, description? }`) |
+| `PUT` | `/api/admin/settings/network/routers/:id` | `admin` o soporte | Actualiza un router |
+| `DELETE` | `/api/admin/settings/network/routers/:id` | `admin` o soporte | Elimina un router |
+| `GET` | `/api/admin/settings/network/routers/:id/password` | `admin` o soporte | Consulta la contraseña del router para edición |
+| `POST` | `/api/admin/settings/network/routers/:routerId/olts` | `admin` o soporte | Crea una OLT bajo un router (`{ name, ip, brand, model, port, user, password, ponPorts }`) |
+| `PUT` | `/api/admin/settings/network/routers/:routerId/olts/:oltId` | `admin` o soporte | Actualiza una OLT |
+| `DELETE` | `/api/admin/settings/network/routers/:routerId/olts/:oltId` | `admin` o soporte | Elimina una OLT |
+| `GET` | `/api/admin/settings/network/routers/:routerId/olts/:oltId/password` | `admin` o soporte | Consulta la contraseña de la OLT |
+| `POST` | `/api/admin/settings/network/test-connection` | `admin` o soporte | Prueba de conectividad con un equipo antes de guardar |
+| `POST` | `/api/admin/settings/network/import` | `admin` o soporte | **Importación masiva**: sube un JSON con la lista completa de routers y OLTs (ej. [docs/network-topology-sample.json](./network-topology-sample.json)) |
+| `GET` | `/api/admin/settings/network/export` | `admin` o soporte | **Exportación**: descarga la topología completa en JSON para respaldos o transferir entre ambientes |
+
+---
+
+## 17. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.

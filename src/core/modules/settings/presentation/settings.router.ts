@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
 import { requireRole, requireAuth } from "../../../../shared/http/require-auth";
-import { authorizationError } from "../../../../shared/errors/domain-errors";
+import { authorizationError, validationError } from "../../../../shared/errors/domain-errors";
 import type { SystemSettingsService } from "../application/services/system-settings.service";
 import type { DepartmentRepositoryPort } from "../../departments/application/ports/department.repository.port";
 import type { Agent } from "../../departments/domain/agent.entity";
@@ -339,6 +339,191 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         body: JSON.stringify(req.body),
       });
       res.json({ success: result.success, data: result });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/admin/settings/network/import
+  // Permite subir un archivo o payload JSON directamente desde el Frontend con la topología completa
+  router.post("/api/admin/settings/network/import", async (req, res, next) => {
+    try {
+      await requireNetworkAccess(req);
+
+      const rawRouters = Array.isArray(req.body)
+        ? req.body
+        : Array.isArray(req.body?.routers)
+          ? req.body.routers
+          : null;
+
+      if (!rawRouters || rawRouters.length === 0) {
+        throw validationError("El cuerpo o archivo debe contener un arreglo de 'routers'");
+      }
+
+      // 1. Consultar routers existentes en el microservicio para evitar duplicados
+      const listData = await proxyMikrotik("/v1/network/routers").catch(() => ({ routers: [] }));
+      const existingRouters = (listData.routers || listData.data || []) as Array<{
+        id: string;
+        name: string;
+        sector?: string;
+        olts?: Array<{ id: string; name: string }>;
+      }>;
+
+      const results: Array<{
+        routerName: string;
+        routerId: string;
+        status: "created" | "existing";
+        olts: Array<{ oltName: string; status: "created" | "existing" | "error" }>;
+      }> = [];
+
+      for (const item of rawRouters) {
+        const routerHost = item.host || item.ip;
+        if (!item.name || !routerHost) continue;
+
+        let routerId = "";
+        let status: "created" | "existing" = "existing";
+
+        const existing = existingRouters.find(
+          (r) =>
+            r.name.toLowerCase() === item.name.toLowerCase() ||
+            (item.sector && r.sector && r.sector.toLowerCase() === item.sector.toLowerCase()) ||
+            (item.displayName && r.name && r.name.toLowerCase() === item.displayName.toLowerCase())
+        );
+
+        if (existing) {
+          routerId = existing.id;
+        } else {
+          const created = await proxyMikrotik("/v1/network/routers", {
+            method: "POST",
+            body: JSON.stringify({
+              name: item.name,
+              displayName: item.displayName || item.sector || item.name,
+              host: routerHost,
+              port: item.port ?? 8322,
+              username: item.username || item.user || "ANGEL",
+              password: item.password,
+            }),
+          });
+          routerId = created.router?.id || created.data?.id || "";
+          status = "created";
+        }
+
+        const oltResults: Array<{ oltName: string; status: "created" | "existing" | "error" }> = [];
+
+        if (routerId && Array.isArray(item.olts)) {
+          const currentOlts = existing?.olts || [];
+          for (const olt of item.olts) {
+            const oltIp = olt.ip || olt.host;
+            if (!olt.name || !oltIp) continue;
+
+            const oltExists = currentOlts.some(
+              (o) => o.name.toLowerCase() === olt.name.toLowerCase()
+            );
+
+            if (oltExists) {
+              oltResults.push({ oltName: olt.name, status: "existing" });
+            } else {
+              try {
+                await proxyMikrotik(`/v1/network/routers/${routerId}/olts`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    name: olt.name,
+                    displayName: olt.displayName || `OLT ${olt.name}`,
+                    ip: oltIp,
+                    brand: (olt.brand || "huawei").toLowerCase(),
+                    username: olt.username || olt.user || "admin",
+                    password: olt.password,
+                    slot: olt.slot,
+                  }),
+                });
+                oltResults.push({ oltName: olt.name, status: "created" });
+              } catch {
+                oltResults.push({ oltName: olt.name, status: "error" });
+              }
+            }
+          }
+        }
+
+        results.push({
+          routerName: item.name,
+          routerId,
+          status,
+          olts: oltResults,
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Importación completada: ${results.length} routers procesados`,
+        data: results,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/admin/settings/network/export
+  // Exporta la topología actual completa con contraseñas descifradas para administradores autorizados
+  router.get("/api/admin/settings/network/export", async (req, res, next) => {
+    try {
+      await requireNetworkAccess(req);
+      const data = await proxyMikrotik("/v1/network/routers");
+      const routers = (data.routers || data.data || []) as any[];
+
+      // Resolver contraseñas descifradas para que el archivo sea un backup completo e importable
+      const fullRouters = await Promise.all(
+        routers.map(async (router) => {
+          let routerPassword = router.password || "";
+          if (router.id) {
+            try {
+              const passData = await proxyMikrotik(`/v1/network/routers/${router.id}/password`);
+              if (passData && passData.password) {
+                routerPassword = passData.password;
+              }
+            } catch {
+              // Mantener valor previo si falla
+            }
+          }
+
+          const olts = Array.isArray(router.olts)
+            ? await Promise.all(
+                router.olts.map(async (olt: any) => {
+                  let oltPassword = olt.password || "";
+                  if (router.id && olt.id) {
+                    try {
+                      const oltPassData = await proxyMikrotik(
+                        `/v1/network/routers/${router.id}/olts/${olt.id}/password`
+                      );
+                      if (oltPassData && oltPassData.password) {
+                        oltPassword = oltPassData.password;
+                      }
+                    } catch {
+                      // Mantener valor previo si falla
+                    }
+                  }
+                  return {
+                    ...olt,
+                    password: oltPassword,
+                  };
+                })
+              )
+            : [];
+
+          return {
+            ...router,
+            password: routerPassword,
+            olts,
+          };
+        })
+      );
+
+      res.json({
+        success: true,
+        data: {
+          exportedAt: new Date().toISOString(),
+          routers: fullRouters,
+        },
+      });
     } catch (err) {
       next(err);
     }

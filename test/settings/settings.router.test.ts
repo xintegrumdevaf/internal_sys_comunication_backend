@@ -319,5 +319,94 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       }
     });
   });
+
+  describe("POST /api/admin/settings/network/import y /export", () => {
+    it("permite a un admin importar la topología de red en lote", async () => {
+      currentRole = "admin";
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (url: string, opts?: RequestInit) => {
+        const u = String(url);
+        // GET routers existentes
+        if (u.endsWith("/v1/network/routers") && (!opts || opts.method === "GET" || !opts.method)) {
+          return {
+            ok: true,
+            json: async () => ({ routers: [{ id: "r-existing", name: "Router Pomasqui", sector: "pomasqui", olts: [] }] }),
+          };
+        }
+        // POST router nuevo
+        if (u.endsWith("/v1/network/routers") && opts?.method === "POST") {
+          return {
+            ok: true,
+            json: async () => ({ router: { id: "r-new", name: "Router San Antonio" } }),
+          };
+        }
+        // POST OLT
+        if (u.includes("/olts") && opts?.method === "POST") {
+          return {
+            ok: true,
+            json: async () => ({ olt: { id: "olt-1", name: "bicentenario" } }),
+          };
+        }
+        return { ok: true, json: async () => ({}) };
+      }) as any;
+
+      try {
+        const res = await request(app)
+          .post("/api/admin/settings/network/import")
+          .send({
+            routers: [
+              {
+                name: "Router Pomasqui",
+                sector: "pomasqui",
+                ip: "10.10.1.1",
+                olts: [{ name: "bicentenario", ip: "10.10.1.10", brand: "huawei" }],
+              },
+              {
+                name: "Router San Antonio",
+                sector: "sanAntonio",
+                ip: "10.10.2.1",
+                olts: [{ name: "kyngtype", ip: "10.10.2.10", brand: "kingtype" }],
+              },
+            ],
+          });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data).toHaveLength(2);
+        expect(res.body.data[0].status).toBe("existing");
+        expect(res.body.data[1].status).toBe("created");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("valida que el payload contenga un arreglo de routers", async () => {
+      currentRole = "admin";
+      const res = await request(app)
+        .post("/api/admin/settings/network/import")
+        .send({ algo: "invalido" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toContain("El cuerpo o archivo debe contener un arreglo de 'routers'");
+    });
+
+    it("permite a un admin exportar la topología", async () => {
+      currentRole = "admin";
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => ({ routers: [{ id: "r-1", name: "Router Pomasqui" }] }),
+      })) as any;
+
+      try {
+        const res = await request(app).get("/api/admin/settings/network/export");
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.routers).toHaveLength(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });
 

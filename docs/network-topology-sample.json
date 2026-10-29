@@ -1,0 +1,139 @@
+{
+  "routers": [
+    {
+      "name": "Router Pomasqui",
+      "sector": "pomasqui",
+      "ip": "192.168.88.1",
+      "port": 8728,
+      "user": "admin",
+      "password": "admin",
+      "description": "Nodo principal Pomasqui",
+      "olts": [
+        {
+          "name": "bicentenario",
+          "ip": "192.168.1.10",
+          "brand": "huawei",
+          "model": "MA5608T",
+          "port": 23,
+          "user": "root",
+          "password": "admin",
+          "ponPorts": 8
+        },
+        {
+          "name": "pomasqui",
+          "ip": "192.168.1.11",
+          "brand": "v-sol",
+          "model": "V1600D4",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 4
+        }
+      ]
+    },
+    {
+      "name": "Router San Antonio",
+      "sector": "sanAntonio",
+      "ip": "192.168.88.2",
+      "port": 8728,
+      "user": "admin",
+      "password": "admin",
+      "description": "Nodo principal San Antonio de Pichincha",
+      "olts": [
+        {
+          "name": "kyngtype",
+          "ip": "192.168.2.10",
+          "brand": "kingtype",
+          "model": "KT-G8",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 8
+        },
+        {
+          "name": "rumicucho",
+          "ip": "192.168.2.11",
+          "brand": "zte",
+          "model": "C320",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 8
+        },
+        {
+          "name": "cDataSoles",
+          "ip": "192.168.2.12",
+          "brand": "cdata",
+          "model": "FD1608S",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 8
+        }
+      ]
+    },
+    {
+      "name": "Router Pifo",
+      "sector": "pifo",
+      "ip": "192.168.88.3",
+      "port": 8728,
+      "user": "admin",
+      "password": "admin",
+      "description": "Nodo principal Pifo",
+      "olts": [
+        {
+          "name": "pifo",
+          "ip": "192.168.3.10",
+          "brand": "v-sol",
+          "model": "V1600D8",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 8
+        }
+      ]
+    },
+    {
+      "name": "Router Calacalí",
+      "sector": "calacali",
+      "ip": "192.168.88.4",
+      "port": 8728,
+      "user": "admin",
+      "password": "admin",
+      "description": "Nodo principal Calacalí",
+      "olts": [
+        {
+          "name": "calacali",
+          "ip": "192.168.4.10",
+          "brand": "huawei",
+          "model": "MA5608T",
+          "port": 23,
+          "user": "root",
+          "password": "admin",
+          "ponPorts": 4
+        }
+      ]
+    },
+    {
+      "name": "Router Bellavista",
+      "sector": "bellavista",
+      "ip": "192.168.88.5",
+      "port": 8728,
+      "user": "admin",
+      "password": "admin",
+      "description": "Nodo principal Bellavista",
+      "olts": [
+        {
+          "name": "bellavista",
+          "ip": "192.168.5.10",
+          "brand": "v-sol",
+          "model": "V1600D4",
+          "port": 23,
+          "user": "admin",
+          "password": "admin",
+          "ponPorts": 4
+        }
+      ]
+    }
+  ]
+}
