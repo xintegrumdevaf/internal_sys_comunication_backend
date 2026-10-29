@@ -334,9 +334,25 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   router.post("/api/admin/settings/network/test-connection", async (req, res, next) => {
     try {
       await requireNetworkAccess(req);
+      const payload = { ...req.body };
+      // Fallback: si no se enviaron host ni ip pero sí routerId, hidratamos automáticamente desde MikroTik
+      if (!payload.host && !payload.ip && payload.routerId) {
+        try {
+          const rData = await proxyMikrotik(`/v1/network/routers/${payload.routerId}`);
+          const r = rData.router || rData.data;
+          if (r) {
+            payload.host = r.host;
+            payload.ip = r.host;
+            payload.port = payload.port || r.port;
+            payload.username = payload.username || r.username;
+          }
+        } catch {
+          // Ignorar si falla lookup
+        }
+      }
       const result = await proxyMikrotik("/v1/network/test-connection", {
         method: "POST",
-        body: JSON.stringify(req.body),
+        body: JSON.stringify(payload),
       });
       res.json({ success: result.success, data: result });
     } catch (err) {
