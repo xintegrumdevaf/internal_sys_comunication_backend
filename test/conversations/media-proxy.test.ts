@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
-import { createConversationsRouter } from "../../src/core/modules/conversations/presentation/conversations.router";
+import { createConversationsRouter, _clearMediaCacheForTesting } from "../../src/core/modules/conversations/presentation/conversations.router";
 import { requireAuth } from "../../src/shared/http/require-auth";
 
 vi.mock("../../src/shared/config/env", () => ({
@@ -18,6 +18,9 @@ vi.mock("../../src/shared/http/require-auth", () => ({
 }));
 
 describe("ConversationsRouter - /api/media Proxy", () => {
+  beforeEach(() => {
+    _clearMediaCacheForTesting();
+  });
   it("descarga imágenes desde una URL de Zernio enviando Bearer ZERNIO_API_KEY", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -298,6 +301,50 @@ describe("ConversationsRouter - /api/media Proxy", () => {
         headers: { Authorization: "Bearer custom-api-key" },
       }),
     );
+  });
+
+  it("soporta peticiones Range (206 Partial Content) y cache en memoria para audios y videos", async () => {
+    const audioData = Buffer.from("0123456789abcdefghij");
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "audio/ogg; codecs=opus" }),
+      arrayBuffer: async () => audioData,
+    });
+    global.fetch = mockFetch;
+
+    const router = createConversationsRouter({
+      listConversations: {} as any,
+      listMessages: {} as any,
+      replyAsHuman: {} as any,
+      takeControl: {} as any,
+      markAsRead: {} as any,
+      caseRepo: {} as any,
+    });
+
+    const app = express();
+    app.use(router);
+
+    // Primera reproducción (descarga y cachea)
+    const res1 = await request(app).get("/api/media/api/v1/whatsapp/media/voice-msg-123");
+    expect(res1.status).toBe(200);
+    expect(res1.headers["content-type"]).toContain("audio/ogg");
+    expect(res1.headers["accept-ranges"]).toBe("bytes");
+    expect(res1.headers["cache-control"]).toContain("public");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Segunda reproducción (seek / replay con Range header): debe servirse desde memoria (206) sin llamar a fetch de nuevo
+    const res2 = await request(app)
+      .get("/api/media/api/v1/whatsapp/media/voice-msg-123")
+      .set("Range", "bytes=0-9");
+
+    expect(res2.status).toBe(206);
+    expect(res2.headers["content-range"]).toBe(`bytes 0-9/${audioData.length}`);
+    expect(res2.headers["content-length"]).toBe("10");
+    const content = Buffer.isBuffer(res2.body) ? res2.body.toString("utf-8") : (res2.text || "");
+    expect(content).toBe("0123456789");
+    // fetch NO fue llamado de nuevo porque se sirvió desde la memoria interna
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 

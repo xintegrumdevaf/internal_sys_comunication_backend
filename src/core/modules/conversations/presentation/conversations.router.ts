@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { env } from "../../../../shared/config/env";
 import { notFound, validationError, businessError } from "../../../../shared/errors/domain-errors";
@@ -80,6 +80,97 @@ function isZernioMediaUrl(resolvedUrl: string, baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface CachedMediaItem {
+  buffer: Buffer;
+  contentType: string | null;
+  timestamp: number;
+}
+
+const mediaMemoryCache = new Map<string, CachedMediaItem>();
+const MAX_CACHE_ENTRIES = 300;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getCachedMedia(key: string): CachedMediaItem | null {
+  const cached = mediaMemoryCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
+    mediaMemoryCache.delete(key);
+    return null;
+  }
+  return cached;
+}
+
+function setCachedMedia(key: string, buffer: Buffer, contentType: string | null) {
+  if (mediaMemoryCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = mediaMemoryCache.keys().next().value;
+    if (oldestKey) mediaMemoryCache.delete(oldestKey);
+  }
+  mediaMemoryCache.set(key, { buffer, contentType, timestamp: Date.now() });
+}
+
+export function _clearMediaCacheForTesting(): void {
+  mediaMemoryCache.clear();
+}
+
+function sendMediaResponse(
+  req: Request,
+  res: Response,
+  buffer: Buffer,
+  rawContentType: string | null,
+  targetUrl: string,
+) {
+  let contentType = rawContentType;
+  if (!contentType || contentType === "application/octet-stream") {
+    const lower = targetUrl.toLowerCase();
+    if (lower.includes(".ogg") || lower.includes("audio") || lower.includes("voice")) {
+      contentType = "audio/ogg";
+    } else if (lower.includes(".mp3")) {
+      contentType = "audio/mpeg";
+    } else if (lower.includes(".wav")) {
+      contentType = "audio/wav";
+    } else if (lower.includes(".m4a")) {
+      contentType = "audio/mp4";
+    } else if (lower.includes(".jpg") || lower.includes(".jpeg")) {
+      contentType = "image/jpeg";
+    } else if (lower.includes(".png")) {
+      contentType = "image/png";
+    }
+  }
+
+  if (contentType) {
+    res.setHeader("Content-Type", contentType);
+  }
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+
+  const totalLength = buffer.length;
+  const rangeHeader = req.headers.range;
+
+  if (rangeHeader) {
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? parseInt(match[2], 10) : totalLength - 1;
+
+      if (start >= totalLength || end >= totalLength || start > end) {
+        res.status(416).setHeader("Content-Range", `bytes */${totalLength}`);
+        res.end();
+        return;
+      }
+
+      const chunk = buffer.subarray(start, end + 1);
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${totalLength}`);
+      res.setHeader("Content-Length", chunk.length);
+      res.send(chunk);
+      return;
+    }
+  }
+
+  res.setHeader("Content-Length", totalLength);
+  res.send(buffer);
 }
 
 const replyBodySchema = z.object({
@@ -463,6 +554,12 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
+        const cached = getCachedMedia(resolvedUrl);
+        if (cached) {
+          sendMediaResponse(req, res, cached.buffer, cached.contentType, resolvedUrl);
+          return;
+        }
+
         const headers: Record<string, string> = {};
         if (zernioApiKey && zernioMedia) {
           headers["Authorization"] = `Bearer ${zernioApiKey}`;
@@ -504,11 +601,9 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           return;
         }
         const contentType = fileRes.headers.get("content-type");
-        if (contentType) {
-          res.setHeader("Content-Type", contentType);
-        }
         const buffer = Buffer.from(await fileRes.arrayBuffer());
-        res.send(buffer);
+        setCachedMedia(resolvedUrl, buffer, contentType);
+        sendMediaResponse(req, res, buffer, contentType, resolvedUrl);
         return;
       }
 
@@ -520,6 +615,12 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
             throw e;
           }
         }
+      }
+
+      const cachedMeta = getCachedMedia(mediaTarget);
+      if (cachedMeta) {
+        sendMediaResponse(req, res, cachedMeta.buffer, cachedMeta.contentType, mediaTarget);
+        return;
       }
 
       if (!env.WHATSAPP_ACCESS_TOKEN) {
@@ -541,11 +642,9 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         res.status(fileRes.status).json({ error: "No se pudo descargar el archivo" });
         return;
       }
-      if (metaJson.mime_type) {
-        res.setHeader("Content-Type", metaJson.mime_type);
-      }
       const buffer = Buffer.from(await fileRes.arrayBuffer());
-      res.send(buffer);
+      setCachedMedia(mediaTarget, buffer, metaJson.mime_type || null);
+      sendMediaResponse(req, res, buffer, metaJson.mime_type || null, mediaTarget);
     } catch (error) {
       next(error);
     }
