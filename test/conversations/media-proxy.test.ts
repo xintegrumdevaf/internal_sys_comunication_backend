@@ -241,5 +241,63 @@ describe("ConversationsRouter - /api/media Proxy", () => {
       vi.mocked(requireAuth).mockImplementation(() => ({ id: "agent-1", role: "agent" }) as never);
     }
   });
+
+  it("si Zernio responde 404 en URL sin accountId, reintenta inyectando el accountId configurado con auth", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "Media not found or missing account" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "image/jpeg" }),
+        arrayBuffer: async () => Buffer.from("retry-success-bytes"),
+      });
+    global.fetch = mockFetch;
+
+    const mockSettingsService = {
+      getChannelSettings: vi.fn().mockResolvedValue({
+        zernioApiKey: "custom-api-key",
+        zernioAccountId: "6ae17617aa3e3cea38f2712b",
+        zernioBaseUrl: "https://zernio.com/api/v1",
+      }),
+    };
+
+    const router = createConversationsRouter({
+      listConversations: {} as any,
+      listMessages: {} as any,
+      replyAsHuman: {} as any,
+      takeControl: {} as any,
+      markAsRead: {} as any,
+      caseRepo: {} as any,
+      settingsService: mockSettingsService as any,
+    });
+
+    const app = express();
+    app.use(router);
+
+    const res = await request(app).get("/api/media/api/v1/whatsapp/media/987654321");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/jpeg");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      "https://zernio.com/api/v1/whatsapp/media/987654321",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer custom-api-key" },
+      }),
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://zernio.com/api/v1/whatsapp/media/987654321?accountId=6ae17617aa3e3cea38f2712b",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer custom-api-key" },
+      }),
+    );
+  });
 });
 

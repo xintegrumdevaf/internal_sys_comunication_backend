@@ -437,7 +437,21 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
-        const zernioBase = (env.ZERNIO_BASE_URL || "https://zernio.com/api/v1").replace(/\/$/, "");
+        let zernioApiKey = env.ZERNIO_API_KEY || "";
+        let zernioAccountId = env.ZERNIO_ACCOUNT_ID || "";
+        let zernioBaseUrl = env.ZERNIO_BASE_URL || "https://zernio.com/api/v1";
+        if (deps.settingsService) {
+          try {
+            const s = await deps.settingsService.getChannelSettings();
+            if (s.zernioApiKey) zernioApiKey = s.zernioApiKey;
+            if (s.zernioAccountId) zernioAccountId = s.zernioAccountId.trim();
+            if (s.zernioBaseUrl) zernioBaseUrl = s.zernioBaseUrl.trim();
+          } catch {
+            // fallback a env
+          }
+        }
+
+        const zernioBase = zernioBaseUrl.replace(/\/$/, "");
         const zernioMedia = isZernioMediaUrl(resolvedUrl, zernioBase);
         if (!req.agent && !zernioMedia) {
           try {
@@ -449,27 +463,13 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
-        let zernioApiKey = env.ZERNIO_API_KEY || "sk_35ec3e10ad46d2d4cc17d81bb3bdeae2e9a00d57205d948be1128cb69e1f68b4";
-        let zernioAccountId = env.ZERNIO_ACCOUNT_ID || "6aa4073f726ebfe037d9f9d1";
-        if (deps.settingsService) {
-          try {
-            const s = await deps.settingsService.getChannelSettings();
-            if (s.zernioApiKey) zernioApiKey = s.zernioApiKey;
-            if (s.zernioAccountId) zernioAccountId = s.zernioAccountId.trim();
-          } catch {
-            // fallback a env
-          }
-        }
         const headers: Record<string, string> = {};
         if (zernioApiKey && zernioMedia) {
           headers["Authorization"] = `Bearer ${zernioApiKey}`;
         }
         let fileRes = await fetch(resolvedUrl, { headers });
-        if (!fileRes.ok && Object.keys(headers).length > 0) {
-          fileRes = await fetch(resolvedUrl);
-        }
 
-        if (!fileRes.ok && fileRes.status === 404 && resolvedUrl.includes("zernio") && zernioAccountId) {
+        if (!fileRes.ok && (fileRes.status === 404 || fileRes.status === 400) && zernioMedia && zernioAccountId) {
           try {
             const retryUrlObj = new URL(resolvedUrl);
             if (retryUrlObj.searchParams.get("accountId") !== zernioAccountId) {
@@ -482,6 +482,10 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           } catch {
             // Ignorar error de parsing en reintento
           }
+        }
+
+        if (!fileRes.ok && !zernioMedia && Object.keys(headers).length > 0) {
+          fileRes = await fetch(resolvedUrl);
         }
 
         if (!fileRes.ok) {
