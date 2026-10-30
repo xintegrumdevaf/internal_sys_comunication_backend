@@ -58,6 +58,9 @@ const envSchema = z.object({
   ZERNIO_WEBHOOK_SECRET: z.string().default(""),
   ZERNIO_BASE_URL: z.string().default("https://zernio.com/api/v1"),
 
+  // Almacenamiento persistente en disco para medios (imágenes, audios, videos, documentos)
+  MEDIA_STORAGE_DIR: z.string().optional(),
+
   // AIProviderPort (docs/spec/03_API_CONTRACT.md §A)
   AI_PROVIDER: z.enum(["ollama", "gemini"]).default("ollama"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
