@@ -15,6 +15,8 @@ export interface Message {
   author: MessageAuthor;
   /** Agente humano autor del reply (07_QUALITY_SUPERVISION.md §6); null en inbound/ai/system. */
   agentId: string | null;
+  /** Nombre del agente autor (resuelto por join con agent.name); null en inbound/ai/system. */
+  agentName?: string | null;
   externalId: string | null;
   body: string;
   type: string;

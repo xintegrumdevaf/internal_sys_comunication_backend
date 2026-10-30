@@ -592,6 +592,8 @@ export function createContainer(): Container {
     departmentRepo,
     auditRepo,
     logger: escalationLogger,
+    messageRepo,
+    broadcaster,
   });
   const disableAutomation = new DisableAutomationUseCase({
     caseRepo,
@@ -686,6 +688,11 @@ export function createContainer(): Container {
     departmentRepo,
     auditRepo,
     logger: casesLogger,
+    autoAssign: autoAssignAgent,
+    escalationRepo,
+    broadcaster,
+    messageRepo,
+    agentRepo,
   });
   const syncCaseBalance = new SyncCaseBalanceUseCase({
     caseRepo,
@@ -802,6 +809,7 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
     agentRepo,
+    messageRepo,
   });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
@@ -923,6 +931,7 @@ export function createContainer(): Container {
   app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
   app.use(
     express.json({
+      limit: "10mb",
       verify: (req, _res, buf) => {
         (req as unknown as { rawBody?: Buffer }).rawBody = buf;
       },

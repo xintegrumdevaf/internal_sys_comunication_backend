@@ -62,10 +62,15 @@ const cancelBodySchema = z.object({
   reason: z.string().min(1),
 });
 
-const transferBodySchema = z.object({
-  toDepartmentId: z.string().uuid(),
-  reason: z.string().min(1),
-});
+const transferBodySchema = z
+  .object({
+    toDepartmentId: z.string().uuid().optional(),
+    toAgentId: z.string().uuid().optional(),
+    reason: z.string().optional().default("Transferencia de departamento"),
+  })
+  .refine((data) => data.toDepartmentId || data.toAgentId, {
+    message: "Debe especificar departamento o agente destino para transferir",
+  });
 
 /**
  * Acciones/lecturas de caso (03_API_CONTRACT.md §C).
@@ -302,6 +307,7 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
       const result = await deps.transferCase.execute({
         caseId: req.params.id,
         toDepartmentId: parsed.data.toDepartmentId,
+        toAgentId: parsed.data.toAgentId,
         reason: parsed.data.reason,
         agentUserId: agent.id,
       });

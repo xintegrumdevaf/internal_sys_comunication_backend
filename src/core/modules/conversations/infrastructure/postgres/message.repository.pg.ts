@@ -14,6 +14,7 @@ type MessageRow = {
   direction: "inbound" | "outbound";
   author: MessageAuthor;
   agent_id: string | null;
+  agent_name?: string | null;
   external_id: string | null;
   body: string;
   type: string;
@@ -47,6 +48,7 @@ function mapRow(row: MessageRow): Message {
     direction: row.direction,
     author: row.author,
     agentId: row.agent_id,
+    agentName: row.agent_name ?? null,
     externalId: row.external_id,
     body: row.body,
     type: row.type,
@@ -111,9 +113,14 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
 
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
     const { rows } = await this.pool.query<MessageRow>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, caption, agent_id, case_id, status, error_message)
-       VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
+      `WITH ins AS (
+         INSERT INTO message (conversation_id, direction, author, external_id, body, type, caption, agent_id, case_id, status, error_message)
+         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *
+       )
+       SELECT ins.*, a.name AS agent_name
+       FROM ins
+       LEFT JOIN agent a ON a.id = ins.agent_id`,
       [
         input.conversationId,
         input.author,
@@ -193,17 +200,25 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     options: { limit?: number; cursor?: string } = {},
   ): Promise<Message[]> {
     const params: unknown[] = [conversationId];
-    const clauses = [`conversation_id = $1`];
+    const clauses = [`m.conversation_id = $1`];
     if (options.cursor) {
       params.push(new Date(options.cursor));
-      clauses.push(`created_at < $${params.length}`);
+      clauses.push(`m.created_at < $${params.length}`);
     }
-    let sql = `SELECT * FROM message WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC`;
+    let sql = `SELECT m.*, a.name AS agent_name
+               FROM message m
+               LEFT JOIN agent a ON a.id = m.agent_id
+               WHERE ${clauses.join(" AND ")}
+               ORDER BY m.created_at ASC`;
     if (options.limit && options.limit > 0) {
       // Pedimos los últimos N: orden DESC + limit + reverse.
       sql = `SELECT * FROM (
-               SELECT * FROM message WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT $${params.length + 1}
-             ) m ORDER BY created_at ASC`;
+               SELECT m.*, a.name AS agent_name
+               FROM message m
+               LEFT JOIN agent a ON a.id = m.agent_id
+               WHERE ${clauses.join(" AND ")}
+               ORDER BY m.created_at DESC LIMIT $${params.length + 1}
+             ) sub ORDER BY sub.created_at ASC`;
       params.push(options.limit);
     }
     const { rows } = await this.pool.query<MessageRow>(sql, params);
@@ -215,7 +230,11 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       return [];
     }
     const { rows } = await this.pool.query<MessageRow>(
-      `SELECT * FROM message WHERE id = ANY($1::uuid[]) ORDER BY created_at ASC`,
+      `SELECT m.*, a.name AS agent_name
+       FROM message m
+       LEFT JOIN agent a ON a.id = m.agent_id
+       WHERE m.id = ANY($1::uuid[])
+       ORDER BY m.created_at ASC`,
       [ids],
     );
     return rows.map(mapRow);
@@ -225,10 +244,11 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     const result = new Map<string, Message>();
     if (conversationIds.length === 0) return result;
     const { rows } = await this.pool.query<MessageRow>(
-      `SELECT DISTINCT ON (conversation_id) *
-       FROM message
-       WHERE conversation_id = ANY($1::uuid[])
-       ORDER BY conversation_id, created_at DESC`,
+      `SELECT DISTINCT ON (m.conversation_id) m.*, a.name AS agent_name
+       FROM message m
+       LEFT JOIN agent a ON a.id = m.agent_id
+       WHERE m.conversation_id = ANY($1::uuid[])
+       ORDER BY m.conversation_id, m.created_at DESC`,
       [conversationIds],
     );
     for (const row of rows) {
