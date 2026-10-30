@@ -350,7 +350,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
   expirationHours: 24,
   waitingSteps: {
     WAITING_USER_CLIENT: {
-      pendingQuestion: "Para consultar el saldo, ¿me confirmas el número de cédula del titular del servicio?",
+      pendingQuestion: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
       requireAll: ["nationalId"],
       maxAttempts: 3,
     },
@@ -362,7 +362,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     },
   },
   replyTemplates: {
-    WAITING_USER_CLIENT: "Para consultar el saldo, ¿me confirmas el número de cédula del titular del servicio?",
+    WAITING_USER_CLIENT: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
     WAITING_USER_RECEIPT:
       "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
     RESPOND_NO_DEBT:

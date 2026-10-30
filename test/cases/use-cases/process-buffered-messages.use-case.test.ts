@@ -24,6 +24,7 @@ import {
   WhatsAppSenderFake,
 } from "../../support/fakes";
 import { silentLogger } from "../../support/silent-logger";
+import type { EscalationService } from "../../../src/core/modules/escalation/application/services/escalation.service";
 
 class QueuedInterpretationProvider implements InterpretationPort {
   private readonly queue: Interpretation[];
@@ -644,6 +645,218 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     }
 
     // 2. Debe haber creado un caso de SUPPORT_INTERNET, NO de BILLING_BALANCE
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
+  });
+
+  it("reconoce comprobante de pago con foto y texto 'Pago realizado' derivando a Cartera y silenciando el bot", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+
+    let escalatedReason: string | null = null;
+    const escalationService = {
+      escalateExistingCase: async (input: { caseId: string; reason: string }) => {
+        escalatedReason = input.reason;
+        return { customerMessage: "" };
+      },
+      sendToTriage: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const fakeAi = new FakeAIProvider();
+    // Simulamos que el OCR visual no extrajo monto explícito, pero la foto vino con 'Pago realizado'
+    fakeAi.extractReceiptImpl = async () => ({
+      isReceipt: true,
+      amount: undefined,
+      reference: undefined,
+      date: undefined,
+      description: "depósito bancario",
+    });
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: new QueuedInterpretationProvider([
+        { type: "NEW_INTENT", intent: "billing.record_payment", entities: {}, confidence: 0.95 },
+      ]),
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const textMsg1 = messageRepo.seedText(conversation.id, "Pago realizado");
+    const imgMsg = messageRepo.seedText(conversation.id, "", { type: "image", mediaId: "media-receipt" });
+    const textMsg2 = messageRepo.seedText(conversation.id, "Buenos dias");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-payment-submission",
+      messages: [textMsg1, imgMsg, textMsg2],
+    });
+
+    // 1. Debe haber enviado el mensaje fijo de confirmación de pago recibido
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toContain("¡Recibido, gracias! 🙌 Estamos verificando tu pago");
+
+    // 2. Debe haber creado el caso en BILLING_BALANCE
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("BILLING_BALANCE");
+
+    // 3. Debe haberse escalado
+    expect(escalatedReason).toContain("Comprobante de pago");
+
+    // 4. La automatización del bot debe estar DESACTIVADA para que no responda con consultas de saldo
+    const autoState = await caseRepo.getAutomationState(cases[0]!.id);
+    expect(autoState?.enabled).toBe(false);
+  });
+
+  it("prioriza soporte técnico (support.internet) cuando el cliente reporta que no tiene internet aunque adjunte comprobante de pago", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "support.internet",
+        entities: { paymentReported: true, amount: 20 },
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const textMsg = messageRepo.seedText(conversation.id, "No tengo internet, pero ya pague en la mañana el servicio");
+    const imgMsg = messageRepo.seedText(conversation.id, "", { type: "image", mediaId: "media-receipt-1" });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-support-with-payment",
+      messages: [textMsg, imgMsg],
+    });
+
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
+  });
+
+  it("procesa y analiza archivos de video incorporando su descripción al contexto de interpretación", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    let textReceivedByAi = "";
+    const interpretationProvider = {
+      interpretMessage: async (input: { text: string }) => {
+        textReceivedByAi = input.text;
+        return {
+          type: "NEW_INTENT" as const,
+          intent: "support.internet",
+          entities: { answer: "luces rojas" },
+          confidence: 0.95,
+        };
+      },
+    };
+
+    const fakeAi = new FakeAIProvider();
+    fakeAi.extractReceiptImpl = async (_url, mime) => {
+      expect(mime).toBe("video/mp4");
+      return {
+        isReceipt: false,
+        description: "video de router con luces rojas en LOS",
+      };
+    };
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      logger: silentLogger,
+    });
+
+    const videoMsg = messageRepo.seedText(conversation.id, "Miren cómo está el router", {
+      type: "video",
+      mediaId: "video-router-1",
+      mimeType: "video/mp4",
+      caption: "Miren cómo está el router",
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-video-analysis",
+      messages: [videoMsg],
+    });
+
+    expect(textReceivedByAi).toContain("[Adjunto video: video de router con luces rojas en LOS]");
+    expect(textReceivedByAi).toContain("Miren cómo está el router");
     const cases = await caseRepo.listByConversation(conversation.id);
     expect(cases).toHaveLength(1);
     expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");

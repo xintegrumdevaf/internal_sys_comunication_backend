@@ -525,6 +525,8 @@ export class SystemSettingsService {
           details: {
             accountsCount: accounts.length,
             targetAccountId: accountId || matched?._id,
+            accountId: accountId || matched?._id,
+            platform: matched?.platform || "whatsapp",
           },
         };
       } catch (err: unknown) {

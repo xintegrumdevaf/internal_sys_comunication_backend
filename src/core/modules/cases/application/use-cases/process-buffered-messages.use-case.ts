@@ -159,125 +159,7 @@ export class ProcessBufferedMessagesUseCase {
         }
       }
 
-      const hasExtractedReceipt = Boolean(
-        receiptEntities.isReceipt === true ||
-        receiptEntities.amount !== undefined ||
-        receiptEntities.reference !== undefined
-      );
 
-      const textNormalized = text.toLowerCase();
-      const mentionsPayment = /\b(comprobante|recibo|transferencia|deposito|depósito|pago|pague|pagué|pagado)\b/i.test(textNormalized);
-      const hasMedia = messages.some((m) => m.type === "image") || hasDocumentAttachment;
-
-      const isPaymentSubmission =
-        hasMedia &&
-        (hasExtractedReceipt || (mentionsPayment && (prevHasDebt || Boolean(text.match(/\$\s*\d+|\b\d+[\.,]\d{2}\b/)))));
-
-      if (isPaymentSubmission) {
-        const billingDeptId = await this.deps.departmentResolver.resolveDepartmentId("BILLING_BALANCE");
-        const billingDeptSlug = billingDeptId ? this.deps.departmentResolver.getDepartmentSlug(billingDeptId) : null;
-        log.info(
-          { departmentId: billingDeptId, departmentSlug: billingDeptSlug },
-          `Comprobante o archivo recibido (documento/imagen): derivando a departamento de cartera/pagos (ID: ${billingDeptId ?? "desconocido"})`,
-        );
-        let targetCaseId: string;
-
-        const rawBalance = inheritedContext.balance as Record<string, unknown> | undefined;
-        const inheritedClient = (inheritedContext as { client?: { nationalId: string; fullName: string } }).client;
-        const mergedContext: BillingBalanceContext = {
-          purpose: "record_payment",
-          client: inheritedClient,
-          balance: {
-            hasDebt: true,
-            amount:
-              typeof rawBalance?.amount === "number"
-                ? rawBalance.amount
-                : typeof rawBalance?.debt === "number"
-                  ? rawBalance.debt
-                  : undefined,
-          },
-          payment: {
-            amount: typeof receiptEntities.amount === "number" ? receiptEntities.amount : undefined,
-            reference: typeof receiptEntities.reference === "string" ? receiptEntities.reference : undefined,
-            date: typeof receiptEntities.date === "string" ? receiptEntities.date : undefined,
-            status: "PENDING",
-          },
-        };
-
-        if (activeAggregate && activeAggregate.case.workflowType === "SUPPORT_INTERNET") {
-          // Cerrar soporte: el soporte tecnico solo aplica cuando se descarta la deuda
-          await this.deps.caseRepo.applyTransition({
-            caseId: activeAggregate.case.id,
-            expectedCaseVersion: activeAggregate.case.version,
-            expectedWorkflowVersion: activeAggregate.workflowInstance.version,
-            status: "COMPLETED",
-            context: activeAggregate.case.context,
-            currentState: "CLOSED_PENDING_PAYMENT",
-            expiresAt: null,
-          });
-        }
-
-        const created = await this.createCase(
-          conversationId,
-          "BILLING_BALANCE",
-          "billing.record_payment",
-          log,
-        );
-        targetCaseId = created.id;
-        const fresh = await this.deps.caseRepo.findById(targetCaseId);
-        if (fresh) {
-          await this.deps.caseRepo.applyTransition({
-            caseId: targetCaseId,
-            expectedCaseVersion: fresh.case.version,
-            expectedWorkflowVersion: fresh.workflowInstance.version,
-            status: fresh.case.status,
-            context: {
-              workflowType: "BILLING_BALANCE",
-              data: mergedContext,
-            },
-            currentState: fresh.workflowInstance.currentState,
-            expiresAt: null,
-            departmentId: billingDeptId,
-          });
-        }
-
-        if (this.deps.escalationService) {
-          await this.deps.escalationService.escalateExistingCase({
-            caseId: targetCaseId,
-            reason: "Comprobante de pago adjunto (documento/imagen)",
-            correlationId,
-          });
-        }
-
-        await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
-          reason: "PAYMENT_RECEIPT_ESCALATED",
-        });
-        await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
-
-        const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
-        const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
-        const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
-
-        const rawAmount = receiptEntities.amount ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount ?? (inheritedContext.balance as { debt?: number } | undefined)?.debt;
-        const amountFormatted =
-          typeof rawAmount === "number" && Number.isFinite(rawAmount)
-            ? `$${rawAmount.toFixed(2).replace('.', ',')}`
-            : typeof rawAmount === "string" && rawAmount.trim() !== "" && Number.isFinite(Number(rawAmount))
-              ? `$${Number(rawAmount).toFixed(2).replace('.', ',')}`
-              : null;
-
-        const amountStr = amountFormatted ? `de ${amountFormatted} ` : "";
-        const replyMessage =
-          `¡Recibido, gracias! 🙌 Estamos verificando tu pago ${amountStr}y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!`.replace("  ", " ");
-
-        await this.deliverFixedReply({
-          conversationId,
-          correlationId,
-          body: replyMessage,
-          log,
-        });
-        return;
-      }
 
       const waitingStep = activeAggregate
         ? this.deps.engine.getDefinition(activeAggregate.case.workflowType)?.waitingSteps?.[
@@ -556,6 +438,112 @@ export class ProcessBufferedMessagesUseCase {
         conversationId,
       });
 
+      // Si la intención interpretada por la IA fue registrar un comprobante o reporte de pago (billing.record_payment):
+      // - Si ya cuenta con todos los datos necesarios (cédula, monto y referencia), el workflow avanza y registra el pago automáticamente.
+      // - Si no cuenta con los datos completos (caso habitual al mandar foto o aviso de pago), se deriva de inmediato a Cartera, se acusa recibo y se silencia el bot.
+      if (interpretation.intent === "billing.record_payment") {
+        const canAutoRecord = Boolean(
+          interpretation.entities?.nationalId &&
+          interpretation.entities?.amount !== undefined &&
+          interpretation.entities?.reference
+        );
+
+        if (!canAutoRecord) {
+          const billingDeptId = await this.deps.departmentResolver.resolveDepartmentId("BILLING_BALANCE", interpretation.intent);
+          const billingDeptSlug = billingDeptId ? this.deps.departmentResolver.getDepartmentSlug(billingDeptId) : null;
+          log.info(
+            { departmentId: billingDeptId, departmentSlug: billingDeptSlug },
+            `Comprobante/pago reportado (incompleto para auto-registro): derivando a departamento de cartera/pagos (ID: ${billingDeptId ?? "desconocido"})`,
+          );
+
+        if (activeAggregate && activeAggregate.case.workflowType === "SUPPORT_INTERNET") {
+          await this.deps.caseRepo.applyTransition({
+            caseId: activeAggregate.case.id,
+            expectedCaseVersion: activeAggregate.case.version,
+            expectedWorkflowVersion: activeAggregate.workflowInstance.version,
+            status: "COMPLETED",
+            context: activeAggregate.case.context,
+            currentState: "CLOSED_PENDING_PAYMENT",
+            expiresAt: null,
+          });
+        }
+
+        const fresh = await this.deps.caseRepo.findById(targetCaseId);
+        if (fresh) {
+          const rawBalance = inheritedContext.balance as Record<string, unknown> | undefined;
+          const inheritedClient = (inheritedContext as { client?: { nationalId: string; fullName: string } }).client;
+          const mergedContext: BillingBalanceContext = {
+            purpose: "record_payment",
+            client: inheritedClient,
+            balance: {
+              hasDebt: true,
+              amount:
+                typeof rawBalance?.amount === "number"
+                  ? rawBalance.amount
+                  : typeof rawBalance?.debt === "number"
+                    ? rawBalance.debt
+                    : undefined,
+            },
+            payment: {
+              amount: typeof interpretation.entities?.amount === "number" ? interpretation.entities.amount : undefined,
+              reference: typeof interpretation.entities?.reference === "string" ? interpretation.entities.reference : undefined,
+              date: typeof interpretation.entities?.date === "string" ? interpretation.entities.date : undefined,
+              status: "PENDING",
+            },
+          };
+
+          await this.deps.caseRepo.applyTransition({
+            caseId: targetCaseId,
+            expectedCaseVersion: fresh.case.version,
+            expectedWorkflowVersion: fresh.workflowInstance.version,
+            status: fresh.case.status,
+            context: {
+              workflowType: "BILLING_BALANCE",
+              data: mergedContext,
+            },
+            currentState: fresh.workflowInstance.currentState,
+            expiresAt: null,
+            departmentId: billingDeptId,
+          });
+        }
+
+        if (this.deps.escalationService) {
+          await this.deps.escalationService.escalateExistingCase({
+            caseId: targetCaseId,
+            reason: "Comprobante de pago adjunto (documento/imagen)",
+            correlationId,
+          });
+        }
+
+        await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
+          reason: "PAYMENT_RECEIPT_ESCALATED",
+        });
+        await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+
+        const amountFromEntities = typeof interpretation.entities?.amount === "number" ? interpretation.entities.amount : undefined;
+        const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
+        const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
+        const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
+        const rawAmount = amountFromEntities ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount;
+        const amountFormatted =
+          typeof rawAmount === "number" && Number.isFinite(rawAmount)
+            ? `$${rawAmount.toFixed(2).replace('.', ',')}`
+            : null;
+
+        const amountStr = amountFormatted ? `de ${amountFormatted} ` : "";
+        const replyMessage =
+          `¡Recibido, gracias! 🙌 Estamos verificando tu pago ${amountStr}y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!`.replace("  ", " ");
+
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: replyMessage,
+          log,
+        });
+        return;
+        }
+      }
+
       // Si el caso está configurado en modo human_direct, se escala de inmediato sin avance de IA
       if (!decision.resumeCaseId && this.deps.routingService) {
         const routing = await this.deps.routingService.resolveByIntent(interpretation.intent);
@@ -676,21 +664,105 @@ export class ProcessBufferedMessagesUseCase {
             mediaUrl,
             message.mimeType ?? "image/jpeg",
           );
-          if (receipt.isReceipt !== false && (receipt.amount !== undefined || receipt.reference !== undefined)) {
+          if (receipt.isReceipt === true || receipt.amount !== undefined || receipt.reference !== undefined) {
             Object.assign(receiptEntities, receipt);
+          } else if (receipt.isReceipt === false) {
+            receiptEntities.isReceipt = false;
           }
           if (receipt.description) {
             parts.push(`[Adjunto imagen: ${receipt.description}]`);
+          } else if (receipt.isReceipt === true) {
+            parts.push(`[Adjunto: foto de comprobante de pago/transferencia bancaria]`);
+          } else if (receipt.isReceipt === false) {
+            parts.push(`[Adjunto: imagen de equipo/dispositivo de red]`);
+          } else {
+            parts.push(`[Adjunto: imagen/foto enviada por el cliente]`);
           }
           if (message.caption) parts.push(message.caption);
-          else if (message.body) parts.push(message.body);
+          else if (message.body && message.body !== "[image]") parts.push(message.body);
         } catch (error) {
           log.warn(
             { messageId: message.id, err: error instanceof Error ? error.message : String(error) },
             "fallo extractReceiptData; se usa caption/body si hay",
           );
-          if (message.body) parts.push(message.body);
+          parts.push(`[Adjunto: imagen/foto enviada por el cliente]`);
+          if (message.caption) parts.push(message.caption);
+          else if (message.body && message.body !== "[image]") parts.push(message.body);
         }
+        continue;
+      }
+
+      if (type === "video") {
+        try {
+          const mediaUrl = message.mediaId ?? "";
+          const analysis = await this.deps.extractReceiptData.execute(
+            mediaUrl,
+            message.mimeType ?? "video/mp4",
+          );
+          if (analysis.isReceipt === true || analysis.amount !== undefined || analysis.reference !== undefined) {
+            Object.assign(receiptEntities, analysis);
+          } else if (analysis.isReceipt === false) {
+            receiptEntities.isReceipt = false;
+          }
+          if (analysis.description) {
+            parts.push(`[Adjunto video: ${analysis.description}]`);
+          } else if (analysis.isReceipt === true) {
+            parts.push(`[Adjunto: video de comprobante de pago/transferencia bancaria]`);
+          } else if (analysis.isReceipt === false) {
+            parts.push(`[Adjunto: video de equipo o pantalla (no es comprobante)]`);
+          } else {
+            parts.push(`[Adjunto: video enviado por el cliente]`);
+          }
+          if (message.caption) parts.push(message.caption);
+          else if (message.body && message.body !== "[video]") parts.push(message.body);
+        } catch (error) {
+          log.warn(
+            { messageId: message.id, err: error instanceof Error ? error.message : String(error) },
+            "fallo analisis visual de video; se usa caption/body si hay",
+          );
+          parts.push(`[Adjunto: video enviado por el cliente]`);
+          if (message.caption) parts.push(message.caption);
+          else if (message.body && message.body !== "[video]") parts.push(message.body);
+        }
+        continue;
+      }
+
+      if (type === "document") {
+        const mime = message.mimeType?.toLowerCase() ?? "";
+        const isPdfOrImageDoc = mime.includes("pdf") || mime.includes("image");
+        if (isPdfOrImageDoc && message.mediaId) {
+          try {
+            const analysis = await this.deps.extractReceiptData.execute(
+              message.mediaId,
+              message.mimeType ?? "application/pdf",
+            );
+            if (analysis.isReceipt === true || analysis.amount !== undefined || analysis.reference !== undefined) {
+              Object.assign(receiptEntities, analysis);
+            } else if (analysis.isReceipt === false) {
+              receiptEntities.isReceipt = false;
+            }
+            if (analysis.description) {
+              parts.push(`[Adjunto documento: ${analysis.description}]`);
+            } else if (analysis.isReceipt === true) {
+              parts.push(`[Adjunto: documento de comprobante de pago/transferencia]`);
+            } else if (message.filename) {
+              parts.push(`[Adjunto documento: ${message.filename}]`);
+            } else {
+              parts.push(`[Adjunto: documento digital]`);
+            }
+            if (message.caption) parts.push(message.caption);
+            continue;
+          } catch (error) {
+            log.warn(
+              { messageId: message.id, err: error instanceof Error ? error.message : String(error) },
+              "fallo analisis de documento; se usa filename/caption",
+            );
+          }
+        }
+
+        if (message.caption) parts.push(message.caption);
+        else if (message.filename) parts.push(`[Adjunto documento: ${message.filename}]`);
+        else parts.push(`[Adjunto: documento digital]`);
         continue;
       }
 

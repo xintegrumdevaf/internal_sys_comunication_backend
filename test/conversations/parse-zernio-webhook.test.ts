@@ -134,6 +134,75 @@ describe("parseZernioWebhookPayload", () => {
     expect(normalized!.mediaId).toBe("https://maps.google.com/?q=-0.2661031,-78.4977984");
     expect(normalized!.body).toContain("Ubicación GPS: -0.2661031, -78.4977984");
   });
+
+  it("extrae correctamente un video adjunto cuando viene en attachments", async () => {
+    const payload = {
+      id: "evt_vid",
+      event: "message.received",
+      message: {
+        id: "msg_vid_1",
+        conversationId: "conv_xyz",
+        platform: "whatsapp",
+        platformMessageId: "wamid.VID101",
+        direction: "incoming",
+        text: "",
+        attachments: [
+          {
+            type: "video",
+            url: "https://zernio.com/api/v1/whatsapp/media/1042377638962976/video_test",
+            mimeType: "video/mp4",
+            caption: "Video desde el router",
+          },
+        ],
+        sender: {
+          id: "593994844050",
+          name: "Marcela Carpio",
+        },
+      },
+    };
+
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.waPhone).toBe("593994844050");
+    expect(normalized!.externalId).toBe("wamid.VID101");
+    expect(normalized!.type).toBe("video");
+    expect(normalized!.mediaId).toBe("https://zernio.com/api/v1/whatsapp/media/1042377638962976/video_test");
+    expect(normalized!.caption).toBe("Video desde el router");
+    expect(normalized!.body).toBe("Video desde el router");
+  });
+
+  it("identifica video si type es 'file' pero mimeType es 'video/mp4'", async () => {
+    const payload = {
+      id: "evt_vid2",
+      event: "message.received",
+      message: {
+        id: "msg_vid_2",
+        conversationId: "conv_xyz",
+        platform: "whatsapp",
+        platformMessageId: "wamid.VID102",
+        direction: "incoming",
+        text: "",
+        attachments: [
+          {
+            type: "file",
+            filename: "router_recording.mp4",
+            url: "https://zernio.com/api/v1/whatsapp/media/1042377638962976/file_test",
+            mimeType: "video/mp4",
+          },
+        ],
+        sender: {
+          id: "593994844050",
+          name: "Marcela Carpio",
+        },
+      },
+    };
+
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.type).toBe("video");
+    expect(normalized!.body).toBe("[video]");
+    expect(normalized!.filename).toBe("router_recording.mp4");
+  });
 });
 
 describe("verifyZernioSignature", () => {

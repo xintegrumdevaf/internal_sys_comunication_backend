@@ -105,7 +105,10 @@ export class UpdateQuickReplyUseCase {
       ...existing,
       shortcut: targetShortcut,
       title: dto.title !== undefined ? dto.title.trim() : existing.title,
-      body: dto.body !== undefined ? dto.body.trim() : existing.body,
+      body:
+        dto.body !== undefined
+          ? dto.body.trim().replace(/\r\n/g, "\n").replace(/\\n/g, "\n")
+          : existing.body,
       departmentId: targetDepartmentId,
       category: dto.category !== undefined ? (dto.category?.trim() || null) : existing.category,
       mediaUrl: dto.mediaUrl !== undefined ? (dto.mediaUrl?.trim() || null) : existing.mediaUrl,

@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-10-30
+
+- **Contextual Intent-Driven Routing & Elimination of Rigid Regex Bypasses**:
+  - *Damage*: A rigid keyword-based regex block (`isPaymentSubmission`) intercepted messages before AI interpretation. This created two serious failure modes:
+    1. *Misrouting technical outages*: When a customer reported a service failure while mentioning a payment or attaching a voucher (e.g. *"No tengo internet, pero ya pagué en la mañana el servicio"*), the hardcoded regex hijacked the ticket and routed it to Cartera, ignoring that the user had an active internet outage needing technical support.
+    2. *Brittleness to natural language*: When a customer reported a payment using terms not present in the hardcoded regex (or when OCR didn't extract fields), the regex evaluated to false and trapped the user in an automated balance inquiry asking for their cédula.
+  - *Root Cause*: Rigid keyword checks attempted to replace AI natural language understanding with regular expressions, bypassing message history and full burst context.
+  - *Resolution*:
+    - Completely removed the pre-NLU regex bypass `isPaymentSubmission` from `ProcessBufferedMessagesUseCase`.
+    - Enriched `prepareText` to always supply full media context (`[Adjunto imagen...]`, `[Adjunto documento...]`, audio transcripts, GPS coordinates) alongside message bursts and recent conversation history to `interpretMessage`.
+    - Reinforced normative intent priority rules in `interpret-message.prompt.ts`:
+      - Outages/technical issues take precedence (`support.internet`) even when payment proof is attached, recording payment entities in context for technicians.
+      - Payment reports without technical failures (`billing.record_payment`) in any natural language phrasing escalate immediately to Cartera, acknowledge receipt, and silence the bot without asking for cédula.
+    - Verified all test suites pass with 492 tests across 87 files.
+
+- **WhatsApp Video & Media Ingestion, Classification & Multimodal Visual Analysis**:
+  - *Damage*: Video messages received from WhatsApp (such as customer recordings of blinking router lights, damaged cables, or payment confirmations) were either dropped, misclassified as generic documents, or ignored by the AI reasoning engine, leaving the bot blind to the actual visual evidence provided by the customer.
+  - *Root Cause*: Ingestion classification omitted video MIME types and extensions, and the reasoning pipeline (`prepareText`) lacked visual extraction for video and document media types.
+  - *Resolution*:
+    - Enhanced `parseZernioWebhookPayload` and `ZernioHistorySyncWorker` to accurately detect video attachments (`type === "video"` or MIME types `video/*` and extensions `.mp4`, `.mov`, `.webm`, `.3gp`, `.mkv`).
+    - Integrated multimodal visual analysis in `GeminiAdapter.extractReceiptData` and `ProcessBufferedMessagesUseCase.prepareText` to process videos, images, and documents, automatically extracting visual scene descriptions (e.g. `[Adjunto video: router con luz roja LOS parpadeando]`) and receipt data.
+    - Added unit test coverage in `test/cases/use-cases/process-buffered-messages.use-case.test.ts` and `test/conversations/parse-zernio-webhook.test.ts`.
+
+- **Preservation of Line Breaks and Multiline Structure in Quick Replies**:
+  - *Damage*: Quick replies containing instructions with multiple paragraphs, bullet points, and contract terms (e.g. equipment return requirements, payment instructions) had all line breaks collapsed into a continuous, illegible block of text.
+  - *Root Cause*: Input and resolution use cases did not normalize Windows CRLF (`\r\n`) or literal backslash-escaped sequences (`\\n`), and AI tone refinement prompts lacked instructions to preserve paragraph and list structures.
+  - *Resolution*:
+    - Standardized line-break normalization (`\r\n` and `\\n` -> `\n`) in `CreateQuickReplyUseCase`, `UpdateQuickReplyUseCase`, and `ResolveQuickReplyUseCase`.
+    - Added structural preservation directive to `buildRefineQuickReplyTonePrompt` ensuring AI-assisted tone improvements preserve bullet points, lists, and line breaks.
+    - Added unit and router integration tests validating multiline preservation.
+
 ## [0.2.1] - 2026-10-29
 
 ### Added

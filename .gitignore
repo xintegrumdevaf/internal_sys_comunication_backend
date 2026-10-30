@@ -8,3 +8,4 @@ dist/
 .cursor/mcp.json
 .vscode/
 scratch/
+public/uploads/

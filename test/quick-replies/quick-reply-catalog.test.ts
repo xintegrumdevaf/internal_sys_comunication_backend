@@ -161,4 +161,18 @@ describe("QuickReplyCatalogService — Catálogo en memoria y resolución de ata
     expect(aiContext).toContain("- /bancos: Cuentas Bancarias");
     expect(aiContext).not.toContain("Saludo Soporte Técnico"); // no pertenece a billing
   });
+
+  it("conserva saltos de línea múltiples y listas con viñetas durante la interpolación", () => {
+    const multilineTemplate =
+      "Estimado {{nombre}}:\n\nTenga en cuenta lo siguiente:\n- Punto 1\n- Punto 2\n\nSaludos,\n{{agente}}";
+    const context = {
+      nombre: "Juan Perez",
+      agente: "Gabriela Mangia",
+    };
+
+    const result = catalogService.interpolate(multilineTemplate, context);
+    expect(result).toBe(
+      "Estimado Juan Perez:\n\nTenga en cuenta lo siguiente:\n- Punto 1\n- Punto 2\n\nSaludos,\nGabriela Mangia",
+    );
+  });
 });

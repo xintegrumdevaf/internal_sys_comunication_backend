@@ -268,7 +268,20 @@ export async function parseZernioWebhookPayload(
     filename = `${latCandidate},${lngCandidate}`;
     mediaId = googleMapsUrl;
   } else if (firstAttachment) {
-    type = firstAttachment.type || "document";
+    const rawType = (firstAttachment.type || "").toLowerCase();
+    const mime = (firstAttachment.mimeType || "").toLowerCase();
+    const fname = (firstAttachment.filename || firstAttachment.name || firstAttachment.url || "").toLowerCase();
+    if (rawType === "video" || mime.startsWith("video/") || /\.(mp4|mov|webm|3gp|3gpp|mkv)$/i.test(fname)) {
+      type = "video";
+    } else if (rawType === "audio" || mime.startsWith("audio/") || /\.(ogg|oga|opus|mp3|m4a|wav|aac)$/i.test(fname)) {
+      type = "audio";
+    } else if (rawType === "image" || mime.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(fname)) {
+      type = "image";
+    } else if (rawType === "document" || mime.includes("pdf") || /\.(pdf|doc|docx|xls|xlsx|csv|zip|rar)$/i.test(fname)) {
+      type = "document";
+    } else {
+      type = rawType || "document";
+    }
     mediaId = firstAttachment.url || null;
     mimeType = firstAttachment.mimeType || null;
     caption = firstAttachment.caption || msg.caption || null;
@@ -284,7 +297,7 @@ export async function parseZernioWebhookPayload(
     parts.push(googleMapsUrl);
     body = parts.join(" - ");
   } else {
-    body = rawText.length > 0 ? rawText : (caption ?? "").trim();
+    body = rawText.length > 0 ? rawText : (caption?.trim() || (type !== "text" ? `[${type}]` : ""));
   }
 
   let createdAt: Date | undefined;

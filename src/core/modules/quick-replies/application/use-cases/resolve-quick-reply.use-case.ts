@@ -83,7 +83,8 @@ export class ResolveQuickReplyUseCase {
       context.agente = context.agent_name;
     }
 
-    const interpolatedBody = this.deps.catalogService.interpolate(quickReply.body, context);
+    const normalizedBody = quickReply.body.replace(/\r\n/g, "\n").replace(/\\n/g, "\n");
+    const interpolatedBody = this.deps.catalogService.interpolate(normalizedBody, context);
 
     return {
       quickReply,

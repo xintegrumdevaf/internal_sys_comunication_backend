@@ -29,9 +29,9 @@ export function buildInterpretMessagePrompt(
   const recentMessages = input.conversationSnapshot?.recentMessages ?? [];
 
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
-- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio.
+- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio o sigue sin internet a pesar de haber pagado, prima soporte técnico).
 - billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
-- billing.record_payment: envío o reporte de comprobante/transferencia de pago YA realizado (ÚNICAMENTE CUANDO EL CLIENTE YA REALIZÓ EL PAGO Y ADJUNTA/ENVÍA LA FOTO DEL COMPROBANTE O EL NÚMERO DE REFERENCIA).`;
+- billing.record_payment: envío o reporte de comprobante, constancia, depósito o transferencia de pago YA realizado (en cualquier expresión del lenguaje natural: cuando el objetivo del cliente es registrar, reportar o confirmar su pago sin reportar fallas técnicas activas).`;
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
     ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
@@ -76,11 +76,11 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   → Clasifica SIEMPRE como type="ANSWER" con el intent del caso activo (ej: intent="support.internet").
   → Extrae en \`entities\`: \`selectedOption\` (número como 1, 2...), \`address\` o \`contractCode\` según lo indicado por el cliente.
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC ni UNCLEAR.
-- RESPUESTAS A PREGUNTAS TÉCNICAS O ESTADO DE EQUIPOS (luces del router, colores, cables, estado del servicio):
+- RESPUESTAS A PREGUNTAS TÉCNICAS O ESTADO DE EQUIPOS (luces del router, colores, cables, estado del servicio, fotos o videos):
   Si el caso activo es de soporte técnico (SUPPORT_INTERNET) y está esperando respuesta del usuario sobre su equipo o conexión (ej: pregunta sobre luces del router, colores verde/rojo, estado encendido/apagado, reinicio, cables):
-  Cualquier respuesta descriptiva o corta del cliente (ej: "Son verdes", "Verdes!!!", "Están rojas", "Luz roja", "Prendidas", "Apagadas", "Parpadea en rojo", "Ya lo reinicié", "Todo conectado"):
+  Cualquier respuesta descriptiva del cliente o contenido de archivo adjunto analizado (ej: "Son verdes", "Verdes!!!", "Están rojas", "Luz roja", "[Adjunto video: router con luz roja LOS parpadeando]", "[Adjunto imagen: luces apagadas]", "Ya lo reinicié", "Todo conectado"):
   → Clasifica SIEMPRE como type="ANSWER" con intent="support.internet".
-  → Extrae en \`entities\`: \`answer\`: "<texto o descripción del cliente>".
+  → Extrae en \`entities\`: \`answer\`: "<texto o descripción del cliente o del video/imagen adjunto>".
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC, UNCLEAR ni CANCEL.
 
 - CANCELACIÓN / BAJA DEFINITIVA DE SERVICIO / DEVOLUCIÓN DE EQUIPOS:
@@ -114,7 +114,14 @@ ${dynamicCatalogSection}
 - general.complaint: queja formal o reclamo por mala atención o servicio deficiente.
 - unknown: no se puede determinar.
 
-Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación (ej. "ya no tengo deuda, valida mi problema de internet" → \`support.internet\`, no \`billing.balance\`).
+Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \`intent\` de la acción que el cliente pide explícitamente, no el de un tema que solo menciona como contexto o justificación.
+- EJEMPLO CRÍTICO: "No tengo internet, pero ya pagué en la mañana el servicio" (o adjuntando comprobante/foto):
+  → El cliente reporta que NO tiene internet. La acción y necesidad principal requerida es RESTAURAR SU SERVICIO.
+  → Clasifica SIEMPRE como intent="support.internet", NO como billing.record_payment ni billing.balance.
+  → Extrae en \`entities\`: \`paymentReported\`: true (junto a datos del comprobante si están visibles).
+- EJEMPLO DE REPORTE DE PAGO: "Pago realizado", "envío el comprobante", "aquí les dejo la constancia del banco", "ya transferí", "listo el depósito" (acompañado o no de comprobante):
+  → El cliente NO reporta fallas de internet ni problemas técnicos; su único objetivo es registrar/confirmar su pago.
+  → Clasifica SIEMPRE como intent="billing.record_payment".
 
 ## Uso del "historial reciente" para mantener el hilo de la conversación y reformular preguntas:
 - REFORMULACIÓN CONTEXTUAL DE PREGUNTAS (CRÍTICO): Usa el historial de mensajes recientes para resolver referencias implícitas, elipsis y anáforas, generando siempre una pregunta completa, autónoma y rica en \`entities.question\`.

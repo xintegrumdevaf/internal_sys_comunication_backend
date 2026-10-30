@@ -38,10 +38,11 @@ export class CreateQuickReplyUseCase {
       throw validationError("El título debe tener al menos 2 caracteres");
     }
 
-    const body = dto.body?.trim();
-    if (!body || body.length < 1) {
+    const rawBody = dto.body?.trim();
+    if (!rawBody || rawBody.length < 1) {
       throw validationError("El contenido de la respuesta rápida no puede estar vacío");
     }
+    const body = rawBody.replace(/\r\n/g, "\n").replace(/\\n/g, "\n");
 
     const departmentId = dto.departmentId ?? null;
 

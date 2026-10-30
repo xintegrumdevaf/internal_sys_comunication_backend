@@ -201,8 +201,25 @@ export class ZernioHistorySyncWorker {
       }
 
       const firstAttachment = msg.attachments?.[0];
-      let type =
-        firstAttachment?.type || (msg.attachments && msg.attachments.length > 0 ? "image" : "text");
+      let type = "text";
+      if (firstAttachment) {
+        const rawType = (firstAttachment.type || "").toLowerCase();
+        const mime = (firstAttachment.mimeType || "").toLowerCase();
+        const fname = (firstAttachment.filename || firstAttachment.url || "").toLowerCase();
+        if (rawType === "video" || mime.startsWith("video/") || /\.(mp4|mov|webm|3gp|3gpp|mkv)$/i.test(fname)) {
+          type = "video";
+        } else if (rawType === "audio" || mime.startsWith("audio/") || /\.(ogg|oga|opus|mp3|m4a|wav|aac)$/i.test(fname)) {
+          type = "audio";
+        } else if (rawType === "image" || mime.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(fname)) {
+          type = "image";
+        } else if (rawType === "document" || mime.includes("pdf") || /\.(pdf|doc|docx|xls|xlsx|csv|zip|rar)$/i.test(fname)) {
+          type = "document";
+        } else {
+          type = rawType || "document";
+        }
+      } else if (msg.attachments && msg.attachments.length > 0) {
+        type = "image";
+      }
       let body = msg.message || (firstAttachment ? `[${type}]` : "");
       let mediaId: string | null = firstAttachment?.url ?? null;
       let mimeType: string | null = firstAttachment?.mimeType ?? null;

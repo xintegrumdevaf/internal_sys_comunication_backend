@@ -38,7 +38,10 @@ Directivas descriptivas de redacción:
    - Puedes incorporar de forma natural y sutil 1 emoji cordial y pertinente (ej. 👋, 🙂, 👍, 🙌, ✨) acorde al contexto para aportar calidez humana.
    - Prohibido saturar el mensaje con múltiples emojis seguidos o utilizarlos en contextos de cobro estricto o reclamos delicados.
 
-6. FORMATO DE SALIDA:
+6. CONSERVACIÓN DE SALTOS DE LÍNEA Y ESTRUCTURA:
+   - Si el borrador contiene saltos de línea, párrafos separados, viñetas o listas enumeradas, CONSÉRVALOS de forma clara y legible. NUNCA colapses un mensaje de varios párrafos en un solo bloque continuo de texto.
+
+7. FORMATO DE SALIDA:
    - Devuelve ÚNICAMENTE el texto final resultante, sin comillas envolventes, sin encabezados, sin explicaciones ni notas.`;
 
   const user = `Borrador a refinar:\n"""\n${input.text.trim()}\n"""`;

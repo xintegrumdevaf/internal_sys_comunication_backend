@@ -193,15 +193,15 @@ export class GeminiAdapter implements AIProviderPort {
     const started = Date.now();
     try {
       const base64Data = await this.downloadMediaAsBase64(mediaUrl);
-      const system = "Sos un analizador y extractor visual de imágenes para una empresa proveedora de internet (ISP). Tu tarea es determinar con precisión si la imagen provista corresponde efectivamente a un comprobante de pago (transferencia bancaria, depósito o recibo de pago de servicios) o si es otro tipo de imagen (por ejemplo: foto de televisor o monitor, foto de router o equipos de red, cables, captura de pantalla de speedtest, foto de una habitación, personas o memes).\n\n" +
+      const system = "Sos un analizador y extractor visual de archivos multimedia (imágenes, videos y documentos) para una empresa proveedora de internet (ISP). Tu tarea es determinar con precisión el contenido del archivo adjunto y si corresponde a un comprobante de pago o a otro tema operativo (por ejemplo: video/foto de router o equipos de red, estado de luces del módem, cables de fibra, video/foto de televisor, captura de pantalla de speedtest, contrato, o comprobante de pago bancario).\n\n" +
         "Devolvé un único objeto JSON con los siguientes campos:\n" +
-        "- isReceipt: booleano (true únicamente si la imagen es claramente un comprobante de pago, transferencia o depósito; false si es cualquier otra cosa).\n" +
+        "- isReceipt: booleano (true únicamente si el archivo muestra claramente un comprobante de pago, transferencia bancaria o depósito; false si muestra equipos, routers, cables, pantallas de TV o cualquier otra cosa operativa).\n" +
         "- amount: el monto numérico del pago si es visible (ej: 25.50), o null si no se identifica.\n" +
         "- reference: el número de comprobante, autorización o transacción como texto, o null si no es visible.\n" +
         "- date: la fecha de la transacción en formato YYYY-MM-DD, o null si no es visible.\n" +
-        "- description: una descripción muy concisa (máximo 15 palabras) de lo que muestra la imagen (ej: 'foto de televisor encendido en dormitorio', 'foto de router con luces encendidas', 'captura de speedtest').\n\n" +
+        "- description: una descripción muy concisa (máximo 15 palabras) de lo que muestra el archivo (ej: 'video de router con luz roja LOS parpadeando', 'foto de cables desconectados detrás del módem', 'captura de speedtest con baja velocidad', 'comprobante de depósito bancario').\n\n" +
         "Devolvé ÚNICAMENTE el JSON correspondiente.";
-      const user = "Analizá el contenido de la siguiente imagen:";
+      const user = "Analizá el contenido del siguiente archivo adjunto (imagen, video o documento):";
 
       const payload = {
         contents: [

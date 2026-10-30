@@ -306,5 +306,28 @@ describe("Quick Replies Router (Integration)", () => {
       expect(res.status).toBe(200);
       expect(res.body.refinedText).toBe("Versión empática: pasa tu cedula para ver tu deuda");
     });
+
+    it("POST /api/quick-replies normaliza y preserva saltos de línea y listas multilínea", async () => {
+      const app = buildApp();
+      const multilineText = "Línea 1\r\nLínea 2\r\n- Item A\r\n- Item B";
+      const res = await supertest(app)
+        .post("/api/quick-replies")
+        .send({
+          shortcut: "/retiro-equipos",
+          title: "Indicaciones de Retiro",
+          body: multilineText,
+          category: "procesos",
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.quickReply.body).toBe("Línea 1\nLínea 2\n- Item A\n- Item B");
+
+      // Verificar resolución con saltos de línea intactos
+      const resolveRes = await supertest(app)
+        .get("/api/quick-replies/resolve?shortcut=retiro-equipos");
+
+      expect(resolveRes.status).toBe(200);
+      expect(resolveRes.body.interpolatedBody).toBe("Línea 1\nLínea 2\n- Item A\n- Item B");
+    });
   });
 });
