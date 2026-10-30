@@ -11,11 +11,17 @@ import type { TakeControlUseCase } from "../application/use-cases/take-control.u
 import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
 import type { ConversationRepositoryPort } from "../application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../application/ports/message.repository.port";
+import type { MediaStoragePort } from "../application/ports/media-storage.port";
 import type { WhatsAppSenderPort } from "../application/ports/whatsapp-sender.port";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../realtime/application/realtime-broadcaster";
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
 import type { MessageTemplateRepositoryPort } from "../../message-templates/application/ports/message-template.repository.port";
+import {
+  inferContentType,
+  isZernioMediaUrl,
+  unwrapOwnMediaTarget,
+} from "../infrastructure/storage/local-media-storage.adapter";
 
 export type ConversationsRouterDeps = {
   listConversations: ListConversationsUseCase;
@@ -30,57 +36,11 @@ export type ConversationsRouterDeps = {
   settingsService?: SystemSettingsService;
   whatsappSender?: WhatsAppSenderPort;
   templateRepo?: MessageTemplateRepositoryPort;
+  mediaStorage?: MediaStoragePort;
 };
 
 
 const statusSchema = z.enum(["open", "pending", "resolved", "closed"]).optional();
-
-/**
- * El historial guarda la ruta de Zernio y el front la pide con <img>.
- * Esa petición es cross-site y no lleva la cookie de sesión.
- * Si el enlace apunta otra vez a /api/media, se desenvuelve hasta el archivo real.
- */
-function unwrapOwnMediaTarget(raw: string): string {
-  let current = raw.trim();
-  for (let i = 0; i < 4; i++) {
-    let decoded = current;
-    try {
-      decoded = decodeURIComponent(current);
-    } catch {
-      decoded = current;
-    }
-    if (/^https?:\/+[^/]/i.test(decoded)) {
-      decoded = decoded.replace(/^(https?):\/+/, "$1://");
-    }
-    if (!/^https?:\/\//i.test(decoded)) return decoded;
-    let url: URL;
-    try {
-      url = new URL(decoded);
-    } catch {
-      return decoded;
-    }
-    if (!url.pathname.startsWith("/api/media")) return decoded;
-    const nested = url.searchParams.get("url");
-    if (nested) {
-      current = nested;
-      continue;
-    }
-    const rest = decodeURIComponent(url.pathname.replace(/^\/api\/media\/?/, "") + url.search);
-    if (!rest) return decoded;
-    current = rest;
-  }
-  return current;
-}
-
-function isZernioMediaUrl(resolvedUrl: string, baseUrl: string): boolean {
-  try {
-    const host = new URL(resolvedUrl).hostname.toLowerCase();
-    const baseHost = new URL(baseUrl).hostname.toLowerCase();
-    return host === baseHost || host === "zernio.com" || host.endsWith(".zernio.com");
-  } catch {
-    return false;
-  }
-}
 
 interface CachedMediaItem {
   buffer: Buffer;
@@ -121,29 +81,13 @@ function sendMediaResponse(
   rawContentType: string | null,
   targetUrl: string,
 ) {
-  let contentType = rawContentType;
-  if (!contentType || contentType === "application/octet-stream") {
-    const lower = targetUrl.toLowerCase();
-    if (lower.includes(".ogg") || lower.includes("audio") || lower.includes("voice")) {
-      contentType = "audio/ogg";
-    } else if (lower.includes(".mp3")) {
-      contentType = "audio/mpeg";
-    } else if (lower.includes(".wav")) {
-      contentType = "audio/wav";
-    } else if (lower.includes(".m4a")) {
-      contentType = "audio/mp4";
-    } else if (lower.includes(".jpg") || lower.includes(".jpeg")) {
-      contentType = "image/jpeg";
-    } else if (lower.includes(".png")) {
-      contentType = "image/png";
-    }
-  }
+  const contentType = inferContentType(rawContentType, targetUrl);
 
   if (contentType) {
     res.setHeader("Content-Type", contentType);
   }
   res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
 
   const totalLength = buffer.length;
   const rangeHeader = req.headers.range;
@@ -554,6 +498,14 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           }
         }
 
+        if (deps.mediaStorage) {
+          const persisted = await deps.mediaStorage.get(resolvedUrl);
+          if (persisted) {
+            sendMediaResponse(req, res, persisted.buffer, persisted.contentType, resolvedUrl);
+            return;
+          }
+        }
+
         const cached = getCachedMedia(resolvedUrl);
         if (cached) {
           sendMediaResponse(req, res, cached.buffer, cached.contentType, resolvedUrl);
@@ -602,7 +554,11 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         }
         const contentType = fileRes.headers.get("content-type");
         const buffer = Buffer.from(await fileRes.arrayBuffer());
-        setCachedMedia(resolvedUrl, buffer, contentType);
+        if (deps.mediaStorage) {
+          await deps.mediaStorage.save(resolvedUrl, buffer, contentType);
+        } else {
+          setCachedMedia(resolvedUrl, buffer, contentType);
+        }
         sendMediaResponse(req, res, buffer, contentType, resolvedUrl);
         return;
       }
@@ -617,18 +573,36 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         }
       }
 
+      if (deps.mediaStorage) {
+        const persistedMeta = await deps.mediaStorage.get(mediaTarget);
+        if (persistedMeta) {
+          sendMediaResponse(req, res, persistedMeta.buffer, persistedMeta.contentType, mediaTarget);
+          return;
+        }
+      }
+
       const cachedMeta = getCachedMedia(mediaTarget);
       if (cachedMeta) {
         sendMediaResponse(req, res, cachedMeta.buffer, cachedMeta.contentType, mediaTarget);
         return;
       }
 
-      if (!env.WHATSAPP_ACCESS_TOKEN) {
+      let whatsappAccessToken = env.WHATSAPP_ACCESS_TOKEN;
+      if (deps.settingsService) {
+        try {
+          const s = await deps.settingsService.getChannelSettings();
+          if (s.accessToken) whatsappAccessToken = s.accessToken;
+        } catch {
+          // fallback a env
+        }
+      }
+
+      if (!whatsappAccessToken) {
         res.status(503).json({ error: "WHATSAPP_ACCESS_TOKEN no configurado" });
         return;
       }
       const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaTarget}`, {
-        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+        headers: { Authorization: `Bearer ${whatsappAccessToken}` },
       });
       if (!metaRes.ok) {
         res.status(metaRes.status).json({ error: "No se pudo obtener metadata del archivo" });
@@ -636,14 +610,18 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
       }
       const metaJson = (await metaRes.json()) as { url: string; mime_type?: string };
       const fileRes = await fetch(metaJson.url, {
-        headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+        headers: { Authorization: `Bearer ${whatsappAccessToken}` },
       });
       if (!fileRes.ok) {
         res.status(fileRes.status).json({ error: "No se pudo descargar el archivo" });
         return;
       }
       const buffer = Buffer.from(await fileRes.arrayBuffer());
-      setCachedMedia(mediaTarget, buffer, metaJson.mime_type || null);
+      if (deps.mediaStorage) {
+        await deps.mediaStorage.save(mediaTarget, buffer, metaJson.mime_type || null);
+      } else {
+        setCachedMedia(mediaTarget, buffer, metaJson.mime_type || null);
+      }
       sendMediaResponse(req, res, buffer, metaJson.mime_type || null, mediaTarget);
     } catch (error) {
       next(error);

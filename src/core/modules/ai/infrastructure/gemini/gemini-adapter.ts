@@ -40,6 +40,7 @@ const INTERPRETATION_TYPES: ReadonlySet<string> = new Set([
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import type { PromptResolverService } from "../../application/services/prompt-resolver.service";
 import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
+import type { MediaStoragePort } from "../../../conversations/application/ports/media-storage.port";
 
 export class GeminiAdapter implements AIProviderPort {
   constructor(
@@ -48,6 +49,7 @@ export class GeminiAdapter implements AIProviderPort {
     private readonly routingService?: DepartmentRoutingService,
     private readonly promptResolver?: PromptResolverService,
     private readonly settingsService?: SystemSettingsService,
+    private readonly mediaStorage?: MediaStoragePort,
   ) {}
 
   async interpretMessage(input: InterpretMessageInput): Promise<Interpretation> {
@@ -328,8 +330,23 @@ export class GeminiAdapter implements AIProviderPort {
 
   private async downloadMediaAsBase64(url: string): Promise<string> {
     try {
+      if (this.mediaStorage) {
+        const stored = await this.mediaStorage.ensureStored(url);
+        if (stored) {
+          return stored.buffer.toString("base64");
+        }
+      }
+
       const headers: Record<string, string> = {};
-      const zernioApiKey = env.ZERNIO_API_KEY;
+      let zernioApiKey = env.ZERNIO_API_KEY;
+      if (this.settingsService) {
+        try {
+          const ch = await this.settingsService.getChannelSettings();
+          if (ch.zernioApiKey) zernioApiKey = ch.zernioApiKey;
+        } catch {
+          // fallback
+        }
+      }
       if (url.includes("zernio") && zernioApiKey) {
         headers["Authorization"] = `Bearer ${zernioApiKey}`;
       }
@@ -340,8 +357,11 @@ export class GeminiAdapter implements AIProviderPort {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      const buffer = await response.arrayBuffer();
-      return Buffer.from(buffer).toString("base64");
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (this.mediaStorage) {
+        await this.mediaStorage.save(url, buffer, response.headers.get("content-type"));
+      }
+      return buffer.toString("base64");
     } catch (error) {
       throw new DomainError(
         "AI_ERROR",

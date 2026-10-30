@@ -5,6 +5,7 @@ import type { Conversation } from "../../domain/conversation.entity";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
+import type { MediaStoragePort } from "../ports/media-storage.port";
 import type { InboundBufferService } from "../../../ingestion/application/services/inbound-buffer.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
@@ -41,6 +42,8 @@ export type ReceiveInboundMessageDeps = {
   /** Opcional: si no se inyecta, el mensaje se persiste pero no se agrupa (tests de Etapa 1). */
   inboundBuffer?: InboundBufferService;
   broadcaster?: RealtimeBroadcaster;
+  /** Almacenamiento local permanente para descargar imágenes, audios, videos y documentos al recibir el webhook. */
+  mediaStorage?: MediaStoragePort;
 };
 
 /**
@@ -115,6 +118,20 @@ export class ReceiveInboundMessageUseCase {
     }
 
     if (!isDuplicate) {
+      if (input.mediaId && input.type !== "location" && this.deps.mediaStorage) {
+        void this.deps.mediaStorage
+          .ensureStored(input.mediaId, {
+            mimeType: input.mimeType,
+            filename: input.filename,
+          })
+          .catch((err) => {
+            log.warn(
+              { err, messageId: message.id, mediaId: input.mediaId },
+              "fallo descarga proactiva de media al disco local; se reintentara en /api/media",
+            );
+          });
+      }
+
       if (!isOutbound) {
         if (conversation.status === "resolved" || conversation.status === "closed") {
           if (!isPoliteClosingMessage(input.body, input.type)) {
@@ -131,7 +148,17 @@ export class ReceiveInboundMessageUseCase {
           type: "MESSAGE_RECEIVED",
           conversationId: conversation.id,
           messageId: message.id,
-          bodyPreview: input.body.substring(0, 100) || (input.type === "document" ? "📄 Documento" : input.type === "image" ? "📷 Imagen" : input.type === "audio" || input.type === "voice" ? "🎤 Audio" : "Mensaje nuevo"),
+          bodyPreview:
+            input.body.substring(0, 100) ||
+            (input.type === "document"
+              ? "📄 Documento"
+              : input.type === "image"
+                ? "📷 Imagen"
+                : input.type === "video"
+                  ? "🎥 Video"
+                  : input.type === "audio" || input.type === "voice"
+                    ? "🎤 Audio"
+                    : "Mensaje nuevo"),
           authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
         });
       } else {
@@ -150,7 +177,13 @@ export class ReceiveInboundMessageUseCase {
 }
 
 function isPoliteClosingMessage(text: string, type: string): boolean {
-  if (type === "document" || type === "image" || type === "audio" || type === "voice") {
+  if (
+    type === "document" ||
+    type === "image" ||
+    type === "audio" ||
+    type === "voice" ||
+    type === "video"
+  ) {
     return false;
   }
   const clean = text.toLowerCase().trim().replace(/[.,!¡?¿\-_]/g, "");

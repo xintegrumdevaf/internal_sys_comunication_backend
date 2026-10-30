@@ -2,6 +2,7 @@ import type Redis from "ioredis";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { ConversationRepositoryPort } from "../../application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../../application/ports/message.repository.port";
+import type { MediaStoragePort } from "../../application/ports/media-storage.port";
 import type { ZernioHistoryPort } from "../../application/ports/zernio-history.port";
 import type {
   ZernioSyncJob,
@@ -22,6 +23,7 @@ export class ZernioHistorySyncWorker {
     private readonly conversationRepo: ConversationRepositoryPort,
     private readonly messageRepo: MessageRepositoryPort,
     private readonly logger: Logger,
+    private readonly mediaStorage?: MediaStoragePort,
   ) {}
 
   startWorker(pollIntervalMs = 2000): void {
@@ -262,6 +264,17 @@ export class ZernioHistorySyncWorker {
         skippedCount++;
       } else {
         importedCount++;
+      }
+
+      if (mediaId && type !== "location" && this.mediaStorage) {
+        void this.mediaStorage
+          .ensureStored(mediaId, { mimeType, filename })
+          .catch((err) => {
+            this.logger.warn(
+              { err, mediaId, externalId: msg.id },
+              "Fallo al persistir media historica en disco local",
+            );
+          });
       }
     }
 

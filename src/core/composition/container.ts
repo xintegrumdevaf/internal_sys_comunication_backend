@@ -83,6 +83,8 @@ import { ZernioHistorySyncWorker } from "../modules/conversations/infrastructure
 import { StartZernioHistorySyncUseCase } from "../modules/conversations/application/use-cases/start-zernio-history-sync.use-case";
 import { GetZernioHistorySyncStatusUseCase } from "../modules/conversations/application/use-cases/get-zernio-history-sync-status.use-case";
 import { createZernioHistorySyncRouter } from "../modules/conversations/presentation/zernio-history-sync.router";
+import { LocalMediaStorageAdapter } from "../modules/conversations/infrastructure/storage/local-media-storage.adapter";
+import type { MediaStoragePort } from "../modules/conversations/application/ports/media-storage.port";
 
 import { CustomerRepositoryPg } from "../modules/customers/infrastructure/postgres/customer.repository.pg";
 import { ContractRepositoryPg } from "../modules/customers/infrastructure/postgres/contract.repository.pg";
@@ -313,6 +315,11 @@ export function createContainer(): Container {
   const metaSender = new WhatsAppSenderHttp(env, conversationsLogger, systemSettingsService);
   const zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender, systemSettingsService);
   const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
+  const mediaStorage: MediaStoragePort = new LocalMediaStorageAdapter({
+    env,
+    logger: conversationsLogger,
+    settingsService: systemSettingsService,
+  });
 
   const sessionStore = new SessionStoreRedis(redisClient);
   const caseRepo = new CaseRepositoryPg(pgPool);
@@ -392,6 +399,7 @@ export function createContainer(): Container {
     departmentRoutingService,
     promptResolver,
     systemSettingsService,
+    mediaStorage,
   );
   const ollamaProvider = new OllamaAdapter(
     {
@@ -773,6 +781,7 @@ export function createContainer(): Container {
     inboundBuffer,
     logger: conversationsLogger,
     broadcaster,
+    mediaStorage,
   });
   const receiveInboundEdit = new ReceiveInboundEditUseCase({
     conversationRepo,
@@ -915,6 +924,7 @@ export function createContainer(): Container {
     conversationRepo,
     messageRepo,
     conversationsLogger,
+    mediaStorage,
   );
   zernioHistorySyncWorker.startWorker();
 
@@ -988,6 +998,7 @@ export function createContainer(): Container {
       settingsService: systemSettingsService,
       whatsappSender,
       templateRepo: messageTemplateRepo,
+      mediaStorage,
     }),
   );
   app.use(
