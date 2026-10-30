@@ -87,8 +87,8 @@ describe("C-Data EPON Parser", () => {
       state: "online",
       softwareVer: "V1.3.8",
     });
-    expect(onus[2].state).toBe("powerdown");
-    expect(onus[14].state).toBe("offline");
+    expect(onus[2]?.state).toBe("powerdown");
+    expect(onus[14]?.state).toBe("offline");
   });
 
   it("finds ONU by MAC with different formats", () => {

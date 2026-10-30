@@ -640,74 +640,139 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   router.post("/api/admin/settings/network/test-connection", async (req, res, next) => {
     try {
       await requireNetworkAccess(req);
+      const payload = { ...req.body };
+      let parentRouterHost = "";
+      let parentRouterPort = 8728;
+
+      // 1. Hidratar datos de router/OLT desde microservicio o desde la topología local en BD
+      const lookupRouterId = payload.routerId || payload.id;
+      if (lookupRouterId) {
+        let matchedRouter: Record<string, any> | undefined;
+        try {
+          const rData = await proxyMikrotik(`/v1/network/routers/${lookupRouterId}`);
+          matchedRouter = rData.router || rData.data || undefined;
+        } catch {
+          // Fallback a topología persistida en BD local
+        }
+
+        const localRouters = await settingsService.getNetworkTopology();
+        const localRouter = localRouters.find(
+          (r) =>
+            String(r.id) === String(lookupRouterId) ||
+            String(r.name || "").toLowerCase() === String(lookupRouterId).toLowerCase() ||
+            String(r.sector || "").toLowerCase() === String(lookupRouterId).toLowerCase(),
+        );
+
+        const combinedRouter = { ...(localRouter || {}), ...(matchedRouter || {}) };
+        if (combinedRouter.host || combinedRouter.ip) {
+          parentRouterHost = String(combinedRouter.host || combinedRouter.ip);
+          parentRouterPort = Number(combinedRouter.port || 8728);
+        }
+
+        if (payload.oltId) {
+          const oltsList = Array.isArray(combinedRouter.olts)
+            ? combinedRouter.olts
+            : Array.isArray(localRouter?.olts)
+              ? localRouter.olts
+              : [];
+          const matchedOlt = oltsList.find(
+            (o: any) =>
+              String(o.id) === String(payload.oltId) ||
+              String(o.name || "").toLowerCase() === String(payload.oltId).toLowerCase(),
+          );
+          if (matchedOlt) {
+            payload.host = payload.host || payload.ip || matchedOlt.ip || matchedOlt.host;
+            payload.ip = payload.ip || payload.host;
+            payload.port = payload.port || matchedOlt.port || 23;
+            payload.username = payload.username || matchedOlt.username || matchedOlt.user;
+            payload.password = payload.password || matchedOlt.password;
+            payload.brand = payload.brand || matchedOlt.brand;
+          }
+        } else if (!payload.host && !payload.ip && (combinedRouter.host || combinedRouter.ip)) {
+          payload.host = combinedRouter.host || combinedRouter.ip;
+          payload.ip = payload.host;
+          payload.port = payload.port || combinedRouter.port;
+          payload.username = payload.username || combinedRouter.username || combinedRouter.user;
+          payload.password = payload.password || combinedRouter.password;
+        }
+      }
+
+      // 2. Intentar prueba en el microservicio de red MikroTik
       try {
         const result = await proxyMikrotik("/v1/network/test-connection", {
           method: "POST",
-          body: JSON.stringify(req.body),
+          body: JSON.stringify(payload),
         });
-        res.json({ success: result.success, data: result });
+        res.json({ success: result.success ?? true, data: result });
         return;
       } catch {
-        // Fallback: prueba de socket TCP directa desde el backend si el microservicio de red está apagado
-        const host = req.body?.host || req.body?.ip;
-        const port = Number(req.body?.port || 8728);
+        // 3. Fallback: prueba de socket TCP directa desde el backend si el microservicio no está disponible o falla
+        const host = String(payload.host || payload.ip || parentRouterHost || "").trim();
+        const isOltTarget = Boolean(payload.oltId || payload.brand || payload.type === "olt");
+        const port = Number(payload.port || (isOltTarget ? 23 : parentRouterPort || 8728));
+
         if (!host) {
-          throw validationError("Debe especificar 'host' o 'ip' para probar la conexión");
+          res.json({
+            success: false,
+            data: {
+              success: false,
+              latencyMs: 0,
+              message: "Debe especificar 'host' o 'ip' para probar la conexión",
+            },
+          });
+          return;
         }
-        const start = Date.now();
-        const tcpResult = await new Promise<{ success: boolean; latencyMs: number; message: string }>((resolve) => {
-          const socket = new net.Socket();
-          socket.setTimeout(5000);
-          socket.once("connect", () => {
-            const latencyMs = Date.now() - start;
-            socket.destroy();
-            resolve({
+
+        const probeTcp = (targetHost: string, targetPort: number, timeoutMs = 4500) =>
+          new Promise<{ success: boolean; latencyMs: number; message: string }>((resolve) => {
+            const start = Date.now();
+            const socket = new net.Socket();
+            socket.setTimeout(timeoutMs);
+            socket.once("connect", () => {
+              const latencyMs = Date.now() - start;
+              socket.destroy();
+              resolve({
+                success: true,
+                latencyMs,
+                message: `Conexión TCP exitosa hacia ${targetHost}:${targetPort} (${latencyMs}ms)`,
+              });
+            });
+            socket.once("timeout", () => {
+              socket.destroy();
+              resolve({
+                success: false,
+                latencyMs: Date.now() - start,
+                message: `Timeout al conectar hacia ${targetHost}:${targetPort}`,
+              });
+            });
+            socket.once("error", (err) => {
+              socket.destroy();
+              resolve({
+                success: false,
+                latencyMs: Date.now() - start,
+                message: `No se pudo alcanzar ${targetHost}:${targetPort} (${err.message})`,
+              });
+            });
+            socket.connect(targetPort, targetHost);
+          });
+
+        let tcpResult = await probeTcp(host, port);
+
+        // Si es una OLT en red privada detrás de un router MikroTik y el salto directo no es alcanzable sin el microservicio,
+        // verificamos conectividad hacia el router cabecera para informar con precisión
+        if (!tcpResult.success && isOltTarget && parentRouterHost && parentRouterHost !== host) {
+          const parentProbe = await probeTcp(parentRouterHost, parentRouterPort);
+          if (parentProbe.success) {
+            tcpResult = {
               success: true,
-              latencyMs,
-              message: `Conexión TCP exitosa hacia ${host}:${port} (${latencyMs}ms)`,
-            });
-          });
-          socket.once("timeout", () => {
-            socket.destroy();
-            resolve({
-              success: false,
-              latencyMs: Date.now() - start,
-              message: `Timeout al conectar hacia ${host}:${port}`,
-            });
-          });
-          socket.once("error", (err) => {
-            socket.destroy();
-            resolve({
-              success: false,
-              latencyMs: Date.now() - start,
-              message: `No se pudo alcanzar ${host}:${port} (${err.message})`,
-            });
-          });
-          socket.connect(port, host);
-        });
+              latencyMs: parentProbe.latencyMs,
+              message: `Router cabecera alcanzable en ${parentRouterHost}:${parentRouterPort} (${parentProbe.latencyMs}ms) para OLT ${host}`,
+            };
+          }
+        }
+
         res.json({ success: tcpResult.success, data: tcpResult });
       }
-      const payload = { ...req.body };
-      // Fallback: si no se enviaron host ni ip pero sí routerId, hidratamos automáticamente desde MikroTik
-      if (!payload.host && !payload.ip && payload.routerId) {
-        try {
-          const rData = await proxyMikrotik(`/v1/network/routers/${payload.routerId}`);
-          const r = rData.router || rData.data;
-          if (r) {
-            payload.host = r.host;
-            payload.ip = r.host;
-            payload.port = payload.port || r.port;
-            payload.username = payload.username || r.username;
-          }
-        } catch {
-          // Ignorar si falla lookup
-        }
-      }
-      const result = await proxyMikrotik("/v1/network/test-connection", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      res.json({ success: result.success, data: result });
     } catch (err) {
       next(err);
     }
