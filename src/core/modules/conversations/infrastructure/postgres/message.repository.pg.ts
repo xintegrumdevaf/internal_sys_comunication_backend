@@ -114,8 +114,12 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
     const { rows } = await this.pool.query<MessageRow>(
       `WITH ins AS (
-         INSERT INTO message (conversation_id, direction, author, external_id, body, type, caption, agent_id, case_id, status, error_message)
-         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         INSERT INTO message (
+           conversation_id, direction, author, external_id, body,
+           type, media_id, mime_type, caption, filename,
+           agent_id, case_id, status, error_message
+         )
+         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *
        )
        SELECT ins.*, a.name AS agent_name
@@ -127,7 +131,10 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.externalId ?? null,
         input.body,
         input.type ?? "text",
+        input.mediaId ?? null,
+        input.mimeType ?? null,
         input.caption ?? null,
+        input.filename ?? null,
         input.agentId ?? null,
         input.caseId ?? null,
         input.status ?? "sent",

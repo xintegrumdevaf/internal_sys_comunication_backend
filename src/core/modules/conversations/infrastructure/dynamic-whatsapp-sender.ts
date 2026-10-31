@@ -2,6 +2,8 @@ import type {
   WhatsAppSenderPort,
   WhatsAppInteractiveButton,
   WhatsAppInteractiveListSection,
+  SendWhatsAppMediaInput,
+  SendWhatsAppMediaOutput,
 } from "../application/ports/whatsapp-sender.port";
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
 
@@ -31,6 +33,17 @@ export class DynamicWhatsAppSender implements WhatsAppSenderPort {
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
     const sender = await this.getSender();
     return sender.sendText(waPhone, body);
+  }
+
+  async sendMedia(input: SendWhatsAppMediaInput): Promise<SendWhatsAppMediaOutput> {
+    const sender = await this.getSender();
+    if (sender.sendMedia) {
+      return sender.sendMedia(input);
+    }
+    if (this.metaSender.sendMedia) {
+      return this.metaSender.sendMedia(input);
+    }
+    throw new Error("El proveedor activo de WhatsApp no soporta envío de archivos multimedia");
   }
 
   async sendTemplate(

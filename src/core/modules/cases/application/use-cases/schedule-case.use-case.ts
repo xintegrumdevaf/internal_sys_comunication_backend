@@ -66,6 +66,11 @@ export class ScheduleCaseUseCase {
       await this.deps.conversationRepo.setStatus(aggregate.case.conversationId, "pending");
     }
 
+    await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
+      reason: "scheduled_human_followup",
+      changedBy: input.agentUserId,
+    });
+
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_SCHEDULED", {
       scheduledAt: input.scheduledAt.toISOString(),
       scheduleTag,

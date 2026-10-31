@@ -1,6 +1,10 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { WhatsAppSenderPort } from "../../application/ports/whatsapp-sender.port";
+import type {
+  SendWhatsAppMediaInput,
+  SendWhatsAppMediaOutput,
+  WhatsAppSenderPort,
+} from "../../application/ports/whatsapp-sender.port";
 import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 type ZernioMessageResponse = {
@@ -346,6 +350,295 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
 
     return { externalId };
+  }
+
+  private async uploadMediaToZernio(
+    input: SendWhatsAppMediaInput,
+    config: { baseUrl: string; apiKey: string; accountId: string },
+  ): Promise<string> {
+    if (
+      input.mediaUrl &&
+      /^https:\/\//i.test(input.mediaUrl) &&
+      !input.mediaUrl.includes("localhost") &&
+      !input.mediaUrl.includes("127.0.0.1")
+    ) {
+      return input.mediaUrl;
+    }
+
+    const defaultExt =
+      input.type === "image"
+        ? "jpg"
+        : input.type === "video"
+          ? "mp4"
+          : input.type === "audio"
+            ? "ogg"
+            : "pdf";
+    const filename = (input.filename || `adjunto-${Date.now()}.${defaultExt}`).trim();
+    const mimeType = (input.mimeType || "application/octet-stream").split(";")[0]?.trim() || "application/octet-stream";
+
+    const extractPublicUrl = (raw: unknown): string | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const obj = raw as Record<string, unknown>;
+      const dataObj = (obj.data && typeof obj.data === "object" ? obj.data : undefined) as
+        | Record<string, unknown>
+        | undefined;
+      const filesArr = (Array.isArray(obj.files) ? obj.files : Array.isArray(dataObj?.files) ? dataObj?.files : undefined) as
+        | Array<Record<string, unknown>>
+        | undefined;
+
+      const candidate =
+        obj.publicUrl ??
+        obj.url ??
+        obj.fileUrl ??
+        obj.mediaUrl ??
+        dataObj?.publicUrl ??
+        dataObj?.url ??
+        dataObj?.fileUrl ??
+        dataObj?.mediaUrl ??
+        filesArr?.[0]?.publicUrl ??
+        filesArr?.[0]?.url;
+
+      return typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : null;
+    };
+
+    // 1. Subida directa (/media/upload-direct) para archivos <= 4 MB
+    if (input.buffer.length <= 4 * 1024 * 1024) {
+      try {
+        const form = new FormData();
+        const blob = new Blob([new Uint8Array(input.buffer)], { type: mimeType });
+        form.append("file", blob, filename);
+        if (mimeType !== "application/octet-stream") {
+          form.append("contentType", mimeType);
+        }
+
+        const directRes = await fetch(`${config.baseUrl}/media/upload-direct`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+          },
+          body: form,
+        });
+
+        if (directRes.ok) {
+          const directJson = await directRes.json();
+          const url = extractPublicUrl(directJson);
+          if (url) return url;
+        } else {
+          const errText = await directRes.text();
+          this.logger.warn(
+            { status: directRes.status, body: errText, filename, mimeType },
+            "Zernio /media/upload-direct no acepto el archivo; intentando /media/presign",
+          );
+        }
+      } catch (err) {
+        this.logger.warn({ err, filename }, "Fallo llamada a Zernio /media/upload-direct; intentando /media/presign");
+      }
+    }
+
+    // 2. Presigned URL (/media/presign) + PUT binario directo al storage de Zernio
+    try {
+      const presignRes = await fetch(`${config.baseUrl}/media/presign`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          filename,
+          contentType: mimeType === "application/octet-stream" ? "application/pdf" : mimeType,
+          size: input.buffer.length,
+        }),
+      });
+
+      if (presignRes.ok) {
+        const presignJson = (await presignRes.json()) as {
+          uploadUrl?: string;
+          publicUrl?: string;
+          url?: string;
+          data?: { uploadUrl?: string; publicUrl?: string; url?: string };
+        };
+        const uploadUrl = presignJson.uploadUrl || presignJson.data?.uploadUrl;
+        const publicUrl =
+          presignJson.publicUrl ||
+          presignJson.url ||
+          presignJson.data?.publicUrl ||
+          presignJson.data?.url;
+
+        if (uploadUrl && publicUrl) {
+          const putRes = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": mimeType === "application/octet-stream" ? "application/pdf" : mimeType,
+            },
+            body: new Uint8Array(input.buffer),
+          });
+          if (putRes.ok) {
+            return publicUrl;
+          }
+          const putErr = await putRes.text();
+          this.logger.warn({ status: putRes.status, body: putErr }, "Fallo PUT a uploadUrl de Zernio presign");
+        }
+      } else {
+        const errText = await presignRes.text();
+        this.logger.warn({ status: presignRes.status, body: errText }, "Zernio /media/presign rechazo la solicitud");
+      }
+    } catch (err) {
+      this.logger.warn({ err, filename }, "Fallo flujo /media/presign en Zernio");
+    }
+
+    // 3. Fallback a /media/upload multipart
+    const fallbackForm = new FormData();
+    const fallbackBlob = new Blob([new Uint8Array(input.buffer)], { type: mimeType });
+    fallbackForm.append("file", fallbackBlob, filename);
+
+    const uploadRes = await fetch(`${config.baseUrl}/media/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: fallbackForm,
+    });
+
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text();
+      throw new Error(`Zernio media upload fallo (${uploadRes.status}): ${errText}`);
+    }
+
+    const uploadJson = await uploadRes.json();
+    const finalUrl = extractPublicUrl(uploadJson);
+    if (!finalUrl) {
+      throw new Error("Zernio media upload no devolvio una URL publica valida");
+    }
+    return finalUrl;
+  }
+
+  async sendMedia(input: SendWhatsAppMediaInput): Promise<SendWhatsAppMediaOutput> {
+    const config = await this.resolveConfig();
+    const cleanPhone = input.waPhone.replace(/\D/g, "");
+
+    let attachmentUrl: string;
+    try {
+      attachmentUrl = await this.uploadMediaToZernio(input, config);
+    } catch (uploadError) {
+      if (this.fallbackSender?.sendMedia) {
+        this.logger.warn(
+          { err: uploadError, cleanPhone, type: input.type },
+          "Subida de media en Zernio fallo; entregando directamente via Meta Cloud API...",
+        );
+        return this.fallbackSender.sendMedia(input);
+      }
+      throw uploadError;
+    }
+
+    const accountId = await this.getAccountId();
+    const existingConversationId = await this.resolveConversationId(cleanPhone);
+    const zernioAttachmentType = input.type === "document" ? "file" : input.type;
+    const captionText = input.caption?.trim() || "";
+
+    const buildPayload = (accId: string, includeParticipant: boolean): Record<string, unknown> => ({
+      accountId: accId,
+      ...(includeParticipant ? { participantId: cleanPhone } : {}),
+      ...(captionText ? { message: captionText } : {}),
+      attachmentUrl,
+      attachmentType: zernioAttachmentType,
+      ...(input.filename ? { attachmentName: input.filename } : {}),
+      ...(input.type === "audio" && input.voiceNote ? { voiceNote: true } : {}),
+    });
+
+    let url = existingConversationId
+      ? `${config.baseUrl}/inbox/conversations/${existingConversationId}/messages`
+      : `${config.baseUrl}/inbox/conversations`;
+    let payload = buildPayload(accountId, !existingConversationId);
+
+    this.logger.info(
+      { waPhone: cleanPhone, type: input.type, zernioAttachmentType, hasExistingConv: !!existingConversationId },
+      "Enviando archivo multimedia via Zernio",
+    );
+
+    let response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      if (
+        response.status === 404 &&
+        (errorBody.toLowerCase().includes("conversation not found") ||
+          errorBody.toLowerCase().includes("conversation_not_found"))
+      ) {
+        this.conversationIdCache.delete(cleanPhone);
+        if (existingConversationId) {
+          this.phoneByConversationIdCache.delete(existingConversationId);
+        }
+        url = `${config.baseUrl}/inbox/conversations`;
+        payload = buildPayload(accountId, true);
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      } else if (
+        response.status === 404 &&
+        (errorBody.toLowerCase().includes("account not found") ||
+          errorBody.toLowerCase().includes("account_not_found"))
+      ) {
+        const refreshedAccountId = await this.getAccountId(true);
+        payload = buildPayload(refreshedAccountId, !existingConversationId);
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      if (!response.ok) {
+        const secondErr = await response.text().catch(() => errorBody);
+        if (this.fallbackSender?.sendMedia) {
+          this.logger.warn(
+            { cleanPhone, status: response.status, secondErr, type: input.type },
+            "Zernio rechazo el envio de media; entregando directamente via Meta Cloud API...",
+          );
+          return this.fallbackSender.sendMedia(input);
+        }
+        this.logger.error(
+          { status: response.status, body: secondErr, type: input.type },
+          "Zernio API rechazo el envio de archivo multimedia",
+        );
+        throw new Error(`Zernio sendMedia fallo (${response.status}): ${secondErr}`);
+      }
+    }
+
+    const data = (await response.json()) as ZernioMessageResponse & {
+      data?: { id?: string; conversationId?: string; messageId?: string };
+    };
+
+    const externalId =
+      data.platformMessageId ||
+      data.messageId ||
+      data.id ||
+      data.data?.messageId ||
+      data.data?.id ||
+      `zernio-media-${Date.now()}`;
+
+    if (data.data?.conversationId && !existingConversationId) {
+      this.conversationIdCache.set(cleanPhone, data.data.conversationId);
+    }
+
+    return {
+      externalId,
+      remoteMediaId: attachmentUrl,
+    };
   }
 
   async sendTemplate(

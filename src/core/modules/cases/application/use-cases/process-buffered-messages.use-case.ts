@@ -78,6 +78,20 @@ export class ProcessBufferedMessagesUseCase {
           null;
       }
 
+      if (targetCase?.context.schedulingMetadata?.scheduledAt) {
+        log.info(
+          {
+            caseId: targetCase.id,
+            scheduledAt: targetCase.context.schedulingMetadata.scheduledAt,
+          },
+          "conversación en espera de retoma humana: silenciando bot",
+        );
+        await this.deps.caseRepo.setAutomationEnabled(targetCase.id, false, {
+          reason: "scheduled_human_followup",
+        });
+        return;
+      }
+
       if (targetCase) {
         // docs/spec/02_STATE_MACHINE.md §8: Expiración perezosa.
         // Si el caso candidato ya venció por inactividad (>24h), no bloquea abrir un caso nuevo ni silencia el bot.

@@ -810,6 +810,7 @@ export function createContainer(): Container {
     caseRepo,
     agentRepo,
     departmentRepo,
+    mediaStorage,
   });
   const takeControl = new TakeControlUseCase({
     conversationRepo,
@@ -941,7 +942,7 @@ export function createContainer(): Container {
   app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
   app.use(
     express.json({
-      limit: "10mb",
+      limit: "50mb",
       verify: (req, _res, buf) => {
         (req as unknown as { rawBody?: Buffer }).rawBody = buf;
       },
