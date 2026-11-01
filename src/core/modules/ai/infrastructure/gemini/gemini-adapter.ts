@@ -493,7 +493,12 @@ function parseReceiptData(raw: string): ReceiptData {
   }
 
   const obj = parsed as Record<string, unknown>;
-  const isReceipt = obj.isReceipt === true;
+  const receiptFlag = obj.isReceipt;
+  const isReceipt =
+    receiptFlag === true ||
+    receiptFlag === "true" ||
+    receiptFlag === "si" ||
+    receiptFlag === "sí";
   const amount = obj.amount !== undefined && obj.amount !== null ? Number(obj.amount) : undefined;
   const reference = typeof obj.reference === "string" || typeof obj.reference === "number" ? String(obj.reference) : undefined;
   const date = typeof obj.date === "string" ? obj.date : undefined;

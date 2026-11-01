@@ -197,6 +197,7 @@ import { CompleteCaseUseCase } from "../modules/cases/application/use-cases/comp
 import { TransferCaseUseCase } from "../modules/cases/application/use-cases/transfer-case.use-case";
 import { GetDashboardUseCase } from "../modules/cases/application/use-cases/get-dashboard.use-case";
 import { TakeControlUseCase } from "../modules/conversations/application/use-cases/take-control.use-case";
+import { DeriveConversationUseCase } from "../modules/conversations/application/use-cases/derive-conversation.use-case";
 
 import { QualityReviewRepositoryPg } from "../modules/quality/infrastructure/postgres/quality-review.repository.pg";
 import { EnqueueQualityReviewService } from "../modules/quality/application/services/enqueue-quality-review.service";
@@ -821,6 +822,16 @@ export function createContainer(): Container {
     agentRepo,
     messageRepo,
   });
+  const deriveConversation = new DeriveConversationUseCase({
+    conversationRepo,
+    caseRepo,
+    escalationService,
+    departmentRepo,
+    agentRepo,
+    messageRepo,
+    broadcaster,
+    logger: conversationsLogger,
+  });
   const listDepartments = new ListDepartmentsUseCase(departmentRepo);
   const listAgents = new ListAgentsUseCase(agentRepo);
   const createAgent = new CreateAgentUseCase({ agentRepo, departmentRepo, auditRepo, logger });
@@ -992,6 +1003,7 @@ export function createContainer(): Container {
       markAsRead,
       replyAsHuman,
       takeControl,
+      deriveConversation,
       caseRepo,
       conversationRepo,
       messageRepo,

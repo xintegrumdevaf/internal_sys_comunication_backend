@@ -211,12 +211,31 @@ export class ProcessBufferedMessagesUseCase {
         recentMessages,
       });
 
-      // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
-      if (hasCompleteReceipt(receiptEntities)) {
+      // Un comprobante visual (aunque falte monto, referencia o fecha) ya es un caso de pago.
+      // No hace falta que el cliente escriba "pago realizado": la imagen basta para derivar a cartera.
+      // Si además reporta que no tiene internet, el soporte sigue teniendo prioridad.
+      const customerText = text.replace(/\[[^\]]*Adjunto[^\]]*\]/gi, "").trim();
+      const reportsOutage =
+        /no tengo internet|sin internet|sin servicio|no hay internet|luz roja|m[aá]s lento|no me funciona/i.test(
+          customerText,
+        ) ||
+        ((interpretation.intent === "support.internet" ||
+          interpretation.intent === "support.slow_internet") &&
+          customerText.length > 0);
+      const describedAsReceipt =
+        receiptEntities.isReceipt !== false &&
+        /\[Adjunto[^\]]*\]/i.test(text) &&
+        /comprobante|transferencia bancaria|transferencia exitosa|dep[oó]sito bancario/i.test(text);
+      const visualReceipt =
+        receiptEntities.isReceipt === true ||
+        hasCompleteReceipt(receiptEntities) ||
+        describedAsReceipt;
+
+      if (visualReceipt && !reportsOutage) {
         interpretation = {
           type: "NEW_INTENT",
           intent: "billing.record_payment",
-          entities: { ...interpretation.entities, ...receiptEntities },
+          entities: { ...interpretation.entities, ...receiptEntities, isReceipt: true },
           confidence: Math.max(interpretation.confidence, 0.95),
         };
       } else if (Object.keys(receiptEntities).length > 0) {

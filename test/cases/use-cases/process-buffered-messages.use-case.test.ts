@@ -732,6 +732,78 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(autoState?.enabled).toBe(false);
   });
 
+  it("deriva a cartera una foto de comprobante aunque el cliente no escriba nada y la interpretación sea UNCLEAR", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let escalatedReason: string | null = null;
+    const escalationService = {
+      escalateExistingCase: async (input: { caseId: string; reason: string }) => {
+        escalatedReason = input.reason;
+        return { customerMessage: "" };
+      },
+      sendToTriage: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const fakeAi = new FakeAIProvider();
+    fakeAi.extractReceiptImpl = async () => ({
+      isReceipt: true,
+      amount: 21.55,
+      reference: undefined,
+      date: undefined,
+      description: "comprobante de transferencia Banco Pichincha",
+    });
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: new QueuedInterpretationProvider([
+        { type: "UNCLEAR", intent: "unknown", entities: {}, confidence: 0.2 },
+      ]),
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const imgMsg = messageRepo.seedText(conversation.id, "", { type: "image", mediaId: "media-pichincha" });
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-receipt-image-only",
+      messages: [imgMsg],
+    });
+
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toContain("Estamos verificando tu pago");
+    expect(lastSent?.body).not.toContain("¿En qué te puedo ayudar");
+
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("BILLING_BALANCE");
+    expect(escalatedReason).toContain("Comprobante de pago");
+    const autoState = await caseRepo.getAutomationState(cases[0]!.id);
+    expect(autoState?.enabled).toBe(false);
+  });
+
   it("prioriza soporte técnico (support.internet) cuando el cliente reporta que no tiene internet aunque adjunte comprobante de pago", async () => {
     const scenario = buildScenario();
     const {

@@ -12,6 +12,7 @@ import type {
   ReplyAsHumanUseCase,
 } from "../application/use-cases/reply-as-human.use-case";
 import type { TakeControlUseCase } from "../application/use-cases/take-control.use-case";
+import type { DeriveConversationUseCase } from "../application/use-cases/derive-conversation.use-case";
 import type { MarkConversationAsReadUseCase } from "../application/use-cases/mark-conversation-as-read.use-case";
 import type { ConversationRepositoryPort } from "../application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../application/ports/message.repository.port";
@@ -32,6 +33,7 @@ export type ConversationsRouterDeps = {
   listMessages: ListMessagesUseCase;
   replyAsHuman: ReplyAsHumanUseCase;
   takeControl: TakeControlUseCase;
+  deriveConversation?: DeriveConversationUseCase;
   markAsRead: MarkConversationAsReadUseCase;
   caseRepo: CaseRepositoryPort;
   conversationRepo?: ConversationRepositoryPort;
@@ -275,7 +277,7 @@ const replyBodySchema = z.object({
  */
 export function createConversationsRouter(deps: ConversationsRouterDeps): Router {
   const router = Router();
-  const { listConversations, listMessages, replyAsHuman, takeControl, markAsRead, caseRepo } = deps;
+  const { listConversations, listMessages, replyAsHuman, takeControl, deriveConversation, markAsRead, caseRepo } = deps;
 
   router.get("/api/conversations", async (req, res, next) => {
     try {
@@ -685,6 +687,33 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
     "ESCALATED",
     "HUMAN_ACTIVE",
   ]);
+
+  const deriveBodySchema = z.object({
+    toDepartmentId: z.string().uuid(),
+    reason: z.string().min(1).optional(),
+  });
+
+  router.post("/api/conversations/:id/derive", async (req, res, next) => {
+    try {
+      const agent = requireAuth(req);
+      if (!deriveConversation) {
+        throw businessError("No se puede derivar la conversación en este momento");
+      }
+      const parsed = deriveBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw validationError("Debes elegir el área a la que se deriva la conversación");
+      }
+      const result = await deriveConversation.execute({
+        conversationId: req.params.id,
+        agentUserId: agent.id,
+        toDepartmentId: parsed.data.toDepartmentId,
+        reason: parsed.data.reason,
+      });
+      res.json({ data: result });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.post("/api/conversations/:id/close", async (req, res, next) => {
     try {
