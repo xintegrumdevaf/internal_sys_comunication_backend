@@ -155,8 +155,18 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (conversation_id, external_id) DO UPDATE SET
         status = EXCLUDED.status,
-        error_message = COALESCE(EXCLUDED.error_message, message.error_message)
-      WHERE EXCLUDED.status != 'sent' OR message.status = 'sent'
+        error_message = COALESCE(EXCLUDED.error_message, message.error_message),
+        type = CASE
+          WHEN message.media_id IS NULL AND EXCLUDED.media_id IS NOT NULL THEN EXCLUDED.type
+          ELSE message.type
+        END,
+        media_id = COALESCE(message.media_id, EXCLUDED.media_id),
+        mime_type = COALESCE(message.mime_type, EXCLUDED.mime_type),
+        filename = COALESCE(message.filename, EXCLUDED.filename),
+        caption = COALESCE(message.caption, EXCLUDED.caption)
+      WHERE EXCLUDED.status != 'sent'
+         OR message.status = 'sent'
+         OR (message.media_id IS NULL AND EXCLUDED.media_id IS NOT NULL)
       RETURNING *`,
       [
         input.conversationId,
