@@ -92,13 +92,33 @@ export class ProcessBufferedMessagesUseCase {
         return;
       }
 
+      const priorMessages = await this.deps.messageRepo.listByConversation(conversationId, {
+        limit: 15,
+      });
+      const inboundIds = new Set(messages.map((message) => message.id));
+      const lastPrior = [...priorMessages]
+        .reverse()
+        .find((message) => !inboundIds.has(message.id) && message.author !== "system");
+      const agentStartedRecently =
+        lastPrior?.author === "agent" &&
+        Date.now() - lastPrior.createdAt.getTime() < 24 * 60 * 60 * 1000;
+
       if (targetCase) {
         // docs/spec/02_STATE_MACHINE.md §8: Expiración perezosa.
         // Si el caso candidato ya venció por inactividad (>24h), no bloquea abrir un caso nuevo ni silencia el bot.
+        // Un agente que escribió en las últimas 24h mantiene la conversación: no se vence ni responde la IA.
         const isCaseExpired = this.deps.expirationService
           ? this.deps.expirationService.isExpired(targetCase)
           : (targetCase.expiresAt !== null && targetCase.expiresAt.getTime() <= Date.now()) ||
             (targetCase.expiresAt === null && Date.now() - targetCase.lastActivityAt.getTime() >= 24 * 60 * 60 * 1000);
+
+        if (isCaseExpired && agentStartedRecently) {
+          log.info(
+            { caseId: targetCase.id, messageId: lastPrior?.id, agentId: lastPrior?.agentId },
+            "el agente inició la conversación: silenciando bot",
+          );
+          return;
+        }
 
         if (isCaseExpired) {
           log.info(
@@ -117,9 +137,11 @@ export class ProcessBufferedMessagesUseCase {
 
       if (targetCase) {
         const autoState = await this.deps.caseRepo.getAutomationState(targetCase.id);
-        const isAutomationDisabled = autoState ? !autoState.enabled : targetCase.status === "HUMAN_ACTIVE" || targetCase.status === "ESCALATED";
-
-        if (isAutomationDisabled) {
+        const humanOwned =
+          targetCase.status === "HUMAN_ACTIVE" ||
+          targetCase.status === "ESCALATED" ||
+          autoState?.enabled === false;
+        if (humanOwned) {
           log.info(
             {
               caseId: targetCase.id,
@@ -127,10 +149,18 @@ export class ProcessBufferedMessagesUseCase {
               assignedAgentId: targetCase.assignedAgentId,
               automationEnabled: autoState ? autoState.enabled : false,
             },
-            "Conversación atendida por agente humano o automatización deshabilitada: silenciando bot",
+            "conversación en manos de una persona: silenciando bot",
           );
           return;
         }
+      }
+
+      if (agentStartedRecently) {
+        log.info(
+          { messageId: lastPrior?.id, agentId: lastPrior?.agentId },
+          "el último mensaje lo envió un agente: silenciando bot",
+        );
+        return;
       }
 
       const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
