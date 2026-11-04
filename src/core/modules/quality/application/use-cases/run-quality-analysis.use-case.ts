@@ -3,6 +3,7 @@ import { DomainError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { AIProviderPort, QualityAnalysis } from "../../../ai/application/ports/ai-provider.port";
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
+import type { Message } from "../../../conversations/domain/message.entity";
 import {
   averageChunkScore,
   buildFinalQualityReview,
@@ -138,17 +139,27 @@ export class RunQualityAnalysisUseCase {
       "analizando tramo de calidad",
     );
 
+    const preparedMessages = await Promise.all(
+      chunk.map(async (m) => {
+        const bodyContent = await this.resolveMessageContent(m);
+        return {
+          messageId: m.id,
+          author: m.author as "customer" | "agent",
+          body:
+            bodyContent.length > BODY_TRUNCATE
+              ? `${bodyContent.slice(0, BODY_TRUNCATE)}…`
+              : bodyContent,
+          createdAt: m.createdAt.toISOString(),
+        };
+      }),
+    );
+
     const aiInput = {
       correlationId: reviewId,
       conversationId: detail.review.conversationId,
       caseId: detail.review.caseId,
       agentId: detail.review.agentId,
-      messages: chunk.map((m) => ({
-        messageId: m.id,
-        author: m.author as "customer" | "agent",
-        body: m.body.length > BODY_TRUNCATE ? `${m.body.slice(0, BODY_TRUNCATE)}…` : m.body,
-        createdAt: m.createdAt.toISOString(),
-      })),
+      messages: preparedMessages,
     };
 
     let analysis: QualityAnalysis | null = null;
@@ -279,6 +290,118 @@ export class RunQualityAnalysisUseCase {
       messagesAnalyzed: newAnalyzed,
       chunkSize,
     });
+  }
+
+  private async resolveMessageContent(m: Message): Promise<string> {
+    const type = (m.type || "text").toLowerCase();
+    let text = (m.body || "").trim();
+
+    // 1. Audio / Nota de voz
+    if (type === "audio" || type === "voice") {
+      if (m.mediaId) {
+        try {
+          const { transcript } = await this.deps.aiProvider.transcribeAudio(
+            m.mediaId,
+            m.mimeType || "audio/ogg",
+          );
+          if (transcript?.trim()) {
+            return `[Nota de voz / audio del cliente]: "${transcript.trim()}"`;
+          }
+        } catch (err) {
+          this.deps.logger.warn(
+            { messageId: m.id, err: err instanceof Error ? err.message : String(err) },
+            "fallo transcripcion de audio en evaluacion de calidad",
+          );
+        }
+      }
+      return text && text !== "[audio]"
+        ? `[Nota de voz / audio del cliente]: "${text}"`
+        : "[Nota de voz / audio enviada por el cliente]";
+    }
+
+    // 2. Imagen / Comprobante
+    if (type === "image") {
+      if (m.mediaId) {
+        try {
+          const receipt = await this.deps.aiProvider.extractReceiptData(
+            m.mediaId,
+            m.mimeType || "image/jpeg",
+          );
+          const parts: string[] = [];
+          if (receipt.description) {
+            parts.push(`[Imagen adjunta del cliente: ${receipt.description}]`);
+          } else if (receipt.isReceipt === true) {
+            const amountStr = receipt.amount ? ` por ${receipt.amount}` : "";
+            const refStr = receipt.reference ? ` (Ref: ${receipt.reference})` : "";
+            parts.push(`[Imagen adjunta: Comprobante de pago / transferencia bancaria${amountStr}${refStr}]`);
+          } else {
+            parts.push("[Imagen adjunta: Fotografía enviada por el cliente]");
+          }
+          if (m.caption) parts.push(m.caption);
+          else if (text && text !== "[image]") parts.push(text);
+          return parts.join(" ");
+        } catch (err) {
+          this.deps.logger.warn(
+            { messageId: m.id, err: err instanceof Error ? err.message : String(err) },
+            "fallo analisis visual de imagen en evaluacion de calidad",
+          );
+        }
+      }
+      const caption = m.caption || (text !== "[image]" ? text : "");
+      return caption ? `[Imagen adjunta]: ${caption}` : "[Imagen adjunta enviada por el cliente]";
+    }
+
+    // 3. Documento / PDF
+    if (type === "document") {
+      const mime = (m.mimeType || "").toLowerCase();
+      if ((mime.includes("pdf") || mime.includes("image")) && m.mediaId) {
+        try {
+          const doc = await this.deps.aiProvider.extractReceiptData(
+            m.mediaId,
+            m.mimeType || "application/pdf",
+          );
+          const parts: string[] = [];
+          if (doc.description) {
+            parts.push(`[Documento adjunto del cliente: ${doc.description}]`);
+          } else if (doc.isReceipt === true) {
+            const amountStr = doc.amount ? ` por ${doc.amount}` : "";
+            parts.push(`[Documento adjunto: Comprobante de pago / transferencia${amountStr}]`);
+          } else if (m.filename) {
+            parts.push(`[Documento adjunto: ${m.filename}]`);
+          } else {
+            parts.push("[Documento digital adjunto]");
+          }
+          if (m.caption) parts.push(m.caption);
+          return parts.join(" ");
+        } catch (err) {
+          this.deps.logger.warn(
+            { messageId: m.id, err: err instanceof Error ? err.message : String(err) },
+            "fallo analisis de documento en evaluacion de calidad",
+          );
+        }
+      }
+      const filename = m.filename ? ` ${m.filename}` : "";
+      const caption = m.caption ? ` (${m.caption})` : "";
+      return `[Documento adjunto:${filename}]${caption}`;
+    }
+
+    // 4. Video
+    if (type === "video") {
+      const caption = m.caption || (text !== "[video]" ? text : "");
+      return caption
+        ? `[Video adjunto por el cliente]: ${caption}`
+        : "[Video adjunto enviado por el cliente]";
+    }
+
+    // 5. Ubicación GPS
+    if (type === "location" || (m.filename && /([-+]?\d{1,2}\.\d+)\s*,\s*([-+]?\d{1,3}\.\d+)/.test(m.filename))) {
+      return `[Ubicación GPS enviada por el cliente: ${m.filename || text}]`;
+    }
+
+    if (m.caption && !text) {
+      text = m.caption;
+    }
+    return text || "[Mensaje sin texto]";
   }
 
   private async finalizeFromExisting(

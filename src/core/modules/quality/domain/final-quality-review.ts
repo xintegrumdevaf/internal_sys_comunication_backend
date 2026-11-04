@@ -90,7 +90,8 @@ export function buildFinalQualityReview(input: {
     lines.push("");
     lines.push("Síntesis por tramos:");
     usefulSummaries.forEach((s, i) => {
-      lines.push(`${i + 1}. ${s}`);
+      const cleanSummary = s.replace(/EFICIENCIA:[\s\S]*$/i, "").trim();
+      lines.push(`${i + 1}. ${cleanSummary || s}`);
     });
   }
 

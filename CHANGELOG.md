@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.4] - 2026-11-04
 
+- **Multimodal Quality Analysis & Voice Note Transcription (`run-quality-analysis.use-case.ts`, `analyze-agent-conversation.prompt.ts`)**:
+  - *Context*: Quality analysis previously evaluated only raw message bodies. When customers sent WhatsApp audio notes or receipts, the AI received empty or placeholder text (e.g. `[audio]`), falsely penalizing agents for abandonment or lack of responsiveness when responding to customer voice notes.
+  - *Changes*:
+    - Implemented `resolveMessageContent` in `RunQualityAnalysisUseCase` to dynamically execute `transcribeAudio` for audio voice notes, and `extractReceiptData` for images and PDF documents.
+    - Updated `ANALYZE_AGENT_CONVERSATION_SYSTEM_PROMPT` with explicit rules to evaluate agent replies within the full context of transcribed voice notes, documents, and vouchers.
+    - Instructed the model to directly highlight infractions at the beginning of the summary before providing constructive pedagogical recommendations.
+    - Sanitized chunk summaries in `buildFinalQualityReview` to eliminate duplicate "Eficiencia:" sections.
+
 - **ESLint 10 & Clean Code Governance Implementation (`eslint.config.js`, `package.json`)**:
   - *Context*: The backend was missing automated static analysis enforcement for Clean Code practices, resulting in oversized modules, untyped `any` leaks, and dead code accumulation.
   - *Changes*:
