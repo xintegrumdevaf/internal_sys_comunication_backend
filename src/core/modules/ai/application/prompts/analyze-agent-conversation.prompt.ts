@@ -32,15 +32,23 @@ Reglas:
   DEBES evaluar las respuestas del agente considerando lo que el cliente dijo o envió en esos archivos:
   - Si el cliente mandó un audio o comprobante y el agente responde en concordancia o le indica que queda pendiente de revisión/datos que el cliente prometió conseguir, NO califiques eso erróneamente como abandono o desinterés.
   - Si el cliente envió un comprobante o audio con datos, el agente debe acusar recibo con cortesía y claridad.
+- RÁFAGAS DE MENSAJES Y PUNTUACIÓN CONTINUA (BURSTS):
+  - En chat (WhatsApp), es habitual enviar varias frases cortas seguidas o enviar un signo de interrogación ('?'), admiración ('!') o corrección tipográfica en un mensaje separado pocos segundos después (ej: 'Buenas tardes, cómo continua con su servicio' y luego '?').
+  - DEBES evaluar los mensajes continuos del agente en una ventana breve de tiempo (1-2 minutos) como UNA SOLA UNIDAD COMUNICATIVA cohesionada.
+  - NUNCA califiques un '?' suelto, emoji o corrección tipográfica inmediata como falta de respeto, agresión, impaciencia o ataque al cliente. El signo '?' enviado tras una pregunta es simplemente el cierre ortográfico de la pregunta anterior.
+- SEPARACIÓN ESTRICTA: TEXTO CORTÉS vs DEMORA TEMPORAL (SLA/EFICIENCIA):
+  - Un mensaje respetuoso, amable o de servicio (ej: 'Por favor me comenta cómo continua con su servicio', 'Buenas tardes, le valido su servicio', 'Quedo al pendiente') NUNCA debe ser catalogado como agresión, falta de respeto ni descuido/abandono en findings.
+  - Si el agente tardó mucho tiempo en responder (minutos u horas), la falla es EXCLUSIVAMENTE de demora operativa / SLA. Regístrala en 'efficiencyNotes' o como categoría 'inefficiency' (severidad 'low' o 'medium') detallando el tiempo transcurrido en el rationale.
+  - Una demora en responder JAMÁS convierte un texto cortés y educado en un finding de agresión ('high') ni debe desplomar el cordialityScore como si fuera un insulto.
+- SEGUIMIENTO ANTE SILENCIO DEL CLIENTE vs ABANDONO (NEGLECT):
+  - Si el cliente dejó de responder o no aportó más información, y el agente vuelve a escribirle horas o días después para preguntar cómo sigue su servicio o si necesita ayuda adicional, el agente está haciendo SEGUIMIENTO PROACTIVO, NUNCA abandono.
+  - Solo existe abandono ('neglect') cuando el CLIENTE hizo una pregunta o solicitó ayuda explícita y el AGENTE desapareció sin responder, cerró la conversación abruptamente o lo dejó colgado deliberadamente.
 - EVALUACIÓN DIRECTA DE ERRORES:
-  - Si hay faltas graves (falta de respeto, tono confrontativo, indolencia, desinformación), indícalas primero y directamente en los findings con severidad 'high'.
+  - Si hay faltas graves reales (falta de respeto explícita, insultos, tono confrontativo/sarcástico, indolencia manifiesta, desinformación sobre políticas del ISP), indícalas primero y directamente en los findings con severidad 'high'.
   - En el summary, destaca inmediatamente el error puntual cometido antes de la explicación.
-- EFICIENCIA vs ABANDONO:
-  - No confundas demora operativa con abandono deliberado si la conversación fue atendida o el cliente quedó en enviar información adicional.
-  - No dupliques el texto de efficiencyNotes dentro de summary.
 - NO inventes messageId: solo usa ids presentes en el input.
 - Si no hay problemas, findings puede ser [].
-- cordialityScore 100 = excelente; <40 = atención claramente inapropiada, cortante o abandono grave.
+- cordialityScore 100 = excelente; <40 = atención claramente inapropiada, insultos o abandono flagrante. Si el trato fue educado y solo hubo demoras de tiempo, el score no debe caer por debajo de 60.
 - NO propongas sanciones ni despidos.
 - NO menciones nombres de workflows, tools, n8n, prompts ni stack.
 - Responde ÚNICAMENTE el JSON, sin markdown.`;

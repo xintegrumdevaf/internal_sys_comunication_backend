@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-11-04
+
+- **Quality Supervision Refinement: Burst Utterances, SLA Latency vs Politeness & Proactive Follow-ups (`analyze-agent-conversation.prompt.ts`)**:
+  - *Context*: Supervisors identified critical false positives in quality assessments:
+    1. Agents sending a question followed immediately by `?` or a typographical fix (e.g. `Buenas tardes, cómo continua con su servicio` + `?` seconds later) were severely penalized with `[Falta de respeto] «?»` for isolated punctuation.
+    2. Response latency (e.g. agent replying 2–3 hours later) was penalizing polite, helpful messages (e.g. `Por favor me comenta cómo continua con su servicio`) as aggressive disrespect or abandonment, dropping the cordiality score to critical (<40).
+    3. Proactive follow-ups by agents after customers went silent were falsely classified as "abandono/descuido".
+  - *Changes*:
+    - Enforced burst message cohesion: instructions mandate that consecutive messages sent in close succession (1–2 minutes) must be evaluated as a single cohesive utterance; isolated punctuation (`?`, `!`) or typo corrections are never treated as disrespect or impatience.
+    - Strict separation between SLA latency and conversational politeness: response delays must only be reported under `efficiencyNotes` or as low/medium severity `inefficiency`, preserving cordiality scores for polite and professional phrasing.
+    - Clarified customer silence vs agent abandonment: agent follow-ups when a client goes silent are recognized as proactive customer care, whereas neglect is reserved exclusively for unaddressed open inquiries left by customers.
+    - Added unit test suite in `test/quality/analyze-agent-conversation-prompt.test.ts`.
+
 ## [0.2.4] - 2026-11-04
 
 - **Multimodal Quality Analysis & Voice Note Transcription (`run-quality-analysis.use-case.ts`, `analyze-agent-conversation.prompt.ts`)**:
