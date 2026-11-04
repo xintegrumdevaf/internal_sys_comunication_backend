@@ -305,6 +305,45 @@ class QualityReviewRepositoryFake implements QualityReviewRepositoryPort {
     return updated;
   }
 
+  async resetReviewForReanalysis(reviewId: string): Promise<QualityReview> {
+    const review = this.reviews.get(reviewId);
+    if (!review) throw new Error("not found");
+    const updated: QualityReview = {
+      ...review,
+      status: "pending" as const,
+      cordialityScore: null,
+      efficiencyNotes: null,
+      summary: null,
+      errorMessage: null,
+      startedAt: null,
+      completedAt: null,
+      messagesAnalyzed: 0,
+    };
+    this.reviews.set(reviewId, updated);
+    this.findings.set(reviewId, []);
+    return updated;
+  }
+
+  async resetReviewsForReanalysis(): Promise<string[]> {
+    const ids: string[] = [];
+    for (const [id, rev] of this.reviews.entries()) {
+      this.reviews.set(id, {
+        ...rev,
+        status: "pending" as const,
+        cordialityScore: null,
+        efficiencyNotes: null,
+        summary: null,
+        errorMessage: null,
+        startedAt: null,
+        completedAt: null,
+        messagesAnalyzed: 0,
+      });
+      this.findings.set(id, []);
+      ids.push(id);
+    }
+    return ids;
+  }
+
   async markReviewed(reviewId: string): Promise<QualityReview> {
     const review = this.reviews.get(reviewId);
     if (!review) throw new Error("not found");

@@ -7,7 +7,7 @@ import { resolveQualityDepartmentScope } from "../quality-auth";
 import type { EnqueueQualityReviewService } from "../services/enqueue-quality-review.service";
 
 const DEFAULT_BATCH_LIMIT = 1;
-const MAX_BATCH_LIMIT = 5;
+const MAX_BATCH_LIMIT = 50;
 
 export type BatchEnqueueResult = {
   enqueued: number;
@@ -16,8 +16,8 @@ export type BatchEnqueueResult = {
 };
 
 /**
- * Encola análisis on-demand para casos cerrados sin review útil.
- * Límite bajo por defecto (tokens). No reanaliza ready/reviewed/pending.
+ * Encola análisis on-demand para casos cerrados.
+ * Si reanalyzeAll: true, resetea a pending las reviews existentes para re-evaluarlas con el prompt actual.
  */
 export class BatchEnqueueQualityReviewsUseCase {
   constructor(
@@ -35,12 +35,37 @@ export class BatchEnqueueQualityReviewsUseCase {
     agentId?: string;
     departmentId?: string;
     limit?: number;
+    reanalyzeAll?: boolean;
   }): Promise<BatchEnqueueResult> {
     const departmentIds = await resolveQualityDepartmentScope(
       input.actor,
       this.deps.agentRepo,
       input.departmentId,
     );
+
+    if (input.reanalyzeAll) {
+      const resetIds = await this.deps.qualityRepo.resetReviewsForReanalysis({
+        from: input.from,
+        to: input.to,
+        agentId: input.agentId,
+        departmentIds,
+      });
+
+      for (const id of resetIds) {
+        this.deps.enqueueService.scheduleRun(id);
+      }
+
+      const pendingTotal = await this.deps.qualityRepo.countByStatus("pending", {
+        agentId: input.agentId,
+        departmentIds,
+      });
+
+      return {
+        enqueued: resetIds.length,
+        pendingTotal,
+        reviews: [],
+      };
+    }
 
     const limit = Math.min(
       Math.max(input.limit ?? DEFAULT_BATCH_LIMIT, 1),

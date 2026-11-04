@@ -492,6 +492,83 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
     return mapReview(rows[0]);
   }
 
+  async resetReviewForReanalysis(reviewId: string): Promise<QualityReview> {
+    await this.pool.query(`DELETE FROM quality_finding WHERE review_id = $1`, [reviewId]);
+    const { rows } = await this.pool.query<ReviewRow>(
+      `UPDATE quality_review
+       SET status = 'pending',
+           cordiality_score = NULL,
+           efficiency_notes = NULL,
+           summary = NULL,
+           error_message = NULL,
+           started_at = NULL,
+           completed_at = NULL,
+           messages_analyzed = 0
+       WHERE id = $1
+       RETURNING *`,
+      [reviewId],
+    );
+    if (!rows[0]) throw new Error(`quality_review ${reviewId} no existe`);
+    return mapReview(rows[0]);
+  }
+
+  async resetReviewsForReanalysis(filters: {
+    agentId?: string;
+    from?: Date;
+    to?: Date;
+    departmentIds?: string[] | null;
+  }): Promise<string[]> {
+    const conditions: string[] = ["status IN ('ready', 'reviewed', 'failed')"];
+    const values: unknown[] = [];
+
+    if (filters.agentId) {
+      values.push(filters.agentId);
+      conditions.push(`agent_id = ${values.length}`);
+    }
+    if (filters.from) {
+      values.push(filters.from);
+      conditions.push(`created_at >= ${values.length}`);
+    }
+    if (filters.to) {
+      values.push(filters.to);
+      conditions.push(`created_at <= ${values.length}`);
+    }
+    if (filters.departmentIds && filters.departmentIds.length > 0) {
+      values.push(filters.departmentIds);
+      conditions.push(`department_id = ANY(${values.length})`);
+    }
+
+    const whereClause = conditions.join(" AND ");
+
+    const selectRes = await this.pool.query<{ id: string }>(
+      `SELECT id FROM quality_review WHERE ${whereClause}`,
+      values,
+    );
+    const ids = selectRes.rows.map((r) => r.id);
+    if (ids.length === 0) return [];
+
+    await this.pool.query(
+      `DELETE FROM quality_finding WHERE review_id = ANY($1)`,
+      [ids],
+    );
+
+    await this.pool.query(
+      `UPDATE quality_review
+       SET status = 'pending',
+           cordiality_score = NULL,
+           efficiency_notes = NULL,
+           summary = NULL,
+           error_message = NULL,
+           started_at = NULL,
+           completed_at = NULL,
+           messages_analyzed = 0
+       WHERE id = ANY($1)`,
+      [ids],
+    );
+
+    return ids;
+  }
+
   async markReviewed(reviewId: string): Promise<QualityReview> {
     const { rows } = await this.pool.query<ReviewRow>(
       `UPDATE quality_review SET status = 'reviewed' WHERE id = $1 RETURNING *`,

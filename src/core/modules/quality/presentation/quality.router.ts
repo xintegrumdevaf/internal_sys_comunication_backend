@@ -117,7 +117,9 @@ function serializeStats(s: AgentQualityStats) {
 }
 
 const onDemandBodySchema = z.object({
-  caseId: z.string().uuid(),
+  caseId: z.string().uuid().optional(),
+  reviewId: z.string().uuid().optional(),
+  reanalyze: z.boolean().optional(),
 });
 
 const noteBodySchema = z.object({
@@ -133,7 +135,8 @@ const batchBodySchema = z.object({
   to: z.string().datetime().optional(),
   agentId: z.string().uuid().optional(),
   departmentId: z.string().uuid().optional(),
-  limit: z.number().int().min(1).max(10).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+  reanalyzeAll: z.boolean().optional(),
 });
 
 /**
@@ -224,7 +227,26 @@ export function createQualityRouter(deps: QualityRouterDeps): Router {
     try {
       const actor = requireRole(req, ["manager", "admin"]);
       const body = onDemandBodySchema.parse(req.body);
-      const review = await deps.requestOnDemand.execute({ actor, caseId: body.caseId });
+      const review = await deps.requestOnDemand.execute({
+        actor,
+        caseId: body.caseId,
+        reviewId: body.reviewId,
+        reanalyze: body.reanalyze,
+      });
+      res.status(200).json({ data: serializeReviewBase(review) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/quality/reviews/:id/reanalyze", async (req, res, next) => {
+    try {
+      const actor = requireRole(req, ["manager", "admin"]);
+      const review = await deps.requestOnDemand.execute({
+        actor,
+        reviewId: req.params.id!,
+        reanalyze: true,
+      });
       res.status(200).json({ data: serializeReviewBase(review) });
     } catch (error) {
       next(error);
@@ -247,6 +269,36 @@ export function createQualityRouter(deps: QualityRouterDeps): Router {
         agentId: body.agentId,
         departmentId: body.departmentId,
         limit: body.limit ?? 1,
+        reanalyzeAll: body.reanalyzeAll,
+      });
+      res.status(200).json({
+        data: {
+          enqueued: result.enqueued,
+          pendingTotal: result.pendingTotal,
+          reviews: result.reviews.map(serializeReviewBase),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /** Reanálisis masivo de todas las reviews en el rango / agente actual con el prompt vigente */
+  router.post("/api/quality/reanalyze-all", async (req, res, next) => {
+    try {
+      const actor = requireRole(req, ["manager", "admin"]);
+      const body = batchBodySchema.parse(req.body ?? {});
+      const from = body.from
+        ? new Date(body.from)
+        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const to = body.to ? new Date(body.to) : new Date();
+      const result = await deps.batchEnqueue.execute({
+        actor,
+        from,
+        to,
+        agentId: body.agentId,
+        departmentId: body.departmentId,
+        reanalyzeAll: true,
       });
       res.status(200).json({
         data: {

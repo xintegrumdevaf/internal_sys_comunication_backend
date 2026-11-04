@@ -9,7 +9,8 @@ import type { EnqueueQualityReviewService } from "../services/enqueue-quality-re
 
 /**
  * Analizar este chat (on-demand).
- * - ready/reviewed → no llama IA; devuelve la review existente.
+ * - reviewId provisto o reanalyze: true → resetea a pending y re-analiza con el prompt actual.
+ * - ready/reviewed sin reanalyze → no llama IA; devuelve la review existente.
  * - pending → re-despierta el worker.
  * - failed → reabre el mismo registro a pending.
  * - sin review → crea pending on_demand.
@@ -24,7 +25,29 @@ export class RequestOnDemandReviewUseCase {
     },
   ) {}
 
-  async execute(input: { actor: Agent; caseId: string }): Promise<QualityReview> {
+  async execute(input: {
+    actor: Agent;
+    caseId?: string;
+    reviewId?: string;
+    reanalyze?: boolean;
+  }): Promise<QualityReview> {
+    if (input.reviewId) {
+      const detail = await this.deps.qualityRepo.findById(input.reviewId);
+      if (!detail) throw notFound(`Review ${input.reviewId} no encontrada`);
+      await assertCanAccessQualityDepartment(
+        input.actor,
+        detail.review.departmentId,
+        this.deps.agentRepo,
+      );
+      const reset = await this.deps.qualityRepo.resetReviewForReanalysis(detail.review.id);
+      this.deps.enqueueService.scheduleRun(reset.id);
+      return reset;
+    }
+
+    if (!input.caseId) {
+      throw businessError("Se requiere caseId o reviewId");
+    }
+
     const aggregate = await this.deps.caseRepo.findById(input.caseId);
     if (!aggregate) throw notFound(`Caso ${input.caseId} no encontrado`);
 
@@ -45,6 +68,11 @@ export class RequestOnDemandReviewUseCase {
     );
 
     if (latest?.status === "ready" || latest?.status === "reviewed") {
+      if (input.reanalyze) {
+        const reset = await this.deps.qualityRepo.resetReviewForReanalysis(latest.id);
+        this.deps.enqueueService.scheduleRun(reset.id);
+        return reset;
+      }
       return latest;
     }
 

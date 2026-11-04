@@ -140,6 +140,15 @@ export interface QualityReviewRepositoryPort {
   markFailed(reviewId: string, errorMessage?: string): Promise<void>;
   /** Reabre failed → pending para reintento manual (mismo registro). */
   reopenFailedAsPending(reviewId: string): Promise<QualityReview>;
+  /** Resetea una review a pending y borra findings anteriores para reanalizar con el prompt actual. */
+  resetReviewForReanalysis(reviewId: string): Promise<QualityReview>;
+  /** Resetea masivamente reviews a pending y borra findings anteriores. Devuelve lista de IDs reseteados. */
+  resetReviewsForReanalysis(filters: {
+    agentId?: string;
+    from?: Date;
+    to?: Date;
+    departmentIds?: string[] | null;
+  }): Promise<string[]>;
   markReviewed(reviewId: string): Promise<QualityReview>;
   addCoachingNote(input: AddCoachingNoteInput): Promise<QualityCoachingNote>;
   getAgentStats(

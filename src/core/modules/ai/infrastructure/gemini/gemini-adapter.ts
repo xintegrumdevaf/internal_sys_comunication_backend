@@ -250,11 +250,29 @@ export class GeminiAdapter implements AIProviderPort {
       caseId: input.caseId,
       agentId: input.agentId,
     });
-    const { system, user } = buildAnalyzeAgentConversationPrompt(input);
+    const fallback = () => buildAnalyzeAgentConversationPrompt(input);
+    const resolved = this.promptResolver
+      ? await this.promptResolver.resolvePrompt(
+          "analyze_agent_conversation",
+          {
+            messages: input.messages.map((m) => ({
+              messageId: m.messageId,
+              author: m.author,
+              createdAt: m.createdAt,
+              body: m.body,
+            })),
+          },
+          fallback,
+        )
+      : { ...fallback(), modelConfig: { temperature: 0.15 }, versionNumber: 0, source: "fallback_code" as const };
+
     const timeoutMs = Math.max(this.config.timeoutMs, this.config.qualityTimeoutMs ?? this.config.timeoutMs);
     const started = Date.now();
     try {
-      const payload = this.buildBasePayload(system, user, { jsonMode: true, temperature: 0.15 });
+      const payload = this.buildBasePayload(resolved.system, resolved.user, {
+        jsonMode: true,
+        temperature: (resolved.modelConfig.temperature as number) ?? 0.15,
+      });
       const raw = await this.callGemini(payload, timeoutMs);
       const analysis = parseQualityAnalysis(raw);
       log.info(
@@ -262,6 +280,8 @@ export class GeminiAdapter implements AIProviderPort {
           durationMs: Date.now() - started,
           cordialityScore: analysis.cordialityScore,
           findingsCount: analysis.findings.length,
+          promptVersion: resolved.versionNumber,
+          promptSource: resolved.source,
         },
         "Gemini analisis de calidad OK",
       );
