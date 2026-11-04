@@ -12,6 +12,7 @@ import type { EscalationRepositoryPort } from "../ports/escalation.repository.po
 import { resolveActingAgent } from "./agent-case-auth";
 
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 export type AssignCaseDeps = {
@@ -23,6 +24,7 @@ export type AssignCaseDeps = {
   logger: Logger;
   messageRepo?: MessageRepositoryPort;
   broadcaster?: RealtimeBroadcaster;
+  conversationRepo?: ConversationRepositoryPort;
 };
 
 /**
@@ -82,7 +84,9 @@ export class AssignCaseUseCase {
     }
 
     const nextStatus =
-      aggregate.case.status === "ESCALATED" ? "HUMAN_ACTIVE" : aggregate.case.status;
+      aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED"
+        ? aggregate.case.status
+        : "HUMAN_ACTIVE";
 
     if (
       departmentId !== aggregate.case.departmentId ||
@@ -101,6 +105,32 @@ export class AssignCaseUseCase {
     }
 
     await this.deps.caseRepo.setAssignedAgent(aggregate.case.id, target.id);
+
+    await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
+      reason: input.reassign ? "CASE_REASSIGNED" : "CASE_ASSIGNED",
+      changedBy: actor.id,
+    });
+    await this.deps.caseRepo.appendEvent(aggregate.case.id, "AUTOMATION_DISABLED", {
+      reason: input.reassign ? "CASE_REASSIGNED" : "CASE_ASSIGNED",
+    });
+
+    if (this.deps.conversationRepo) {
+      await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
+    }
+
+    if (this.deps.broadcaster) {
+      this.deps.broadcaster.publish({
+        type: "AUTOMATION_DISABLED",
+        caseId: aggregate.case.id,
+        conversationId: aggregate.case.conversationId,
+      });
+      this.deps.broadcaster.publish({
+        type: "HUMAN_ASSIGNED",
+        caseId: aggregate.case.id,
+        agentUserId: target.id,
+        conversationId: aggregate.case.conversationId,
+      });
+    }
 
     const escalation = await this.deps.escalationRepo.findByCaseId(aggregate.case.id);
     if (escalation) {

@@ -592,6 +592,8 @@ export function createContainer(): Container {
     departmentRepo,
     auditRepo,
     logger: escalationLogger,
+    conversationRepo,
+    broadcaster,
   });
   const assignCase = new AssignCaseUseCase({
     caseRepo,
@@ -602,6 +604,7 @@ export function createContainer(): Container {
     logger: escalationLogger,
     messageRepo,
     broadcaster,
+    conversationRepo,
   });
   const disableAutomation = new DisableAutomationUseCase({
     caseRepo,
@@ -701,6 +704,7 @@ export function createContainer(): Container {
     broadcaster,
     messageRepo,
     agentRepo,
+    conversationRepo,
   });
   const syncCaseBalance = new SyncCaseBalanceUseCase({
     caseRepo,

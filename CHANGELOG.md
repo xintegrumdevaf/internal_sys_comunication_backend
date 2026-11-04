@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-11-04
+
+- **AI Automation Deactivation Upon Agent Assignment & Case Claim**:
+  - *Damage*: When an AI assistant escalated a conversation to a human department or an agent took control, subsequent customer incoming messages could still trigger the AI bot to reply automatically, talking over the human agent or giving contradictory advice.
+  - *Root Cause*: Arbitration (`CaseArbitrationService`) did not treat active cases with an assigned agent as strictly human-owned if status was not yet `HUMAN_ACTIVE`, and assignment / claim / transfer use cases did not automatically persist `automation_enabled = false` on the case or publish realtime deactivation events.
+  - *Resolution*:
+    - Reinforced `CaseArbitrationService` and `ProcessBufferedMessagesUseCase` to strictly return `REQUEST_HUMAN` for any non-terminal case with `assignedAgentId` set or with status `HUMAN_ACTIVE`/`ESCALATED`, preventing any automated bot messages while human staff are assigned.
+    - Updated `AssignCaseUseCase`, `ClaimCaseUseCase`, and `TransferCaseUseCase` to automatically disable case automation (`setAutomationEnabled(false)`), append `AUTOMATION_DISABLED` audit events, sync `conversation.active_case_id`, and broadcast `AUTOMATION_DISABLED` and `HUMAN_ASSIGNED` realtime events.
+    - Added unit test coverage in `test/cases/use-cases/process-buffered-messages.use-case.test.ts`.
+
 ## [0.2.2] - 2026-10-30
 
 - **Contextual Intent-Driven Routing & Elimination of Rigid Regex Bypasses**:
@@ -32,6 +42,30 @@ All notable changes to this project will be documented in this file.
     - Standardized line-break normalization (`\r\n` and `\\n` -> `\n`) in `CreateQuickReplyUseCase`, `UpdateQuickReplyUseCase`, and `ResolveQuickReplyUseCase`.
     - Added structural preservation directive to `buildRefineQuickReplyTonePrompt` ensuring AI-assisted tone improvements preserve bullet points, lists, and line breaks.
     - Added unit and router integration tests validating multiline preservation.
+
+- **Persistent Local Media Storage & Streaming (LocalMediaStorageAdapter)**:
+  - *Damage*: WhatsApp and Zernio temporary media URLs expire after hours or days, causing broken image/video links in past conversation histories and failing downstream vision/OCR processing.
+  - *Root Cause*: Lack of local persistence for ingested media files; media endpoints acted only as a passthrough proxy.
+  - *Resolution*:
+    - Implemented LocalMediaStorageAdapter satisfying MediaStoragePort to persist media locally under MEDIA_STORAGE_PATH (storage/media) with Docker volume support.
+    - Added dual-layer caching (in-memory LRU + disk persistence) in conversations.router.ts.
+    - Implemented HTTP Range Requests (Accept-Ranges: bytes) enabling seeking and smooth streaming for WhatsApp audio and video in frontend clients.
+    - Added automatic retry with zernioAccountId parameter when external Zernio requests return 400/404.
+
+- **Direct Case Transfer to Agents & In-Chat Traceability**:
+  - *Damage*: Case transfers were restricted to department IDs only without direct agent assignment, and agents could not see transfer or assignment history inside the conversation timeline.
+  - *Root Cause*: TransferCaseUseCase did not accept "toAgentId", lacked auto-assignment dispatch, and did not emit system messages into the message repository.
+  - *Resolution*:
+    - Enhanced TransferCaseUseCase to accept "toAgentId" or "toDepartmentId" with auto-assignment fallback to eligible agents.
+    - Registered visible system audit messages (uthor: "system") in the conversation history upon case transfers, manual assignments, and take-control actions for human agent visibility.
+    - Broadcasted real-time WebSocket events (MESSAGE_SENT, HUMAN_ASSIGNED, HUMAN_UNASSIGNED).
+
+- **Network Connection Testing & OLT Subnet Traversal**:
+  - *Damage*: Testing connections to OLTs located behind MikroTik routers in private subnets failed when the MikroTik microservice was offline or when credentials were omitted.
+  - *Root Cause*: Lack of parent router credential hydration and TCP socket fallback probing.
+  - *Resolution*:
+    - POST /api/admin/settings/network/test-connection now hydrates host, port, and credentials from local database topology.
+    - Direct TCP socket fallback probe with latency measurement and parent router reachability checks for OLTs on private subnets.
 
 ## [0.2.1] - 2026-10-29
 

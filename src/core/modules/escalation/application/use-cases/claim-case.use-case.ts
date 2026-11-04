@@ -5,6 +5,8 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { EscalationRepositoryPort } from "../ports/escalation.repository.port";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import { assertCanWriteCase, resolveActingAgent } from "./agent-case-auth";
 
 export type ClaimCaseDeps = {
@@ -14,6 +16,8 @@ export type ClaimCaseDeps = {
   departmentRepo: DepartmentRepositoryPort;
   auditRepo: AuditRepositoryPort;
   logger: Logger;
+  conversationRepo?: ConversationRepositoryPort;
+  broadcaster?: RealtimeBroadcaster;
 };
 
 /**
@@ -45,16 +49,50 @@ export class ClaimCaseUseCase {
 
     const targetDepartmentId = aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;
 
-    if (aggregate.case.status === "ESCALATED" || (aggregate.case.departmentId === null && targetDepartmentId !== null)) {
+    const nextStatus =
+      aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED"
+        ? aggregate.case.status
+        : "HUMAN_ACTIVE";
+
+    if (
+      aggregate.case.status !== nextStatus ||
+      (aggregate.case.departmentId === null && targetDepartmentId !== null)
+    ) {
       await this.deps.caseRepo.applyTransition({
         caseId: aggregate.case.id,
         expectedCaseVersion: aggregate.case.version,
         expectedWorkflowVersion: aggregate.workflowInstance.version,
-        status: aggregate.case.status === "ESCALATED" ? "HUMAN_ACTIVE" : aggregate.case.status,
+        status: nextStatus,
         context: aggregate.case.context,
         currentState: aggregate.workflowInstance.currentState,
         departmentId: targetDepartmentId,
         expiresAt: null,
+      });
+    }
+
+    await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
+      reason: "CASE_CLAIMED",
+      changedBy: agent.id,
+    });
+    await this.deps.caseRepo.appendEvent(aggregate.case.id, "AUTOMATION_DISABLED", {
+      reason: "CASE_CLAIMED",
+    });
+
+    if (this.deps.conversationRepo) {
+      await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
+    }
+
+    if (this.deps.broadcaster) {
+      this.deps.broadcaster.publish({
+        type: "AUTOMATION_DISABLED",
+        caseId: aggregate.case.id,
+        conversationId: aggregate.case.conversationId,
+      });
+      this.deps.broadcaster.publish({
+        type: "HUMAN_ASSIGNED",
+        caseId: aggregate.case.id,
+        agentUserId: agent.id,
+        conversationId: aggregate.case.conversationId,
       });
     }
 

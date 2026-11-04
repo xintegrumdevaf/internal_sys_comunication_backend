@@ -290,6 +290,19 @@ export class EscalationService {
       status: "ASSIGNED",
     });
 
+    await this.deps.caseRepo.setAutomationEnabled(caseEntity.id, false, {
+      reason: "AUTO_ASSIGNED",
+    });
+    await this.deps.caseRepo.appendEvent(caseEntity.id, "AUTOMATION_DISABLED", {
+      reason: "AUTO_ASSIGNED",
+    });
+    await this.deps.conversationRepo.setActiveCaseId(caseEntity.conversationId, caseEntity.id);
+    this.deps.broadcaster?.publish({
+      type: "AUTOMATION_DISABLED",
+      caseId: caseEntity.id,
+      conversationId: caseEntity.conversationId,
+    });
+
     await this.deps.caseRepo.appendEvent(caseEntity.id, "HUMAN_ASSIGNED", {
       agentUserId: agent.id,
       via: "auto_assign",

@@ -10,6 +10,7 @@ import type { RealtimeBroadcaster } from "../../../realtime/application/realtime
 
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 
 export type TransferCaseDeps = {
   caseRepo: CaseRepositoryPort;
@@ -21,6 +22,7 @@ export type TransferCaseDeps = {
   broadcaster?: RealtimeBroadcaster;
   messageRepo?: MessageRepositoryPort;
   agentRepo?: AgentRepositoryPort;
+  conversationRepo?: ConversationRepositoryPort;
 };
 
 /**
@@ -75,7 +77,7 @@ export class TransferCaseUseCase {
     }
 
     const nextStatus = assignedAgent
-      ? (aggregate.case.status === "ESCALATED" ? "HUMAN_ACTIVE" : aggregate.case.status)
+      ? (aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED" ? aggregate.case.status : "HUMAN_ACTIVE")
       : aggregate.case.status;
 
     const result = await this.deps.caseRepo.applyTransition({
@@ -111,6 +113,25 @@ export class TransferCaseUseCase {
       reason,
       assignedAgentId: assignedAgent ? assignedAgent.id : null,
     });
+
+    if (assignedAgent) {
+      await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
+        reason: input.toAgentId ? "MANUAL_TRANSFER" : "TRANSFER_AUTO_ASSIGN",
+        changedBy: input.agentUserId,
+      });
+      await this.deps.caseRepo.appendEvent(aggregate.case.id, "AUTOMATION_DISABLED", {
+        reason: input.toAgentId ? "MANUAL_TRANSFER" : "TRANSFER_AUTO_ASSIGN",
+      });
+      this.deps.broadcaster?.publish({
+        type: "AUTOMATION_DISABLED",
+        caseId: aggregate.case.id,
+        conversationId: aggregate.case.conversationId,
+      });
+    }
+
+    if (this.deps.conversationRepo) {
+      await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
+    }
 
     if (assignedAgent) {
       await this.deps.caseRepo.appendEvent(aggregate.case.id, "HUMAN_ASSIGNED", {

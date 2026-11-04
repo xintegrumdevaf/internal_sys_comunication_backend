@@ -1,3 +1,4 @@
+import { TERMINAL_CASE_STATUSES } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { Interpretation } from "../ports/interpretation.port";
 import type { Logger } from "../../../../../shared/logging/logger";
@@ -142,13 +143,13 @@ export class CaseArbitrationService {
     //   con alta confianza, permitir activar el workflow automatizado para recopilar la informacion del cliente.
     const allCases = await this.caseRepo.listByConversation(conversationId);
     const pendingHumanCase = allCases.find(
-      (c) => (c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") && !this.expirationService.isExpired(c),
+      (c) =>
+        !TERMINAL_CASE_STATUSES.includes(c.status) &&
+        !this.expirationService.isExpired(c) &&
+        (c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED" || Boolean(c.assignedAgentId)),
     );
     if (pendingHumanCase) {
-      const isAssignedToAgent = pendingHumanCase.status === "HUMAN_ACTIVE" || Boolean(pendingHumanCase.assignedAgentId);
-      if (isAssignedToAgent) {
-        return { action: "REQUEST_HUMAN", caseId: pendingHumanCase.id };
-      }
+      return { action: "REQUEST_HUMAN", caseId: pendingHumanCase.id };
     }
 
     const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);

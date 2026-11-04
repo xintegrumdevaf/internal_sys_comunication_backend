@@ -861,4 +861,158 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(cases).toHaveLength(1);
     expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
   });
+
+  it("silencia el bot si el caso está asignado a un agente humano y el cliente vuelve a escribir", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    const { case: existingCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: "dept-support",
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    // Simulamos que el caso fue asignado a un agente humano
+    await caseRepo.setAssignedAgent(existingCase.id, "agent-adriana");
+    await caseRepo.applyTransition({
+      caseId: existingCase.id,
+      expectedCaseVersion: 1,
+      expectedWorkflowVersion: 1,
+      status: "HUMAN_ACTIVE",
+      context: existingCase.context,
+      currentState: "HUMAN_DIRECT",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, existingCase.id);
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "support.internet",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const clientMsg = messageRepo.seedText(conversation.id, "Buenas tardes no estoy en casa");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-human-assigned",
+      messages: [clientMsg],
+    });
+
+    // El bot NO debe haber respondido porque el caso está asignado a un agente
+    expect(whatsappSender.sent).toHaveLength(0);
+    const autoState = await caseRepo.getAutomationState(existingCase.id);
+    expect(autoState?.enabled).toBe(false);
+  });
+
+  it("permite que el bot responda si el caso previo fue completado o resuelto", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    const { case: completedCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: "dept-support",
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "RESOLVED",
+      expiresAt: null,
+    });
+
+    // Caso resuelto anteriormente
+    await caseRepo.setAssignedAgent(completedCase.id, "agent-adriana");
+    await caseRepo.applyTransition({
+      caseId: completedCase.id,
+      expectedCaseVersion: 1,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: completedCase.context,
+      currentState: "RESOLVED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "support.internet",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const newClientMsg = messageRepo.seedText(conversation.id, "Hola, se cayó mi internet de nuevo");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-completed-case",
+      messages: [newClientMsg],
+    });
+
+    // Al estar resuelto el caso anterior, el bot SÍ puede atender la nueva consulta
+    expect(whatsappSender.sent.length).toBeGreaterThan(0);
+  });
 });

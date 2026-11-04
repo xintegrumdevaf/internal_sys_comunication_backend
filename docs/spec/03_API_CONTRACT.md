@@ -1,4 +1,4 @@
-# 03_API_CONTRACT.md (v3 — interpretación movida a código, catálogo de acciones en DB)
+﻿# 03_API_CONTRACT.md (v3 — interpretación movida a código, catálogo de acciones en DB)
 
 > Cambios acumulados: (v2) todos los workflows de n8n responden síncronamente. (v3) la interpretación de lenguaje y la composición de respuesta al cliente **ya no pasan por n8n** — viven en la API como un `AIProviderPort` (interfaz en código, adapters intercambiables: Ollama por defecto, extensible a OpenAI/OpenRouter/Claude). n8n queda dedicado exclusivamente a integraciones con sistemas externos reales (contrato, saldo, diagnóstico, pagos). El registro de acción→URL de n8n pasa de variables de entorno a una tabla (`n8n_workflow_registry`, `01_DATA_MODEL.md` §2).
 
@@ -190,6 +190,7 @@ o en error:
 | `POST /api/cases/:id/complete` `{ resolutionNote?, closeReason?: 'RESOLVED' \| 'CLIENT_NO_RESPONSE' }` | `COMPLETED` (Cierre manual con motivo: Cierre normal o Cierre por falta de respuesta) |
 | `POST /api/cases/:id/schedule` `{ scheduledAt, scheduleTag? }` | Agenda caso a la sección "En Espera" con etiqueta (`AGENDADO`, `POSPUESTO`, `MONITOREO` u otra de catálogo) |
 | `POST /api/cases/:id/cancel` `{ reason }` | `CANCELLED` |
+| `POST /api/cases/:id/transfer` `{ toDepartmentId?, toAgentId?, reason? }` | Transfiere el caso a otro departamento o agente específico, auto-asigna si aplica y registra mensaje de sistema en la conversación |
 | `POST /api/cases/:id/disable-automation` `{ reason }` | Fuerza `automation.enabled=false` sin escalar |
 | `POST /api/cases/:id/reactivate-automation` | `automation.enabled=true`, conserva `context` |
 | `POST /api/cases/:id/sync-data` | Sincroniza la ficha completa del cliente (contratos, sector, OLT, PON, serial, IP) y saldo (`VALIDATE_CLIENT` + `CHECK_BALANCE`) |

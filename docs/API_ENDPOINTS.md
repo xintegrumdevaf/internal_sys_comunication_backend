@@ -79,7 +79,7 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
 | `POST` | `/api/conversations/sync-history` | sesión de `role=admin` | Encola en Redis la sincronización de mensajes históricos de Zernio. Body opcional: `{ "days": 30, "limit": 100 }` |
 | `GET` | `/api/conversations/sync-history/status` | sesión (`admin` o `manager`) | Consulta el estado del worker de sincronización (`idle`, `running`, `completed`, `failed`), total sincronizado y errores |
-| `GET` | `/api/media/*` o `?url=` | wildcard o query `?url=` | Proxy de streaming de adjuntos multimedia (WhatsApp y Zernio). Desempaqueta URLs anidadas recursivamente, inyecta credenciales dinámicas de canal e incluye bypass de sesión para etiquetas `<img>` del navegador |
+| `GET` | `/api/media/*` o `?url=` | wildcard o query `?url=` | Proxy de streaming y persistencia local de adjuntos (`LocalMediaStorageAdapter`). Desempaqueta URLs recursivamente, soporta Range Requests (`Accept-Ranges: bytes`) para streaming continuo de audio/video y reintento con accountId |
 
 Todas requieren sesión (§1) — el agente que responde/toma control es siempre el de la cookie, nunca uno declarado en el body.
 
@@ -108,7 +108,7 @@ Content-Type: application/json
 | `POST` | `/api/cases/:id/reassign` | igual que assign → `204` | Reasigna caso ya asignado |
 | `POST` | `/api/cases/:id/complete` | `{ "resolutionNote?" }` | Cierra `COMPLETED` |
 | `POST` | `/api/cases/:id/cancel` | `{ "reason" }` | `CANCELLED` |
-| `POST` | `/api/cases/:id/transfer` | `{ "toDepartmentId", "reason" }` | Cambia departamento |
+| `POST` | `/api/cases/:id/transfer` | `{ "toDepartmentId?", "toAgentId?", "reason?" }` | Cambia departamento o transfiere a agente. Auto-asigna agente si aplica y deja mensaje de sistema en la conversación para trazabilidad |
 | `POST` | `/api/cases/:id/disable-automation` | `{ "reason" }` | Apaga bot sin escalar |
 | `POST` | `/api/cases/:id/reactivate-automation` | — (sesión) | Reactiva bot **conservando** el context |
 | `POST` | `/api/cases/:id/sync-data` | — (sesión) | Sincroniza ficha completa de cliente (contratos, sector, OLT, PON, serial, IP) y saldo actual |

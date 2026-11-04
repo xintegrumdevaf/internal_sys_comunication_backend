@@ -1,6 +1,6 @@
 import { DomainError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { Case } from "../../domain/case.entity";
+import { TERMINAL_CASE_STATUSES, type Case } from "../../domain/case.entity";
 import { emptyContextFor, type CaseContext } from "../../domain/contexts/case-context";
 import type { BillingBalanceContext } from "../../domain/contexts/billing-balance.context";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
@@ -65,16 +65,19 @@ export class ProcessBufferedMessagesUseCase {
 
     try {
       const conversation = await this.deps.conversationRepo.findById(conversationId);
+      const cases = await this.deps.caseRepo.listByConversation(conversationId);
+      const openCases = cases.filter((c) => !TERMINAL_CASE_STATUSES.includes(c.status));
+
       let targetCase: Case | null = null;
       if (conversation?.activeCaseId) {
-        const agg = await this.deps.caseRepo.findById(conversation.activeCaseId);
-        if (agg) targetCase = agg.case;
+        const activeMatch = openCases.find((c) => c.id === conversation.activeCaseId);
+        if (activeMatch) targetCase = activeMatch;
       }
       if (!targetCase) {
-        const cases = await this.deps.caseRepo.listByConversation(conversationId);
         targetCase =
-          cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
-          cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          openCases.find((c) => Boolean(c.assignedAgentId) || c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+          openCases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+          openCases.find((c) => c.status === "NEW") ??
           null;
       }
 
@@ -103,15 +106,29 @@ export class ProcessBufferedMessagesUseCase {
 
       if (targetCase) {
         const autoState = await this.deps.caseRepo.getAutomationState(targetCase.id);
-        const isAutomationDisabled = autoState ? !autoState.enabled : targetCase.status === "HUMAN_ACTIVE" || targetCase.status === "ESCALATED";
+        const hasAssignedAgent = Boolean(targetCase.assignedAgentId);
+        const isHumanStatus = targetCase.status === "HUMAN_ACTIVE" || targetCase.status === "ESCALATED";
+
+        // Regla no negociable: si el asistente de IA deriva a un agente o ya está asignado,
+        // el asistente de IA se desactiva y no puede responder a la conversación a menos que
+        // el agente humano lo habilite expresamente (reactivate-automation) o que el caso se resuelva.
+        const isAutomationDisabled =
+          autoState?.enabled === false ||
+          hasAssignedAgent ||
+          isHumanStatus;
 
         if (isAutomationDisabled) {
+          if (autoState?.enabled !== false && (hasAssignedAgent || isHumanStatus)) {
+            await this.deps.caseRepo.setAutomationEnabled(targetCase.id, false, {
+              reason: "HUMAN_ASSIGNED_ACTIVE",
+            });
+          }
           log.info(
             {
               caseId: targetCase.id,
               status: targetCase.status,
               assignedAgentId: targetCase.assignedAgentId,
-              automationEnabled: autoState ? autoState.enabled : false,
+              automationEnabled: false,
             },
             "Conversación atendida por agente humano o automatización deshabilitada: silenciando bot",
           );
