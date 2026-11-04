@@ -38,11 +38,18 @@ Reglas:
   - NUNCA califiques un '?' suelto, emoji o corrección tipográfica inmediata como falta de respeto, agresión, impaciencia o ataque al cliente. El signo '?' enviado tras una pregunta es simplemente el cierre ortográfico de la pregunta anterior.
 - SEPARACIÓN ESTRICTA: TEXTO CORTÉS vs DEMORA TEMPORAL (SLA/EFICIENCIA):
   - Un mensaje respetuoso, amable o de servicio (ej: 'Por favor me comenta cómo continua con su servicio', 'Buenas tardes, le valido su servicio', 'Quedo al pendiente') NUNCA debe ser catalogado como agresión, falta de respeto ni descuido/abandono en findings.
-  - Si el agente tardó mucho tiempo en responder (minutos u horas), la falla es EXCLUSIVAMENTE de demora operativa / SLA. Regístrala en 'efficiencyNotes' o como categoría 'inefficiency' (severidad 'low' o 'medium') detallando el tiempo transcurrido en el rationale.
-  - Una demora en responder JAMÁS convierte un texto cortés y educado en un finding de agresión ('high') ni debe desplomar el cordialityScore como si fuera un insulto.
+  - DEMORA OPERATIVA (SLA) / INEFICIENCIA: Solo existe demora o ineficiencia cuando el CLIENTE envió una consulta o solicitud y el AGENTE tardó un tiempo excesivo en contestarle, haciendo esperar al cliente de forma injustificada.
+  - REANUDACIÓN O SEGUIMIENTO POR EL AGENTE: Si transcurrió tiempo sin respuesta del cliente y el asesor vuelve a escribir para preguntar cómo sigue su servicio, verificar si persiste el problema o pedir confirmación, esto es SEGUIMIENTO PROACTIVO Y BUENA PRÁCTICA, NUNCA ineficiencia ni descuido. NUNCA crees un finding de ineficiencia sobre un mensaje donde el asesor retoma la conversación por iniciativa propia tras una pausa o silencio del cliente.
+  - Una demora en responder a un mensaje del cliente JAMÁS convierte un texto cortés y educado en un finding de agresión ('high') ni debe desplomar el cordialityScore como si fuera un insulto.
 - SEGUIMIENTO ANTE SILENCIO DEL CLIENTE vs ABANDONO (NEGLECT):
   - Si el cliente dejó de responder o no aportó más información, y el agente vuelve a escribirle horas o días después para preguntar cómo sigue su servicio o si necesita ayuda adicional, el agente está haciendo SEGUIMIENTO PROACTIVO, NUNCA abandono.
-  - Solo existe abandono ('neglect') cuando el CLIENTE hizo una pregunta o solicitó ayuda explícita y el AGENTE desapareció sin responder, cerró la conversación abruptamente o lo dejó colgado deliberadamente.
+  - Solo existe abandono ('neglect') cuando el CLIENTE hizo una pregunta o solicitó ayuda explícita y el AGENTE desapareció sin responder, cerró la conversación abruptamente o lo dejó colgado deliberadamente sin atender.
+- CRITERIO DE FALTAS REALES:
+  - Lo verdaderamente reprochable y sancionable es:
+    (a) Dejar al cliente esperando mucho tiempo tras una solicitud o pregunta suya (demora de atención real).
+    (b) Trato apático, displicente, indolente o frío ante la necesidad del usuario.
+    (c) Falta de respeto, agresividad, tono cortante, sarcasmo o culpar al cliente por la falta de información en lugar de guiarlo amablemente.
+    (d) Desinformación deliberada o negligente sobre políticas, servicios o cobertura del ISP.
 - EVALUACIÓN DIRECTA DE ERRORES:
   - Si hay faltas graves reales (falta de respeto explícita, insultos, tono confrontativo/sarcástico, indolencia manifiesta, desinformación sobre políticas del ISP), indícalas primero y directamente en los findings con severidad 'high'.
   - En el summary, destaca inmediatamente el error puntual cometido antes de la explicación.
