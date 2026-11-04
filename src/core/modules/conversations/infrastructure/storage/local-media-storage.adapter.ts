@@ -186,6 +186,20 @@ export function inferContentType(
       contentType = "image/gif";
     } else if (lower.includes(".pdf")) {
       contentType = "application/pdf";
+    } else if (lower.includes(".docx")) {
+      contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    } else if (lower.includes(".doc")) {
+      contentType = "application/msword";
+    } else if (lower.includes(".xlsx")) {
+      contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    } else if (lower.includes(".xls")) {
+      contentType = "application/vnd.ms-excel";
+    } else if (lower.includes(".csv")) {
+      contentType = "text/csv";
+    } else if (lower.includes(".txt")) {
+      contentType = "text/plain";
+    } else if (lower.includes(".zip")) {
+      contentType = "application/zip";
     }
   }
   return contentType;
@@ -217,6 +231,13 @@ export function extensionFromMimeOrTarget(
     "video/3gpp": ".3gp",
     "video/quicktime": ".mov",
     "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "text/csv": ".csv",
+    "text/plain": ".txt",
+    "application/zip": ".zip",
   };
 
   if (mime && mimeToExt[mime]) {

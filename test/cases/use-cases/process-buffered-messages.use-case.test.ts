@@ -496,6 +496,71 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(refreshedOldCase?.case.status).toBe("EXPIRED");
   });
 
+  it("no responde la IA cuando un agente inició la conversación y el cliente contesta", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    const openCase = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    const storedCase = (await caseRepo.findById(openCase.case.id))!.case;
+    storedCase.status = "HUMAN_ACTIVE";
+    storedCase.assignedAgentId = "agent-adriana";
+    storedCase.lastActivityAt = new Date(Date.now() - 30 * 60 * 60 * 1000);
+    await caseRepo.setAutomationEnabled(openCase.case.id, true, { reason: "human_reply_missing" });
+
+    messageRepo.seedText(
+      conversation.id,
+      "Buen dia, por favor me ayuda validando nuevamente el servicio de la tv",
+      { author: "agent", direction: "outbound", agentId: "agent-adriana" },
+    );
+    const customerReply = messageRepo.seedText(conversation.id, "Buenas tardes no estoy en casa");
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: new QueuedInterpretationProvider([]),
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-agent-started",
+      messages: [customerReply],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(0);
+    const refreshed = await caseRepo.findById(openCase.case.id);
+    expect(refreshed?.case.status).toBe("HUMAN_ACTIVE");
+  });
+
   it("activa el Circuit Breaker y escala a triage con MAX_CLARIFY_ATTEMPTS_EXCEEDED si el bot ya había pedido aclaración", async () => {
     const scenario = buildScenario();
     const {
@@ -728,6 +793,78 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(escalatedReason).toContain("Comprobante de pago");
 
     // 4. La automatización del bot debe estar DESACTIVADA para que no responda con consultas de saldo
+    const autoState = await caseRepo.getAutomationState(cases[0]!.id);
+    expect(autoState?.enabled).toBe(false);
+  });
+
+  it("deriva a cartera una foto de comprobante aunque el cliente no escriba nada y la interpretación sea UNCLEAR", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let escalatedReason: string | null = null;
+    const escalationService = {
+      escalateExistingCase: async (input: { caseId: string; reason: string }) => {
+        escalatedReason = input.reason;
+        return { customerMessage: "" };
+      },
+      sendToTriage: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const fakeAi = new FakeAIProvider();
+    fakeAi.extractReceiptImpl = async () => ({
+      isReceipt: true,
+      amount: 21.55,
+      reference: undefined,
+      date: undefined,
+      description: "comprobante de transferencia Banco Pichincha",
+    });
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: new QueuedInterpretationProvider([
+        { type: "UNCLEAR", intent: "unknown", entities: {}, confidence: 0.2 },
+      ]),
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const imgMsg = messageRepo.seedText(conversation.id, "", { type: "image", mediaId: "media-pichincha" });
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-receipt-image-only",
+      messages: [imgMsg],
+    });
+
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toContain("Estamos verificando tu pago");
+    expect(lastSent?.body).not.toContain("¿En qué te puedo ayudar");
+
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("BILLING_BALANCE");
+    expect(escalatedReason).toContain("Comprobante de pago");
     const autoState = await caseRepo.getAutomationState(cases[0]!.id);
     expect(autoState?.enabled).toBe(false);
   });

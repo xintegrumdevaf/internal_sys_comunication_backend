@@ -8,6 +8,11 @@ import type { Case } from "../../../cases/domain/case.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 
+export type LastAttendedByDto = {
+  agentId: string | null;
+  agentName: string | null;
+};
+
 export type ConversationDto = Conversation & {
   lastMessagePreview: {
     body: string;
@@ -26,6 +31,11 @@ export type ConversationDto = Conversation & {
     assignedAgentName?: string | null;
     automationEnabled: boolean;
   } | null;
+  /**
+   * Solo en conversaciones resueltas o cerradas, cuando ya no hay caso activo.
+   * Identifica a la última persona asignada a ese caso. No reabre ni reasigna nada.
+   */
+  lastAttendedBy?: LastAttendedByDto | null;
 };
 
 export type ListConversationsQuery = ListConversationsFilter & {
@@ -35,9 +45,9 @@ export type ListConversationsQuery = ListConversationsFilter & {
 
 /**
  * Lista conversaciones con `lastMessagePreview` (03_API_CONTRACT.md §C.4)
- * y filtros opcionales departmentId/userId evaluados estrictamente sobre
- * el caso activo (o más reciente vigente), evitando filtrado erróneo por
- * casos históricos previos.
+ * y filtros opcionales departmentId/userId. Con un caso vivo se filtra solo
+ * por ese caso. En resueltas y cerradas, sin caso vivo, se usa el último caso
+ * para saber quién lo atendió.
  */
 export class ListConversationsUseCase {
   constructor(
@@ -55,44 +65,63 @@ export class ListConversationsUseCase {
     type ResolvedItem = {
       conv: Conversation;
       activeAggregate: Case | null;
+      recordCase: Case | null;
     };
 
     const resolvedItems: ResolvedItem[] = [];
 
     for (const conv of rawConversations) {
-      let activeAggregate: Case | null = null;
-      if (this.caseRepo) {
-        const cases = await this.caseRepo.listByConversation(conv.id);
-        activeAggregate =
-          (conv.activeCaseId ? cases.find((item) => item.id === conv.activeCaseId) : null) ??
-          cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
-          cases.find((item) => item.status === "ACTIVE" || item.status === "WAITING_USER") ??
-          null;
-      }
+      const cases = this.caseRepo ? await this.caseRepo.listByConversation(conv.id) : [];
+      const activeAggregate =
+        (conv.activeCaseId ? cases.find((item) => item.id === conv.activeCaseId) : null) ??
+        cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
+        cases.find((item) => item.status === "ACTIVE" || item.status === "WAITING_USER") ??
+        null;
 
-      // El filtrado por departamento y agente se evalúa sobre el CASO ACTIVO de la conversación
+      const isClosedRecord = conv.status === "resolved" || conv.status === "closed";
+      const recordCase =
+        !activeAggregate && isClosedRecord
+          ? [...cases].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+          : null;
+
+      // Con caso vivo se filtra por ese caso. En resueltas/cerradas, por quien atendió el último.
+      const filterCase = activeAggregate ?? recordCase;
+
       if (filter.departmentId) {
-        if (!activeAggregate || activeAggregate.departmentId !== filter.departmentId) {
+        if (!filterCase || filterCase.departmentId !== filter.departmentId) {
           continue;
         }
       }
 
       if (filter.userId) {
-        if (!activeAggregate || activeAggregate.assignedAgentId !== filter.userId) {
+        if (!filterCase || filterCase.assignedAgentId !== filter.userId) {
           continue;
         }
       }
 
-      resolvedItems.push({ conv, activeAggregate });
+      resolvedItems.push({ conv, activeAggregate, recordCase });
     }
 
     const conversations = resolvedItems.map((item) => item.conv);
     const lastMap = await this.messageRepo.findLastByConversationIds(conversations.map((c) => c.id));
     const dtos: ConversationDto[] = [];
 
-    for (const { conv, activeAggregate } of resolvedItems) {
+    for (const { conv, activeAggregate, recordCase } of resolvedItems) {
       const last = lastMap.get(conv.id) ?? null;
       let activeCaseDto: ConversationDto["activeCase"] = null;
+      let lastAttendedBy: ConversationDto["lastAttendedBy"] = null;
+
+      if (recordCase) {
+        let agentName: string | null = null;
+        if (recordCase.assignedAgentId && this.agentRepo) {
+          const ag = await this.agentRepo.findById(recordCase.assignedAgentId);
+          if (ag) agentName = ag.name;
+        }
+        lastAttendedBy = {
+          agentId: recordCase.assignedAgentId,
+          agentName,
+        };
+      }
 
       if (activeAggregate && this.caseRepo) {
         const autoState = await this.caseRepo.getAutomationState(activeAggregate.id);
@@ -138,6 +167,7 @@ export class ListConversationsUseCase {
             }
           : null,
         activeCase: activeCaseDto,
+        lastAttendedBy,
       });
     }
 

@@ -47,11 +47,11 @@ export function createTagsRouter(deps: TagsRouterDeps): Router {
 
   /**
    * POST /api/tags
-   * Crea una nueva etiqueta (requiere rol admin o manager).
+   * Crea una nueva etiqueta.
    */
   router.post("/api/tags", async (req, res, next) => {
     try {
-      requireRole(req, ["admin", "manager"]);
+      requireAuth(req);
       const parsed = createTagSchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));
@@ -65,11 +65,11 @@ export function createTagsRouter(deps: TagsRouterDeps): Router {
 
   /**
    * PATCH /api/tags/:id
-   * Modifica una etiqueta (requiere rol admin o manager).
+   * Modifica una etiqueta.
    */
   router.patch("/api/tags/:id", async (req, res, next) => {
     try {
-      requireRole(req, ["admin", "manager"]);
+      requireAuth(req);
       const parsed = updateTagSchema.safeParse(req.body);
       if (!parsed.success) {
         throw validationError(parsed.error.issues.map((i) => i.message).join(", "));

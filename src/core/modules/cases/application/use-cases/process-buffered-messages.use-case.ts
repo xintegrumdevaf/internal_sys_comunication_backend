@@ -81,13 +81,47 @@ export class ProcessBufferedMessagesUseCase {
           null;
       }
 
+      if (targetCase?.context.schedulingMetadata?.scheduledAt) {
+        log.info(
+          {
+            caseId: targetCase.id,
+            scheduledAt: targetCase.context.schedulingMetadata.scheduledAt,
+          },
+          "conversación en espera de retoma humana: silenciando bot",
+        );
+        await this.deps.caseRepo.setAutomationEnabled(targetCase.id, false, {
+          reason: "scheduled_human_followup",
+        });
+        return;
+      }
+
+      const priorMessages = await this.deps.messageRepo.listByConversation(conversationId, {
+        limit: 15,
+      });
+      const inboundIds = new Set(messages.map((message) => message.id));
+      const lastPrior = [...priorMessages]
+        .reverse()
+        .find((message) => !inboundIds.has(message.id) && message.author !== "system");
+      const agentStartedRecently =
+        lastPrior?.author === "agent" &&
+        Date.now() - lastPrior.createdAt.getTime() < 24 * 60 * 60 * 1000;
+
       if (targetCase) {
         // docs/spec/02_STATE_MACHINE.md §8: Expiración perezosa.
         // Si el caso candidato ya venció por inactividad (>24h), no bloquea abrir un caso nuevo ni silencia el bot.
+        // Un agente que escribió en las últimas 24h mantiene la conversación: no se vence ni responde la IA.
         const isCaseExpired = this.deps.expirationService
           ? this.deps.expirationService.isExpired(targetCase)
           : (targetCase.expiresAt !== null && targetCase.expiresAt.getTime() <= Date.now()) ||
             (targetCase.expiresAt === null && Date.now() - targetCase.lastActivityAt.getTime() >= 24 * 60 * 60 * 1000);
+
+        if (isCaseExpired && agentStartedRecently) {
+          log.info(
+            { caseId: targetCase.id, messageId: lastPrior?.id, agentId: lastPrior?.agentId },
+            "el agente inició la conversación: silenciando bot",
+          );
+          return;
+        }
 
         if (isCaseExpired) {
           log.info(
@@ -130,10 +164,18 @@ export class ProcessBufferedMessagesUseCase {
               assignedAgentId: targetCase.assignedAgentId,
               automationEnabled: false,
             },
-            "Conversación atendida por agente humano o automatización deshabilitada: silenciando bot",
+            "conversación en manos de una persona: silenciando bot",
           );
           return;
         }
+      }
+
+      if (agentStartedRecently) {
+        log.info(
+          { messageId: lastPrior?.id, agentId: lastPrior?.agentId },
+          "el último mensaje lo envió un agente: silenciando bot",
+        );
+        return;
       }
 
       const activeAggregate = await this.deps.caseRepo.findActiveByConversation(conversationId);
@@ -214,12 +256,31 @@ export class ProcessBufferedMessagesUseCase {
         recentMessages,
       });
 
-      // Comprobante completo → billing.record_payment sin preguntar (aceptacion Etapa 5).
-      if (hasCompleteReceipt(receiptEntities)) {
+      // Un comprobante visual (aunque falte monto, referencia o fecha) ya es un caso de pago.
+      // No hace falta que el cliente escriba "pago realizado": la imagen basta para derivar a cartera.
+      // Si además reporta que no tiene internet, el soporte sigue teniendo prioridad.
+      const customerText = text.replace(/\[[^\]]*Adjunto[^\]]*\]/gi, "").trim();
+      const reportsOutage =
+        /no tengo internet|sin internet|sin servicio|no hay internet|luz roja|m[aá]s lento|no me funciona/i.test(
+          customerText,
+        ) ||
+        ((interpretation.intent === "support.internet" ||
+          interpretation.intent === "support.slow_internet") &&
+          customerText.length > 0);
+      const describedAsReceipt =
+        receiptEntities.isReceipt !== false &&
+        /\[Adjunto[^\]]*\]/i.test(text) &&
+        /comprobante|transferencia bancaria|transferencia exitosa|dep[oó]sito bancario/i.test(text);
+      const visualReceipt =
+        receiptEntities.isReceipt === true ||
+        hasCompleteReceipt(receiptEntities) ||
+        describedAsReceipt;
+
+      if (visualReceipt && !reportsOutage) {
         interpretation = {
           type: "NEW_INTENT",
           intent: "billing.record_payment",
-          entities: { ...interpretation.entities, ...receiptEntities },
+          entities: { ...interpretation.entities, ...receiptEntities, isReceipt: true },
           confidence: Math.max(interpretation.confidence, 0.95),
         };
       } else if (Object.keys(receiptEntities).length > 0) {

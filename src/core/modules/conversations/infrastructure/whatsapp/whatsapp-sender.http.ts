@@ -1,6 +1,10 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { WhatsAppSenderPort } from "../../application/ports/whatsapp-sender.port";
+import type {
+  SendWhatsAppMediaInput,
+  SendWhatsAppMediaOutput,
+  WhatsAppSenderPort,
+} from "../../application/ports/whatsapp-sender.port";
 import type { SystemSettingsService } from "../../../settings/application/services/system-settings.service";
 
 const GRAPH_API_VERSION = "v20.0";
@@ -69,6 +73,96 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
     }
 
     return { externalId };
+  }
+
+  async sendMedia(input: SendWhatsAppMediaInput): Promise<SendWhatsAppMediaOutput> {
+    const creds = await this.resolveCredentials();
+    const cleanPhone = input.waPhone.replace(/\D/g, "");
+    let uploadedMediaId: string | undefined;
+
+    if (input.buffer && input.buffer.length > 0) {
+      const uploadUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/media`;
+      const form = new FormData();
+      form.append("messaging_product", "whatsapp");
+      form.append("type", input.mimeType || "application/octet-stream");
+      const filename = input.filename || `adjunto.${input.type === "image" ? "jpg" : input.type === "video" ? "mp4" : input.type === "audio" ? "ogg" : "pdf"}`;
+      const blob = new Blob([new Uint8Array(input.buffer)], {
+        type: input.mimeType || "application/octet-stream",
+      });
+      form.append("file", blob, filename);
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${creds.accessToken}`,
+        },
+        body: form,
+      });
+
+      if (!uploadRes.ok) {
+        const errorBody = await uploadRes.text();
+        this.logger.error(
+          { status: uploadRes.status, body: errorBody, type: input.type, mimeType: input.mimeType },
+          "whatsapp Graph API rechazo la subida de archivo multimedia",
+        );
+        throw new Error(`WhatsApp media upload fallo (${uploadRes.status}): ${errorBody}`);
+      }
+
+      const uploadData = (await uploadRes.json()) as { id?: string };
+      if (!uploadData.id) {
+        throw new Error("Respuesta de subida de media de WhatsApp sin id");
+      }
+      uploadedMediaId = uploadData.id;
+    } else if (!input.mediaUrl) {
+      throw new Error("Se requiere un archivo binario o una URL pública para enviar multimedia por WhatsApp");
+    }
+
+    const sendUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
+    const mediaPayload: Record<string, unknown> = uploadedMediaId
+      ? { id: uploadedMediaId }
+      : { link: input.mediaUrl };
+
+    if (input.caption && input.type !== "audio") {
+      mediaPayload.caption = input.caption;
+    }
+    if (input.type === "document" && input.filename) {
+      mediaPayload.filename = input.filename;
+    }
+
+    const response = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${creds.accessToken}`,
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: cleanPhone,
+        type: input.type,
+        [input.type]: mediaPayload,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      this.logger.error(
+        { status: response.status, body: errorBody, type: input.type },
+        "whatsapp Graph API rechazo el envio de mensaje multimedia",
+      );
+      throw new Error(`WhatsApp sendMedia fallo (${response.status}): ${errorBody}`);
+    }
+
+    const data = (await response.json()) as WhatsAppSendResponse;
+    const externalId = data.messages?.[0]?.id;
+    if (!externalId) {
+      this.logger.error({ data }, "respuesta de whatsapp sendMedia sin id de mensaje");
+      throw new Error("Respuesta de WhatsApp sin id de mensaje");
+    }
+
+    return {
+      externalId,
+      remoteMediaId: uploadedMediaId ?? input.mediaUrl,
+    };
   }
 
   async sendTemplate(

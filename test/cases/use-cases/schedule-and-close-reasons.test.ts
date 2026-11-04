@@ -153,6 +153,9 @@ describe("Cierre manual y agendamiento de casos", () => {
     });
 
     expect(scheduledCase.status).toBe("WAITING_USER");
+    const automation = await caseRepo.getAutomationState(created.id);
+    expect(automation?.enabled).toBe(false);
+    expect(automation?.disabledReason).toBe("scheduled_human_followup");
     expect(scheduledCase.context.schedulingMetadata).toMatchObject({
       scheduleTag: "MONITOREO",
       scheduledByAgentId: agent.id,

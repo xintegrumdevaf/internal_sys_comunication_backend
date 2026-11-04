@@ -161,4 +161,53 @@ describe("ListConversationsUseCase - filtrado por caso activo", () => {
     expect(activeAgentList[0]!.id).toBe(conv.id);
     expect(activeAgentList[0]!.activeCase?.assignedAgentId).toBe("agent-active");
   });
+
+  it("en una conversación resuelta conserva quién atendió el último caso, sin tratarlo como caso activo", async () => {
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+    const caseRepo = new CaseRepositoryFake();
+
+    const conv = conversationRepo.createOpen({
+      id: "conv-resolved",
+      waPhone: "+593982222222",
+      status: "resolved",
+    });
+    messageRepo.seedText(conv.id, "Gracias");
+
+    const { case: doneCase, workflowInstance } = await caseRepo.create({
+      conversationId: conv.id,
+      workflowType: "BILLING_BALANCE",
+      departmentId: "dept-cartera",
+      context: emptyContextFor("BILLING_BALANCE"),
+      initialState: "START",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: doneCase.id,
+      expectedCaseVersion: doneCase.version,
+      expectedWorkflowVersion: workflowInstance.version,
+      status: "COMPLETED",
+      context: doneCase.context,
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await caseRepo.setAssignedAgent(doneCase.id, "agent-erick");
+
+    const listUseCase = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
+
+    const byAgent = await listUseCase.execute({ userId: "agent-erick" });
+    expect(byAgent).toHaveLength(1);
+    expect(byAgent[0]!.activeCase).toBeNull();
+    expect(byAgent[0]!.lastAttendedBy).toEqual({
+      agentId: "agent-erick",
+      agentName: null,
+    });
+
+    const otherAgent = await listUseCase.execute({ userId: "agent-other" });
+    expect(otherAgent).toHaveLength(0);
+
+    const byDept = await listUseCase.execute({ departmentId: "dept-cartera" });
+    expect(byDept).toHaveLength(1);
+    expect(byDept[0]!.id).toBe(conv.id);
+  });
 });

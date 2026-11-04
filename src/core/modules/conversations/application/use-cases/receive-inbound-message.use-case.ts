@@ -133,7 +133,14 @@ export class ReceiveInboundMessageUseCase {
       }
 
       if (!isOutbound) {
-        if (conversation.status === "resolved" || conversation.status === "closed") {
+        if (conversation.status === "pending") {
+          log.info(
+            { conversationId: conversation.id },
+            "reabriendo conversacion en espera por mensaje del cliente",
+          );
+          await conversationRepo.setStatus(conversation.id, "open");
+          conversation = { ...conversation, status: "open" };
+        } else if (conversation.status === "resolved" || conversation.status === "closed") {
           if (!isPoliteClosingMessage(input.body, input.type)) {
             log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
             await conversationRepo.setStatus(conversation.id, "open");

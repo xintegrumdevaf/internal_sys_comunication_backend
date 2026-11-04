@@ -26,7 +26,10 @@ export type InsertOutboundMessageInput = {
   /** Caso activo de la conversacion al momento del reply, si existe. */
   caseId?: string | null;
   type?: string;
+  mediaId?: string | null;
+  mimeType?: string | null;
   caption?: string | null;
+  filename?: string | null;
   status?: MessageStatus;
   errorMessage?: string | null;
 };

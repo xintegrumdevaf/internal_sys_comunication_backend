@@ -122,6 +122,9 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
 - EJEMPLO DE REPORTE DE PAGO: "Pago realizado", "envío el comprobante", "aquí les dejo la constancia del banco", "ya transferí", "listo el depósito" (acompañado o no de comprobante):
   → El cliente NO reporta fallas de internet ni problemas técnicos; su único objetivo es registrar/confirmar su pago.
   → Clasifica SIEMPRE como intent="billing.record_payment".
+- COMPROBANTE SOLO EN IMAGEN, VIDEO O DOCUMENTO: Si el mensaje es únicamente un adjunto (o su descripción) de comprobante, transferencia bancaria, depósito o constancia de pago (ej: "[Adjunto imagen: comprobante de transferencia Banco Pichincha por $21.55]", "[Adjunto: foto de comprobante de pago/transferencia bancaria]") y NO hay reporte de falla de internet:
+  → Clasifica SIEMPRE como type="NEW_INTENT", intent="billing.record_payment", con confianza alta.
+  → NUNCA como UNCLEAR, saludo ni general.inquiry. Aunque el cliente no haya escrito una frase, la imagen del pago ya es el caso.
 
 ## Uso del "historial reciente" para mantener el hilo de la conversación y reformular preguntas:
 - REFORMULACIÓN CONTEXTUAL DE PREGUNTAS (CRÍTICO): Usa el historial de mensajes recientes para resolver referencias implícitas, elipsis y anáforas, generando siempre una pregunta completa, autónoma y rica en \`entities.question\`.

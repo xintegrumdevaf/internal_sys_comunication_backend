@@ -114,8 +114,12 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
     const { rows } = await this.pool.query<MessageRow>(
       `WITH ins AS (
-         INSERT INTO message (conversation_id, direction, author, external_id, body, type, caption, agent_id, case_id, status, error_message)
-         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         INSERT INTO message (
+           conversation_id, direction, author, external_id, body,
+           type, media_id, mime_type, caption, filename,
+           agent_id, case_id, status, error_message
+         )
+         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *
        )
        SELECT ins.*, a.name AS agent_name
@@ -127,7 +131,10 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.externalId ?? null,
         input.body,
         input.type ?? "text",
+        input.mediaId ?? null,
+        input.mimeType ?? null,
         input.caption ?? null,
+        input.filename ?? null,
         input.agentId ?? null,
         input.caseId ?? null,
         input.status ?? "sent",
@@ -148,8 +155,18 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (conversation_id, external_id) DO UPDATE SET
         status = EXCLUDED.status,
-        error_message = COALESCE(EXCLUDED.error_message, message.error_message)
-      WHERE EXCLUDED.status != 'sent' OR message.status = 'sent'
+        error_message = COALESCE(EXCLUDED.error_message, message.error_message),
+        type = CASE
+          WHEN message.media_id IS NULL AND EXCLUDED.media_id IS NOT NULL THEN EXCLUDED.type
+          ELSE message.type
+        END,
+        media_id = COALESCE(message.media_id, EXCLUDED.media_id),
+        mime_type = COALESCE(message.mime_type, EXCLUDED.mime_type),
+        filename = COALESCE(message.filename, EXCLUDED.filename),
+        caption = COALESCE(message.caption, EXCLUDED.caption)
+      WHERE EXCLUDED.status != 'sent'
+         OR message.status = 'sent'
+         OR (message.media_id IS NULL AND EXCLUDED.media_id IS NOT NULL)
       RETURNING *`,
       [
         input.conversationId,
