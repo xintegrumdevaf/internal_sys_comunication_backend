@@ -14,7 +14,7 @@ import type { ConversationRepositoryPort } from "../../../conversations/applicat
 import type { ConversationIdentityPort } from "../../../customers/application/ports/conversation-identity.port";
 import type { EscalationService } from "../../../escalation/application/services/escalation.service";
 import type { WorkflowStepOutcome } from "../engine/workflow-definition";
-import { WorkflowEngine } from "../engine/workflow-engine";
+import { type WorkflowEngine } from "../engine/workflow-engine";
 import { InstrumentedN8nGateway } from "../gateway/instrumented-n8n-gateway";
 import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
 import { normalizeNationalId } from "../../../customers/domain/national-id";

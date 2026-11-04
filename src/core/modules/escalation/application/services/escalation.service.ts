@@ -9,7 +9,7 @@ import type { DepartmentRepositoryPort } from "../../../departments/application/
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
 import type { Escalation } from "../../domain/escalation.entity";
 import type { EscalationRepositoryPort } from "../ports/escalation.repository.port";
-import { CaseSummaryBuilderService } from "./case-summary-builder.service";
+import { type CaseSummaryBuilderService } from "./case-summary-builder.service";
 import { businessReplyForReason } from "./business-reply-catalog";
 import type { AutoAssignAgentService } from "./auto-assign-agent.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";

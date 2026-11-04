@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-11-04
+
+- **ESLint 10 & Clean Code Governance Implementation (`eslint.config.js`, `package.json`)**:
+  - *Context*: The backend was missing automated static analysis enforcement for Clean Code practices, resulting in oversized modules, untyped `any` leaks, and dead code accumulation.
+  - *Changes*:
+    - Installed modern ESLint 10 with `@typescript-eslint` flat configuration.
+    - Aligned TypeScript dependency to stable `^5.9.3` (`^5.8.3` semver) to resolve AST parser incompatibilities with `typescript-eslint`.
+    - Added automated npm scripts: `pnpm run lint` and `pnpm run lint:fix`.
+    - Configured rules:
+      - `max-lines`: Warns on files exceeding 400 lines (ignoring comments/whitespace), establishing a target standard for ongoing modular refactoring.
+      - `@typescript-eslint/no-explicit-any`: Enforces type safety by warning on explicit `any` usage.
+      - `@typescript-eslint/consistent-type-imports`: Enforces explicit `type` imports for cleaner architecture and bundling.
+      - `no-console`, `no-debugger`, `no-duplicate-imports`: Prohibits stray debugger statements, duplicate imports, and raw console logging in favor of structured Pino logging.
+    - Fixed empty catch blocks in `meta-templates-gateway.http.ts` and `message-templates.router.ts` with explicit explanatory comments.
+    - Cleaned up duplicate and unused type imports across case and escalation use cases.
+
 ## [0.2.3] - 2026-11-04
 
 - **AI Automation Deactivation Upon Agent Assignment & Case Claim**:
@@ -57,7 +73,7 @@ All notable changes to this project will be documented in this file.
   - *Root Cause*: TransferCaseUseCase did not accept "toAgentId", lacked auto-assignment dispatch, and did not emit system messages into the message repository.
   - *Resolution*:
     - Enhanced TransferCaseUseCase to accept "toAgentId" or "toDepartmentId" with auto-assignment fallback to eligible agents.
-    - Registered visible system audit messages (uthor: "system") in the conversation history upon case transfers, manual assignments, and take-control actions for human agent visibility.
+    - Registered visible system audit messages (author: "system") in the conversation history upon case transfers, manual assignments, and take-control actions for human agent visibility.
     - Broadcasted real-time WebSocket events (MESSAGE_SENT, HUMAN_ASSIGNED, HUMAN_UNASSIGNED).
 
 - **Network Connection Testing & OLT Subnet Traversal**:

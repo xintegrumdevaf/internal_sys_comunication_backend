@@ -274,7 +274,7 @@ export class MikrotikDiagnosticAdapter implements N8nGatewayPort {
 
 export function normalizeMikrotikSector(rawSector?: unknown): string {
   if (typeof rawSector !== "string") return "";
-  let s = rawSector.trim().toLowerCase().replace(/[-_]?(mkt|mtd)$/i, "").trim();
+  const s = rawSector.trim().toLowerCase().replace(/[-_]?(mkt|mtd)$/i, "").trim();
   if (s.includes("bellavista")) return "bellavista";
   if (s.includes("pomasqui")) return "pomasqui";
   if (s.includes("sanantonio")) return "sanAntonio";

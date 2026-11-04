@@ -143,7 +143,9 @@ export function createMessageTemplatesRouter(deps: MessageTemplatesRouterDeps): 
           try {
             const updated = await deps.syncTemplateStatus.execute({ id: t.id });
             updatedList.push(updated);
-          } catch (_) {}
+          } catch (_) {
+            // Ignore single template sync failures in bulk loop
+          }
         }
         res.json({ data: updatedList, syncedCount: updatedList.length });
       }

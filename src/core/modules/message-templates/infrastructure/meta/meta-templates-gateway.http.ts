@@ -43,7 +43,9 @@ function extractMetaErrorMessage(status: number, errorText: string): Error {
     } else if (parsed?.error?.message) {
       userMsg = parsed.error.message;
     }
-  } catch (_) {}
+  } catch (_) {
+    // Non-JSON error payload, fall back to default errorText
+  }
 
   const finalMsg = userMsg ? `Meta rechazó la plantilla: ${userMsg}` : `Meta Graph API error (${status}): ${errorText}`;
   if (status === 400) {

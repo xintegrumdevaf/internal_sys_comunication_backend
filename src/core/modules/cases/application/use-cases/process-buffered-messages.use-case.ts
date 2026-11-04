@@ -14,11 +14,11 @@ import type { EscalationService } from "../../../escalation/application/services
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { InterpretationPort } from "../ports/interpretation.port";
-import { CaseArbitrationService } from "../services/case-arbitration.service";
-import { DepartmentResolverService } from "../services/department-resolver.service";
+import { type CaseArbitrationService } from "../services/case-arbitration.service";
+import { type DepartmentResolverService } from "../services/department-resolver.service";
 import { resolveReplyTemplate } from "../services/resolve-reply-template";
-import { WorkflowEngine } from "../engine/workflow-engine";
-import { AdvanceCaseUseCase } from "./advance-case.use-case";
+import { type WorkflowEngine } from "../engine/workflow-engine";
+import { type AdvanceCaseUseCase } from "./advance-case.use-case";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import { ExpirationService } from "../services/expiration.service";

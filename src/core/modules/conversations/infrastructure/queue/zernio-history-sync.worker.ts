@@ -222,7 +222,7 @@ export class ZernioHistorySyncWorker {
       }
       let body = msg.message || (firstAttachment ? `[${type}]` : "");
       let mediaId: string | null = firstAttachment?.url ?? null;
-      let mimeType: string | null = firstAttachment?.mimeType ?? null;
+      const mimeType: string | null = firstAttachment?.mimeType ?? null;
       let filename: string | null = firstAttachment?.filename ?? null;
 
       // Detección de ubicación geográfica en historial de Zernio

@@ -5,7 +5,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanReadEscalation, resolveActingAgent } from "./agent-case-auth";
-import { CaseSummaryBuilderService } from "../services/case-summary-builder.service";
+import { type CaseSummaryBuilderService } from "../services/case-summary-builder.service";
 import type { WorkflowExecutionRepositoryPort } from "../../../cases/application/ports/workflow-execution.repository.port";
 
 export class GetCaseSummaryUseCase {
