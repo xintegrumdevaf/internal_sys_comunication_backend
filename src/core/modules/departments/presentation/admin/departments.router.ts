@@ -38,6 +38,7 @@ const createBodySchema = z.object({
   slug: z.string().trim().min(2),
   description: z.string().trim().optional(),
   visibility: visibilitySchema.optional(),
+  maxConcurrentCases: z.number().int().min(1).max(50).optional(),
   cases: z.array(caseItemSchema).optional(),
 });
 
@@ -46,6 +47,7 @@ const updateBodySchema = z.object({
   slug: z.string().trim().min(2).optional(),
   description: z.string().trim().optional(),
   visibility: visibilitySchema.optional(),
+  maxConcurrentCases: z.number().int().min(1).max(50).optional(),
   active: z.boolean().optional(),
   cases: z.array(caseItemSchema).optional(),
 });

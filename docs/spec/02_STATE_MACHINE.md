@@ -215,5 +215,19 @@ stateDiagram-v2
 
 Tres entradas posibles al mismo `workflow_type` (`billing.balance`, `billing.payment_methods`, `billing.record_payment`) son válidas y están en el catálogo de intents (`06_AI_PROMPTS.md` §2) — el motor decide el estado inicial según cuál disparó el caso.
 
+## 15. Despacho Progresivo por Capacidad Concurrente (Paced FIFO Dispatch / Concurrency Cap)
+
+Cuando los casos escalan a atención humana (`status = 'ESCALATED'`) sin disponibilidad inmediata de asesores, entran en una cola FIFO estructurada. Para evitar tanto el **volcado masivo / estampida** (saturar al primer agente que inicia turno) como la **parálisis por quórum** (retrasar atención esperando múltiples agentes), el sistema implementa **despacho progresivo por capacidad**:
+
+1. **Cupo Máximo Concurrente (`department.max_concurrent_cases`, default: 6):**
+   * Configurable por departamento desde el panel de administración.
+   * `AutoAssignAgentService` excluye a cualquier asesor que ya tenga $\ge$ su límite de casos en `HUMAN_ACTIVE`.
+2. **Drenaje Reactivo (Event-Driven):**
+   * Al conectarse un asesor vía SSE o activar su disponibilidad (`PATCH /api/auth/availability`), `DrainDepartmentQueueService` calcula los slots libres del asesor (`max_concurrent_cases - activeCases`) y extrae los casos más antiguos de la cola hasta completar su capacidad.
+   * Al completarse o cancelarse un caso humano (`CompleteCaseUseCase` / `CancelCaseUseCase`), el asesor libera 1 slot y se drena de inmediato el siguiente caso en cola del departamento.
+3. **Concurrencia Segura y Tolerancia a Fallos:**
+   * La extracción de casos pendientes en PostgreSQL se ejecuta con `FOR UPDATE OF e SKIP LOCKED`, garantizando que múltiples conexiones o workers paralelos jamás asignen el mismo caso por condición de carrera.
+
+
 
 

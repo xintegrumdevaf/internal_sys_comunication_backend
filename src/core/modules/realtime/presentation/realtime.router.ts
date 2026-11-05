@@ -1,9 +1,11 @@
 import { Router, type Response } from "express";
 import { requireAuth } from "../../../../shared/http/require-auth";
 import type { RealtimeBroadcaster, RealtimeEvent } from "../application/realtime-broadcaster";
+import type { DrainDepartmentQueueService } from "../../escalation/application/services/drain-department-queue.service";
 
 export type RealtimeRouterDeps = {
   broadcaster: RealtimeBroadcaster;
+  drainQueue?: DrainDepartmentQueueService;
 };
 
 /**
@@ -44,6 +46,10 @@ export function createRealtimeRouter(deps: RealtimeRouterDeps): Router {
         role: agent.role,
         send,
       });
+
+      if (deps.drainQueue) {
+        void deps.drainQueue.drainQueueForAgent(agent.id).catch(() => {});
+      }
 
       const keepAlive = setInterval(() => {
         res.write(`: ping\n\n`);

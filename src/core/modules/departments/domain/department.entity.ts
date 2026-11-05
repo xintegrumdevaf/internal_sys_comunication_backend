@@ -12,5 +12,10 @@ export interface Department {
    */
   visibility: DepartmentVisibility;
   active: boolean;
+  /**
+   * Cupo máximo de casos concurrentes en HUMAN_ACTIVE por agente en este departamento (default: 6).
+   * Al alcanzar este límite, el agente no recibe más casos automáticos hasta que libere cupos.
+   */
+  maxConcurrentCases: number;
   createdAt: Date;
 }

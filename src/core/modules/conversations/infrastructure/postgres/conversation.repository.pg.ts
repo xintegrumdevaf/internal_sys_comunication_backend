@@ -2,8 +2,10 @@ import type { Pool } from "pg";
 import type { Conversation, ConversationStatus } from "../../domain/conversation.entity";
 import type {
   ConversationRepositoryPort,
+  ConversationSearchMatch,
   ListConversationsFilter,
 } from "../../application/ports/conversation.repository.port";
+import type { MessageAuthor } from "../../domain/message.entity";
 
 type ConversationRow = {
   id: string;
@@ -157,5 +159,60 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
       `${baseQuery} ORDER BY c.last_activity_at DESC`,
     );
     return rows.map(mapRow);
+  }
+
+  async search(query: string, options?: { limit?: number }): Promise<ConversationSearchMatch[]> {
+    const cleanQ = query.trim();
+    if (!cleanQ) return [];
+    const limit = Math.min(options?.limit ?? 25, 50);
+
+    const sql = `
+      SELECT
+        c.*,
+        cust.full_name AS customer_name,
+        m.id AS matched_message_id,
+        m.body AS matched_message_body,
+        m.author AS matched_message_author,
+        m.created_at AS matched_message_created_at
+      FROM conversation c
+      LEFT JOIN customer cust ON c.customer_id = cust.id OR (c.customer_id IS NULL AND c.wa_phone = cust.wa_phone)
+      LEFT JOIN LATERAL (
+        SELECT m1.id, m1.body, m1.author, m1.created_at
+        FROM message m1
+        WHERE m1.conversation_id = c.id
+          AND m1.body ILIKE ('%' || $1 || '%')
+        ORDER BY m1.created_at DESC
+        LIMIT 1
+      ) m ON true
+      WHERE
+        c.wa_phone ILIKE ('%' || $1 || '%')
+        OR c.wa_profile_name ILIKE ('%' || $1 || '%')
+        OR cust.full_name ILIKE ('%' || $1 || '%')
+        OR cust.national_id ILIKE ('%' || $1 || '%')
+        OR m.id IS NOT NULL
+      ORDER BY COALESCE(m.created_at, c.last_activity_at) DESC
+      LIMIT $2
+    `;
+
+    const { rows } = await this.pool.query<
+      ConversationRow & {
+        matched_message_id?: string | null;
+        matched_message_body?: string | null;
+        matched_message_author?: MessageAuthor | null;
+        matched_message_created_at?: Date | null;
+      }
+    >(sql, [cleanQ, limit]);
+
+    return rows.map((row) => ({
+      conversation: mapRow(row),
+      matchedMessage: row.matched_message_id
+        ? {
+            id: row.matched_message_id,
+            body: row.matched_message_body ?? "",
+            author: row.matched_message_author ?? "customer",
+            createdAt: row.matched_message_created_at ?? row.created_at,
+          }
+        : null,
+    }));
   }
 }

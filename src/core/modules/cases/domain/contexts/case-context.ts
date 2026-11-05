@@ -18,6 +18,10 @@ export type CaseSchedulingMetadata = {
 
 type ContextCommon = {
   closeReason?: CaseCloseReason;
+  closedByAgentId?: string;
+  closedByAgentName?: string;
+  closedAt?: string;
+  resolutionNote?: string | null;
   schedulingMetadata?: CaseSchedulingMetadata;
   _engine?: CaseEngineMeta;
 };

@@ -336,6 +336,13 @@ class ConversationRepositoryFake implements ConversationRepositoryPort {
     const conv = await this.findById(id);
     if (conv) conv.status = status;
   }
+  async search(query: string, options?: { limit?: number }) {
+    const q = query.toLowerCase();
+    return this.conversations
+      .filter((c) => c.waPhone.includes(q) || (c.customerName ?? "").toLowerCase().includes(q))
+      .slice(0, options?.limit ?? 25)
+      .map((c) => ({ conversation: c, matchedMessage: null }));
+  }
 }
 
 describe("Módulo de Contactos / Clientes (Customers & Contacts)", () => {

@@ -1,14 +1,16 @@
 import type { Agent } from "../../../departments/domain/agent.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
+import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 export type AutoAssignAgentDeps = {
   agentRepo: AgentRepositoryPort;
   caseRepo: CaseRepositoryPort;
+  departmentRepo?: Pick<DepartmentRepositoryPort, "findById">;
   broadcaster?: Pick<RealtimeBroadcaster, "isUserConnected">;
   /**
-   * Umbral opcional de referencia o telemetría.
+   * Umbral opcional de referencia o fallback por defecto (default: 6).
    */
   maxActiveCasesPerAgent?: number;
 };
@@ -19,6 +21,10 @@ export type AutoAssignOptions = {
    * activos del departamento (evitando que el caso quede desatendido si hay personal operativo).
    */
   fallbackToAnyActive?: boolean;
+  /**
+   * Si es true, ignora el tope de casos concurrentes (para transferencias forzadas o casos críticos).
+   */
+  ignoreCapacityLimit?: boolean;
 };
 
 /**
@@ -93,17 +99,26 @@ export class AutoAssignAgentService {
 
     const loads = await this.deps.caseRepo.countActiveCasesByAgent(eligible.map((a) => a.id));
 
+    // Despacho por capacidad concurrente (Concurrency Cap):
+    // Si no se indica ignoreCapacityLimit, filtramos asesores que ya alcanzaron su cupo máximo.
+    let candidates = eligible;
+    if (!options?.ignoreCapacityLimit) {
+      const dept = await this.deps.departmentRepo?.findById(departmentId);
+      const maxConcurrency = dept?.maxConcurrentCases ?? this.deps.maxActiveCasesPerAgent ?? 6;
+      candidates = eligible.filter((a) => (loads[a.id] ?? 0) < maxConcurrency);
+      if (candidates.length === 0) {
+        return null; // Todos los asesores en turno están copados a su capacidad máxima
+      }
+    }
+
     // Balanceo Equitativo Garantizado (Least-Connections):
     // Siempre se elige al agente con menor carga activa en ese instante.
-    // Si todos los agentes están por encima de un umbral orientativo, el sistema
-    // NO bloquea la atención ni deja al cliente huérfano: continúa repartiendo
-    // de forma simétrica y justa entre los agentes en turno.
-    eligible.sort((a, b) => {
+    candidates.sort((a, b) => {
       const diff = (loads[a.id] ?? 0) - (loads[b.id] ?? 0);
       if (diff !== 0) return diff;
       return a.name.localeCompare(b.name, "es");
     });
 
-    return eligible[0]!;
+    return candidates[0]!;
   }
 }

@@ -2,7 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.6] - 2026-11-04
+## [0.2.8] - 2026-11-05
+
+- **Deep Historical Message Search via PostgreSQL Trigram GIN (`search-conversations.use-case.ts`, `conversation.repository.pg.ts`, `0046_message_search_index.sql`)**:
+  - *Context*: Support and billing agents required the ability to search not only customer names, surnames, and phones, but also historical messages across past conversations (e.g. searching "quemó la fuente", "corte de fibra", or payment details from previous weeks), similar to WhatsApp Web.
+  - *Architectural Design & Performance*:
+    1. Created migration `0046_message_search_index.sql` enabling the PostgreSQL `pg_trgm` extension and adding `CREATE INDEX idx_message_body_trgm ON message USING gin (body gin_trgm_ops)`. This enables arbitrary substring search (`ILIKE %q%`) with sub-millisecond execution times over large message volumes without sequential table scans.
+    2. Implemented `search(query, options)` in `ConversationRepositoryPg` using an optimized `LEFT JOIN LATERAL` against `message` matching `m.body ILIKE ('%' || $1 || '%') ORDER BY m.created_at DESC LIMIT 1`. This isolates the single most recent matching message per conversation, avoiding expensive `GROUP BY` operations.
+    3. Created `SearchConversationsUseCase` and wired endpoint `GET /api/conversations/search?q=...&departmentId=...&limit=...`, returning unified conversation DTOs enriched with `matchedMessage` (message ID, snippet body, author, and timestamp).
+    4. Added automated unit tests in `test/conversations/search-conversations.use-case.test.ts`.
+
+## [0.2.7] - 2026-11-05
+
+- **Visual Traceability for Case Closures (`complete-case.use-case.ts`, `list-conversations.use-case.ts`)**:
+  - *Problem*: Previously, closing a case only updated internal database states and audit events, leaving no visual system message in the chat timeline. Team members opening past or resolved conversations could not see who resolved the case, when, or with what reason.
+  - *Resolution*:
+    1. `CompleteCaseUseCase` now persists closing metadata (`closedByAgentId`, `closedByAgentName`, `closedAt`, `closeReason`, `resolutionNote`) directly into `case.context`.
+    2. Inserts an in-chat system message (`author: "system"`, `🔒 Caso completado por {actorName} • Motivo: {reasonLabel}{note}`) and broadcasts `MESSAGE_SENT` over SSE.
+    3. `ListConversationsUseCase` resolves `lastAttendedBy` taking into account `closedByAgentId`/`closedByAgentName` so that resolved conversations correctly attribute the closing advisor.
+
+- **Paced FIFO Dispatch with Concurrency Cap per Department (`drain-department-queue.service.ts`, `auto-assign-agent.service.ts`, `0045_department_max_concurrent_cases.sql`)**:
+  - *Problem & Operational Risk*:
+    - When escalated customer cases queued during off-hours or agent absence, no automated mechanism drained them when staff became available without requiring manual dispatch by a supervisor.
+    - Conversely, a naive "all-at-once" dump upon agent connection would cause catastrophic agent overload (e.g., 20 simultaneous chats assigned to the first agent starting a shift), while waiting for quorum would create artificial customer starvation and SLA breaches.
+  - *Architectural Decision & Solution*:
+    - Implemented **Paced FIFO Dispatch with Concurrency Cap**:
+      1. Added `max_concurrent_cases INTEGER NOT NULL DEFAULT 6` to the `department` table (migration `0045_department_max_concurrent_cases.sql`), configurable per department from the management panel.
+      2. Enhanced `AutoAssignAgentService`: strictly excludes any agent whose active workload in `HUMAN_ACTIVE` meets or exceeds the department's concurrency cap.
+      3. Created `DrainDepartmentQueueService`: an event-driven dispatcher that atomically locks and drains the oldest pending escalations using PostgreSQL `FOR UPDATE OF e SKIP LOCKED`, guaranteeing zero race conditions across concurrent processes.
+      4. Wired reactive triggers:
+         - **On Case Completion / Cancellation**: when an agent completes or cancels a case (`CompleteCaseUseCase`), a slot frees up and the next pending department case is drained immediately.
+         - **On Agent Availability Toggle**: when an agent turns on `autoAssignEnabled` (`UpdateAgentAvailabilityUseCase`), pending cases drain up to their free capacity.
+         - **On Realtime SSE Connection**: when an agent connects in the morning (`RealtimeRouter`), their available slots drain automatically without overwhelming them.
+    - Added unit test suite in `test/escalation/services/drain-department-queue.service.test.ts` (100% passing).
+
 
 - **Mitigation of False Payment Confirmations & Elimination of Rigid Canned Responses (`process-buffered-messages.use-case.ts`, `resolve-reply-template.ts`, `billing-balance.workflow.ts`, `interpret-message.prompt.ts`)**:
   - *Context & Damage*:

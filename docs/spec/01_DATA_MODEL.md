@@ -39,6 +39,7 @@ CREATE TABLE department (
   -- 'restricted': solo agentes con membership en este departamento pueden verlo (ej. datos sensibles).
   visibility    TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('shared','restricted')),
   active        BOOLEAN NOT NULL DEFAULT true,
+  max_concurrent_cases INTEGER NOT NULL DEFAULT 6, -- Cupo máximo de casos HUMAN_ACTIVE concurrentes por agente (migración 0045)
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -155,6 +156,7 @@ CREATE TABLE message (
 CREATE INDEX idx_message_conversation ON message(conversation_id, created_at);
 CREATE INDEX idx_message_agent ON message(agent_id) WHERE agent_id IS NOT NULL;
 CREATE INDEX idx_message_edited ON message(conversation_id, edited_at) WHERE edited_at IS NOT NULL;
+CREATE INDEX idx_message_body_trgm ON message USING gin (body gin_trgm_ops); -- Búsqueda profunda en historial con pg_trgm (migración 0046)
 
 CREATE TABLE case (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

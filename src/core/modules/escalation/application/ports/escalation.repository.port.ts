@@ -34,4 +34,5 @@ export interface EscalationRepositoryPort {
       departmentId?: string | null;
     },
   ): Promise<Escalation>;
+  findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]>;
 }

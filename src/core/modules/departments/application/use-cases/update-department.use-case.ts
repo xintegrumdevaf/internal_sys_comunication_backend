@@ -25,6 +25,7 @@ export type UpdateDepartmentInput = {
     slug?: string;
     description?: string | null;
     visibility?: DepartmentVisibility;
+    maxConcurrentCases?: number;
     active?: boolean;
     cases?: UpdateDepartmentCaseItem[];
   };
@@ -59,6 +60,7 @@ export class UpdateDepartmentUseCase {
       slug: input.patch.slug,
       description: input.patch.description,
       visibility: input.patch.visibility,
+      maxConcurrentCases: input.patch.maxConcurrentCases,
       active: input.patch.active,
     });
 

@@ -19,6 +19,7 @@ type DepartmentRow = {
   description: string | null;
   visibility: DepartmentVisibility;
   active: boolean;
+  max_concurrent_cases: number;
   created_at: Date;
 };
 
@@ -43,6 +44,9 @@ function mapRow(row: DepartmentRow): Department {
     description: row.description ?? null,
     visibility: row.visibility,
     active: row.active,
+    maxConcurrentCases: row.max_concurrent_cases !== undefined && row.max_concurrent_cases !== null
+      ? Number(row.max_concurrent_cases)
+      : 6,
     createdAt: row.created_at,
   };
 }
@@ -90,10 +94,16 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
 
   async create(input: CreateDepartmentInput): Promise<Department> {
     const { rows } = await this.pool.query<DepartmentRow>(
-      `INSERT INTO department (slug, name, description, visibility) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description
+      `INSERT INTO department (slug, name, description, visibility, max_concurrent_cases) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, max_concurrent_cases = EXCLUDED.max_concurrent_cases
        RETURNING *`,
-      [input.slug, input.name, input.description ?? null, input.visibility ?? "shared"],
+      [
+        input.slug,
+        input.name,
+        input.description ?? null,
+        input.visibility ?? "shared",
+        input.maxConcurrentCases ?? 6,
+      ],
     );
     return mapRow(rows[0]!);
   }
@@ -118,6 +128,10 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
     if (input.visibility !== undefined) {
       values.push(input.visibility);
       fields.push(`visibility = $${values.length}`);
+    }
+    if (input.maxConcurrentCases !== undefined) {
+      values.push(input.maxConcurrentCases);
+      fields.push(`max_concurrent_cases = $${values.length}`);
     }
     if (input.active !== undefined) {
       values.push(input.active);

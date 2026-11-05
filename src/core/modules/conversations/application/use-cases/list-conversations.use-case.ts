@@ -113,12 +113,17 @@ export class ListConversationsUseCase {
 
       if (recordCase) {
         let agentName: string | null = null;
-        if (recordCase.assignedAgentId && this.agentRepo) {
-          const ag = await this.agentRepo.findById(recordCase.assignedAgentId);
+        const caseCtx = recordCase.context as Record<string, unknown> | undefined;
+        const effectiveAgentId = (caseCtx?.closedByAgentId as string | undefined) || recordCase.assignedAgentId;
+        if (effectiveAgentId && this.agentRepo) {
+          const ag = await this.agentRepo.findById(effectiveAgentId);
           if (ag) agentName = ag.name;
         }
+        if (!agentName && caseCtx?.closedByAgentName) {
+          agentName = String(caseCtx.closedByAgentName);
+        }
         lastAttendedBy = {
-          agentId: recordCase.assignedAgentId,
+          agentId: effectiveAgentId,
           agentName,
         };
       }

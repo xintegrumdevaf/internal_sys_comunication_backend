@@ -21,6 +21,7 @@ export type CreateDepartmentInput = {
   slug: string;
   description?: string | null;
   visibility?: DepartmentVisibility;
+  maxConcurrentCases?: number;
   actorId: string;
   cases?: CreateDepartmentCaseItem[];
 };
@@ -57,6 +58,7 @@ export class CreateDepartmentUseCase {
       slug,
       description: input.description?.trim() || null,
       visibility: input.visibility ?? "shared",
+      maxConcurrentCases: input.maxConcurrentCases ?? 6,
     });
 
     const createdCases: DepartmentCaseRouting[] = [];

@@ -6,6 +6,7 @@ import { notFound, validationError, businessError } from "../../../../shared/err
 import { requireAuth } from "../../../../shared/http/require-auth";
 import { emptyContextFor } from "../../cases/domain/contexts/case-context";
 import type { ListConversationsUseCase } from "../application/use-cases/list-conversations.use-case";
+import type { SearchConversationsUseCase } from "../application/use-cases/search-conversations.use-case";
 import type { ListMessagesUseCase } from "../application/use-cases/list-messages.use-case";
 import type {
   ReplyAsHumanMediaInput,
@@ -30,6 +31,7 @@ import {
 
 export type ConversationsRouterDeps = {
   listConversations: ListConversationsUseCase;
+  searchConversations?: SearchConversationsUseCase;
   listMessages: ListMessagesUseCase;
   replyAsHuman: ReplyAsHumanUseCase;
   takeControl: TakeControlUseCase;
@@ -288,6 +290,28 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
       const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
       const conversations = await listConversations.execute({ status, departmentId, userId });
       res.json({ data: conversations });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/api/conversations/search", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+      if (!q || q.length < 2) {
+        res.json({ data: [] });
+        return;
+      }
+      const limit = Math.min(Number(req.query.limit) || 25, 50);
+      const departmentId =
+        typeof req.query.departmentId === "string" ? req.query.departmentId : undefined;
+      const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+
+      const results = deps.searchConversations
+        ? await deps.searchConversations.execute({ query: q, limit, departmentId, userId })
+        : [];
+      res.json({ data: results });
     } catch (error) {
       next(error);
     }

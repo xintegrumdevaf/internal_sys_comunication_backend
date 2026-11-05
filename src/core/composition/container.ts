@@ -72,6 +72,7 @@ import type { WhatsAppSenderPort } from "../modules/conversations/application/po
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
 import { ReceiveInboundEditUseCase } from "../modules/conversations/application/use-cases/receive-inbound-edit.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
+import { SearchConversationsUseCase } from "../modules/conversations/application/use-cases/search-conversations.use-case";
 import { ListMessagesUseCase } from "../modules/conversations/application/use-cases/list-messages.use-case";
 import { MarkConversationAsReadUseCase } from "../modules/conversations/application/use-cases/mark-conversation-as-read.use-case";
 import { ReplyAsHumanUseCase } from "../modules/conversations/application/use-cases/reply-as-human.use-case";
@@ -180,6 +181,7 @@ import { EscalationRepositoryPg } from "../modules/escalation/infrastructure/pos
 import { CaseSummaryBuilderService } from "../modules/escalation/application/services/case-summary-builder.service";
 import { EscalationService } from "../modules/escalation/application/services/escalation.service";
 import { AutoAssignAgentService } from "../modules/escalation/application/services/auto-assign-agent.service";
+import { DrainDepartmentQueueService } from "../modules/escalation/application/services/drain-department-queue.service";
 import { ClaimCaseUseCase } from "../modules/escalation/application/use-cases/claim-case.use-case";
 import { AssignCaseUseCase } from "../modules/escalation/application/use-cases/assign-case.use-case";
 import {
@@ -571,8 +573,20 @@ export function createContainer(): Container {
   const autoAssignAgent = new AutoAssignAgentService({
     agentRepo,
     caseRepo,
+    departmentRepo,
     broadcaster,
     maxActiveCasesPerAgent: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
+  const drainDepartmentQueue = new DrainDepartmentQueueService({
+    agentRepo,
+    departmentRepo,
+    caseRepo,
+    escalationRepo,
+    conversationRepo,
+    auditRepo,
+    broadcaster,
+    logger: escalationLogger,
+    defaultMaxConcurrentCases: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT ?? 6,
   });
   const escalationService = new EscalationService({
     caseRepo,
@@ -675,11 +689,13 @@ export function createContainer(): Container {
   const completeCase = new CompleteCaseUseCase({
     caseRepo,
     conversationRepo,
+    messageRepo,
     auditRepo,
     logger: casesLogger,
     agentRepo,
     departmentRepo,
     enqueueQualityReview,
+    drainQueue: drainDepartmentQueue,
   });
   const scheduleCase = new ScheduleCaseUseCase({
     caseRepo,
@@ -804,6 +820,13 @@ export function createContainer(): Container {
     agentRepo,
     departmentRepo,
   );
+  const searchConversations = new SearchConversationsUseCase(
+    conversationRepo,
+    messageRepo,
+    caseRepo,
+    agentRepo,
+    departmentRepo,
+  );
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
   const markAsRead = new MarkConversationAsReadUseCase(conversationRepo);
   const replyAsHuman = new ReplyAsHumanUseCase({
@@ -868,7 +891,12 @@ export function createContainer(): Container {
   });
   const logout = new LogoutUseCase(sessionStore);
   const changePassword = new ChangePasswordUseCase({ agentRepo, logger });
-  const updateAvailability = new UpdateAgentAvailabilityUseCase({ agentRepo, auditRepo, logger });
+  const updateAvailability = new UpdateAgentAvailabilityUseCase({
+    agentRepo,
+    auditRepo,
+    drainQueue: drainDepartmentQueue,
+    logger,
+  });
 
   const listN8nWorkflows = new ListN8nWorkflowsUseCase(n8nWorkflowRegistryRepo);
   const upsertN8nWorkflow = new UpsertN8nWorkflowUseCase({
@@ -1003,6 +1031,7 @@ export function createContainer(): Container {
   app.use(
     createConversationsRouter({
       listConversations,
+      searchConversations,
       listMessages,
       markAsRead,
       replyAsHuman,
@@ -1085,7 +1114,7 @@ export function createContainer(): Container {
     }),
   );
   app.use(createEscalationsRouter({ listEscalations }));
-  app.use(createRealtimeRouter({ broadcaster }));
+  app.use(createRealtimeRouter({ broadcaster, drainQueue: drainDepartmentQueue }));
   app.use(
     createQualityRouter({
       listReviews: listQualityReviews,

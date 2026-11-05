@@ -5,12 +5,13 @@ import { ScheduledReminderNotifierService } from "../../../src/core/modules/case
 import { RealtimeBroadcaster } from "../../../src/core/modules/realtime/application/realtime-broadcaster";
 import { CaseRepositoryFake } from "../fakes";
 import { AgentRepositoryFake, AuditRepositoryFake } from "../../support/agent-audit.fakes";
-import { ConversationRepositoryFake, DepartmentRepositoryFake } from "../../support/fakes";
+import { ConversationRepositoryFake, DepartmentRepositoryFake, MessageRepositoryFake } from "../../support/fakes";
 import { silentLogger } from "../../support/silent-logger";
 
 function buildSetup() {
   const caseRepo = new CaseRepositoryFake();
   const conversationRepo = new ConversationRepositoryFake();
+  const messageRepo = new MessageRepositoryFake();
   const auditRepo = new AuditRepositoryFake();
   const agentRepo = new AgentRepositoryFake();
   const departmentRepo = new DepartmentRepositoryFake();
@@ -19,6 +20,7 @@ function buildSetup() {
   const completeCase = new CompleteCaseUseCase({
     caseRepo,
     conversationRepo,
+    messageRepo,
     auditRepo,
     logger: silentLogger,
     agentRepo,
@@ -39,7 +41,7 @@ function buildSetup() {
     logger: silentLogger,
   });
 
-  return { caseRepo, conversationRepo, auditRepo, agentRepo, departmentRepo, broadcaster, completeCase, scheduleCase, notifierService };
+  return { caseRepo, conversationRepo, messageRepo, auditRepo, agentRepo, departmentRepo, broadcaster, completeCase, scheduleCase, notifierService };
 }
 
 describe("Cierre manual y agendamiento de casos", () => {
@@ -87,7 +89,7 @@ describe("Cierre manual y agendamiento de casos", () => {
   });
 
   it("completa un caso con motivo RESOLVED (cierre normal por defecto)", async () => {
-    const { caseRepo, agentRepo, departmentRepo, completeCase } = buildSetup();
+    const { caseRepo, agentRepo, departmentRepo, messageRepo, completeCase } = buildSetup();
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
     const agent = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent", primaryDepartmentId: support.id });
 
@@ -117,6 +119,13 @@ describe("Cierre manual y agendamiento de casos", () => {
 
     expect(result.status).toBe("COMPLETED");
     expect(result.context.closeReason).toBe("RESOLVED");
+    expect(result.context.closedByAgentName).toBe("Ana");
+    expect(result.context.closedByAgentId).toBe(agent.id);
+
+    const messages = await messageRepo.listByConversation("conv-2");
+    const sysMsg = messages.find((m) => m.author === "system");
+    expect(sysMsg).toBeDefined();
+    expect(sysMsg?.body).toContain("Caso completado por Ana • Motivo: Resuelto");
   });
 
   it("agenda un caso a la sección En Espera y emite alerta interna SSE al cumplirse la hora", async () => {

@@ -144,7 +144,12 @@ Pregunta pendiente: {{pendingQuestion}}',
   now(),
   now()
 FROM ai_prompt_templates t
-WHERE t.slug = 'interpret_message';
+WHERE t.slug = 'interpret_message'
+ON CONFLICT (template_id, version_number) DO UPDATE
+SET system_prompt = EXCLUDED.system_prompt,
+    user_template = EXCLUDED.user_template,
+    model_config = EXCLUDED.model_config,
+    status = EXCLUDED.status;
 
 -- 4. Asignar la Versión 5 como la versión activa de la plantilla
 UPDATE ai_prompt_templates t

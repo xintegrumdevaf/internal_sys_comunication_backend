@@ -1,4 +1,4 @@
-﻿# 03_API_CONTRACT.md (v3 — interpretación movida a código, catálogo de acciones en DB)
+# 03_API_CONTRACT.md (v3 — interpretación movida a código, catálogo de acciones en DB)
 
 > Cambios acumulados: (v2) todos los workflows de n8n responden síncronamente. (v3) la interpretación de lenguaje y la composición de respuesta al cliente **ya no pasan por n8n** — viven en la API como un `AIProviderPort` (interfaz en código, adapters intercambiables: Ollama por defecto, extensible a OpenAI/OpenRouter/Claude). n8n queda dedicado exclusivamente a integraciones con sistemas externos reales (contrato, saldo, diagnóstico, pagos). El registro de acción→URL de n8n pasa de variables de entorno a una tabla (`n8n_workflow_registry`, `01_DATA_MODEL.md` §2).
 
@@ -156,6 +156,7 @@ o en error:
 | `POST /api/auth/logout` | Revoca la sesión actual → `204` |
 | `GET /api/auth/me` | Agente de la sesión actual → `{ data: AgentDto }` \| `403` sin sesión |
 | `GET /api/conversations?departmentId=&userId=&status=` | Bandeja de conversaciones — cada item incluye `lastMessagePreview` (ver `ConversationDto` en §C.4) y `activeCase`. Los filtros `departmentId` y `userId` aplican estrictamente sobre el caso activo actual (§G v9), para evitar contaminación por casos históricos previos |
+| `GET /api/conversations/search?q=&limit=&departmentId=&userId=` | Búsqueda unificada y profunda: busca por teléfono, perfil de WhatsApp, nombres y apellidos del cliente o contenido histórico de mensajes mediante índice trigram GIN `pg_trgm`. Retorna `ConversationSearchResultDto` con `matchedMessage` si coincidió por mensaje |
 | `GET /api/conversations/:id/messages?limit=&cursor=` | Mensajes de la conversación, orden cronológico, paginado |
 | `GET /api/conversations/:id/cases` | Casos (histórico) de la conversación |
 | `GET /api/conversations/:id/automation` | Estado de automatización del caso activo |

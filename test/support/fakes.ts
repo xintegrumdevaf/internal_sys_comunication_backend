@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Conversation, ConversationStatus } from "../../src/core/modules/conversations/domain/conversation.entity";
 import type {
   ConversationRepositoryPort,
+  ConversationSearchMatch,
   ListConversationsFilter,
 } from "../../src/core/modules/conversations/application/ports/conversation.repository.port";
 import type { Message, MessageStatus } from "../../src/core/modules/conversations/domain/message.entity";
@@ -124,6 +125,21 @@ export class ConversationRepositoryFake implements ConversationRepositoryPort {
     if (conversation) {
       this.conversations.set(id, { ...conversation, status });
     }
+  }
+
+  async search(query: string, options?: { limit?: number }): Promise<ConversationSearchMatch[]> {
+    const q = query.toLowerCase();
+    const matches: ConversationSearchMatch[] = [];
+    for (const c of this.conversations.values()) {
+      if (
+        c.waPhone.toLowerCase().includes(q) ||
+        (c.waProfileName ?? "").toLowerCase().includes(q) ||
+        (c.customerName ?? "").toLowerCase().includes(q)
+      ) {
+        matches.push({ conversation: c, matchedMessage: null });
+      }
+    }
+    return matches.slice(0, options?.limit ?? 25);
   }
 }
 
@@ -428,6 +444,7 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
       name: department.name,
       description: department.description ?? null,
       visibility: department.visibility ?? "shared",
+      maxConcurrentCases: department.maxConcurrentCases ?? 6,
       active: department.active ?? true,
       createdAt: department.createdAt ?? now,
     };

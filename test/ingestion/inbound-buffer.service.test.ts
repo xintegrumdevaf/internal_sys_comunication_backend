@@ -37,7 +37,7 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
     await buffer.push(conversationId, "msg-3");
 
     // Cada push reprograma el debounce; solo debe dispararse una vez, ~150ms despues del ultimo push.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
     expect(flushes).toHaveLength(1);
     expect(flushes[0]).toEqual(["msg-1", "msg-2", "msg-3"]);

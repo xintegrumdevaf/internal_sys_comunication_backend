@@ -57,6 +57,11 @@ export class CaseSummaryBuilderService {
           results.technical = diag.technical;
         }
       }
+      if (ctx.closedByAgentName) results.closedByAgentName = ctx.closedByAgentName;
+      if (ctx.closedByAgentId) results.closedByAgentId = ctx.closedByAgentId;
+      if (ctx.closeReason) results.closeReason = ctx.closeReason;
+      if (ctx.closedAt) results.closedAt = ctx.closedAt;
+      if (ctx.resolutionNote) results.resolutionNote = ctx.resolutionNote;
     }
 
     if ("technical" in results && results.technical) {

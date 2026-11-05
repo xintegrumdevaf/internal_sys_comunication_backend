@@ -99,6 +99,28 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
     return rows.map(mapRow);
   }
 
+  async findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]> {
+    const { rows } = await this.pool.query<EscalationRow>(
+      `SELECT e.* FROM escalation e
+       JOIN cases c ON c.id = e.case_id
+       WHERE e.status = 'PENDING'
+         AND e.department_id = $1
+         AND c.status = 'ESCALATED'
+       ORDER BY
+         CASE e.priority
+           WHEN 'urgent' THEN 1
+           WHEN 'high' THEN 2
+           WHEN 'normal' THEN 3
+           ELSE 4
+         END,
+         e.created_at ASC
+       LIMIT $2
+       FOR UPDATE OF e SKIP LOCKED`,
+      [departmentId, limit],
+    );
+    return rows.map(mapRow);
+  }
+
   async updateAssignment(
     id: string,
     input: {
@@ -178,5 +200,22 @@ export class EscalationRepositoryFake implements EscalationRepositoryPort {
     };
     this.items.set(id, updated);
     return updated;
+  }
+
+  async findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]> {
+    const priorityWeight: Record<EscalationPriority, number> = {
+      urgent: 1,
+      high: 2,
+      normal: 3,
+      low: 4,
+    };
+    return [...this.items.values()]
+      .filter((e) => e.status === "PENDING" && e.departmentId === departmentId)
+      .sort((a, b) => {
+        const pDiff = (priorityWeight[a.priority] ?? 3) - (priorityWeight[b.priority] ?? 3);
+        if (pDiff !== 0) return pDiff;
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      })
+      .slice(0, limit);
   }
 }
