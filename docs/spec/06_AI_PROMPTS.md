@@ -29,6 +29,7 @@ export const INTENT_CATALOG = [
   { intent: "support.internet",      workflowType: "SUPPORT_INTERNET", description: "no tiene servicio de internet / está caído" },
   { intent: "support.slow_internet", workflowType: "SUPPORT_INTERNET", description: "internet lento (a futuro, workflow propio)" },
   { intent: "billing.balance",       workflowType: "BILLING_BALANCE",  description: "quiere saber cuánto debe / su saldo" },
+  { intent: "billing.payment_methods",workflowType: "BILLING_BALANCE", description: "consulta sobre números de cuenta, formas de pago o dónde/cómo pagar o transferir" },
   { intent: "billing.record_payment",workflowType: "BILLING_BALANCE",  description: "envía o menciona un comprobante de pago" },
   { intent: "sales.packages",        workflowType: "SALES_PACKAGES",   description: "pregunta por planes/paquetes/precios/velocidades" },
   { intent: "sales.upgrade",         workflowType: "SALES_PACKAGES",   description: "quiere cambiar/mejorar su plan actual" },

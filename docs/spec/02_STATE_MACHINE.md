@@ -200,16 +200,20 @@ stateDiagram-v2
     CHECK_BALANCE --> RESPOND_DEBT_WITH_OPTIONS: hasDebt=true
     RESPOND_DEBT_WITH_OPTIONS --> [*]: COMPLETED
 
-    [*] --> RECORD_PAYMENT: entrada directa por intent=billing.record_payment (cliente ya mandó comprobante sin que se le pidiera)
+    [*] --> RESPOND_PAYMENT_METHODS: entrada por intent=billing.payment_methods (pide cuentas para depositar/transferir)
+    RESPOND_PAYMENT_METHODS --> WAITING_USER_RECEIPT: entrega cuentas autorizadas sin exigir cédula
+
+    [*] --> RECORD_PAYMENT: entrada directa por intent=billing.record_payment con comprobante visual
     RECORD_PAYMENT --> [*]: COMPLETED (pago registrado) / ESCALATE (datos del comprobante incompletos, §13)
 ```
 
-**Regla dura de plantillas** (elimina el bug del "pide comprobante con saldo $0"):
+**Reglas duras de plantillas y veracidad de negocio:**
 - `RESPOND_NO_DEBT` (hasDebt=false): confirma que no hay saldo pendiente. **Nunca** menciona comprobantes, pagos, ni invita a enviar nada — no hay nada que conciliar.
 - `RESPOND_DEBT_WITH_OPTIONS` (hasDebt=true): muestra el monto exacto (obligatorio, `06_AI_PROMPTS.md` §4) y **solo ahí** tiene sentido invitar a enviar el comprobante si ya pagó, o explicar formas de pago si no.
-- Estas son dos `templateHint` distintos, nunca el mismo texto condicionado a medias — la ramificación (`hasDebt` true/false) ocurre en el motor de workflow antes de llamar a `composeReply`, no dentro del prompt.
+- `RESPOND_PAYMENT_METHODS`: entrega de forma directa y clara las cuentas bancarias corrientes autorizadas (Banco Pichincha, Banco Guayaquil, Produbanco) para realizar el depósito o transferencia, sin forzar al cliente a ingresar su cédula, y dejándolo en espera del comprobante.
+- **Prohibición estricta de falsa confirmación de pago**: Si el cliente reporta haber pagado pero no envía imagen o documento de comprobante (`visualReceipt === false`), el sistema **nunca** afirma que el pago ha sido recibido ni que se está verificando. En su lugar, solicita amablemente la foto o comprobante para poder registrarlo.
 
-Dos entradas posibles al mismo `workflow_type` (`billing.balance` vs `billing.record_payment`) son válidas y ya están en el catálogo de intents (`06_AI_PROMPTS.md` §2) — el motor decide el estado inicial según cuál disparó el caso, no siempre arranca en `VALIDATE_CLIENT`.
+Tres entradas posibles al mismo `workflow_type` (`billing.balance`, `billing.payment_methods`, `billing.record_payment`) son válidas y están en el catálogo de intents (`06_AI_PROMPTS.md` §2) — el motor decide el estado inicial según cuál disparó el caso.
 
 
 

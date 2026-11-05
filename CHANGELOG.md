@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-11-04
+
+- **Mitigation of False Payment Confirmations & Elimination of Rigid Canned Responses (`process-buffered-messages.use-case.ts`, `resolve-reply-template.ts`, `billing-balance.workflow.ts`, `interpret-message.prompt.ts`)**:
+  - *Context & Damage*:
+    1. *False Payment Confirmations*: When a client sent text stating their intent to pay (e.g. "quiero pagar", "para pagar", "ya pagué") without attaching any image or voucher, the assistant falsely responded: `¡Recibido, gracias! 🙌 Estamos verificando tu pago de $X y te confirmamos por aquí mismo en cuanto quede listo...` and escalated to Cartera as if a receipt had been delivered. This falsely led customers to believe their payment was verified and processed when no transaction details or proof existed.
+    2. *Inappropriate Canned Greetings on Explicit Payment Requests*: When a client asked for payment accounts or deposit details (e.g. "Me podría mandar el número para de positarle gracias"), the system miscategorized the query as `general.inquiry` or fell back to `CLARIFY_TEMPLATE`, returning a canned first-contact greeting: `¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un especialista?`. This ignored the customer's actual question and repeated an opening greeting mid-conversation.
+  - *Root Cause*:
+    1. In `process-buffered-messages.use-case.ts`, `interpretation.intent === "billing.record_payment"` unconditionally fired the receipt confirmation message and escalated to Cartera regardless of whether `visualReceipt` was `true` or `false`.
+    2. Bank account numbers and payment deposit instructions were miscategorized under `general.inquiry` (General department) instead of Facturación (`billing`), and `CLARIFY_TEMPLATE` was a rigid canned opening greeting. Furthermore, `composeReply` never received the client's inbound text (`customerText`).
+  - *Resolution*:
+    1. Guarded receipt confirmation strictly behind `visualReceipt === true`. When a customer writes about paying without an image or receipt attached (`visualReceipt === false`), the assistant now asks specifically: *"Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario."*, keeping automation active.
+    2. Introduced canonical intent `billing.payment_methods` mapped to the Billing department (`BILLING_BALANCE`). When triggered, `billing-balance.workflow.ts` delivers authorized bank accounts (Banco Pichincha, Banco Guayaquil, Produbanco) directly without requiring cédula validation, setting state to wait for the receipt.
+    3. Added `customerText` to `ComposeReplyInput` and passed it from `ProcessBufferedMessagesUseCase` so `composeReply` generates context-aware, coherent responses tailored to the customer's specific query.
+    4. Replaced generic opening canned greetings in `resolve-reply-template.ts` with contextual clarifying phrasing: *"No logré comprender del todo tu solicitud. ¿Podrías indicarme si necesitas ayuda con soporte técnico de internet, pagos y facturación, o prefieres comunicarte con un asesor?"*.
+    5. Added migration `0044_prompt_interpret_payment_methods.sql` adding `billing.payment_methods` to `department_case_routing` and publishing Version 5 of `interpret_message`.
+- **Multi-Contract Discovery Context Retention (`support-internet.workflow.ts`, `support-internet.context.ts`)**:
+  - *Context*: During contract disambiguation, when a customer selected option 1 or clarified *"No es el 2"*, the advisor's panel lost visibility of the alternative contracts because `pendingContracts` was wiped from the case context.
+  - *Resolution*: Added `availableContracts` to `SupportInternetContext` and retained all discovered customer contracts throughout the lifecycle of the case, allowing human advisors to switch between contracts in the panel.
+
 ## [0.2.5] - 2026-11-04
 
 - **Quality Supervision Refinement: Burst Utterances, SLA Latency vs Politeness & Proactive Follow-ups (`analyze-agent-conversation.prompt.ts`)**:

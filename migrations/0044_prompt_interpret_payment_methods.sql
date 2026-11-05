@@ -154,3 +154,4 @@ FROM ai_prompt_versions v
 WHERE t.slug = 'interpret_message'
   AND v.template_id = t.id
   AND v.version_number = 5;
+
