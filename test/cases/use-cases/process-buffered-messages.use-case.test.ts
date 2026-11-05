@@ -427,7 +427,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
     expect(whatsappSender.sent).toHaveLength(1);
     expect(whatsappSender.sent[0]!.body).toBe(
-      "¡Recibido, gracias! 🙌 Estamos verificando tu pago de $20,53 y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!"
+      "¡Recibido, gracias! 🙌 Estamos verificando tu comprobante de pago de $20,53 y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!"
     );
   });
 
@@ -782,7 +782,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
     // 1. Debe haber enviado el mensaje fijo de confirmación de pago recibido
     const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
-    expect(lastSent?.body).toContain("¡Recibido, gracias! 🙌 Estamos verificando tu pago");
+    expect(lastSent?.body).toContain("¡Recibido, gracias! 🙌 Estamos verificando tu comprobante de pago");
 
     // 2. Debe haber creado el caso en BILLING_BALANCE
     const cases = await caseRepo.listByConversation(conversation.id);
@@ -858,7 +858,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     });
 
     const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
-    expect(lastSent?.body).toContain("Estamos verificando tu pago");
+    expect(lastSent?.body).toContain("Estamos verificando tu comprobante de pago");
     expect(lastSent?.body).not.toContain("¿En qué te puedo ayudar");
 
     const cases = await caseRepo.listByConversation(conversation.id);
@@ -1151,5 +1151,57 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
     // Al estar resuelto el caso anterior, el bot SÍ puede atender la nueva consulta
     expect(whatsappSender.sent.length).toBeGreaterThan(0);
+  });
+
+  it("si el cliente menciona pago pero no adjunta comprobante visual, no acusa recibo falso y solicita la foto o comprobante", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "NEW_INTENT", intent: "billing.record_payment", entities: {}, confidence: 0.95 },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const textOnlyMsg = messageRepo.seedText(conversation.id, "ya pagué el servicio");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-no-receipt-text",
+      messages: [textOnlyMsg],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toBe(
+      "Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario."
+    );
+    expect(whatsappSender.sent[0]!.body).not.toContain("¡Recibido, gracias!");
   });
 });

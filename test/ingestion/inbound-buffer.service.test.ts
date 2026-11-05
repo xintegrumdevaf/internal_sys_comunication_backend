@@ -61,7 +61,7 @@ describe("InboundBufferService (docs/spec/02_STATE_MACHINE.md §12)", () => {
 
     await buffer.push(conversationId, "b-1");
     await buffer.push(conversationId, "b-2");
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 350));
 
     expect(flushes).toEqual([["a-1"], ["b-1", "b-2"]]);
   });

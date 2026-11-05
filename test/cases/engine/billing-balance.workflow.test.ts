@@ -180,4 +180,25 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
     expect(outcome).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT" });
     expect(gateway.actionsCalledFor("RECORD_PAYMENT")).toBe(0);
   });
+
+  it("payment_methods: VALIDATE_CLIENT → RESPOND_PAYMENT_METHODS → WAITING_USER_RECEIPT sin requerir cédula", async () => {
+    const engine = new WorkflowEngine([billingBalanceWorkflow]);
+    const gateway = new N8nGatewayFake({});
+
+    const ctx: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: { purpose: "payment_methods" },
+    };
+
+    const step1 = await engine.step("BILLING_BALANCE", baseInput("VALIDATE_CLIENT", ctx, gateway));
+    expect(step1).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_PAYMENT_METHODS" });
+    if (step1.type !== "CONTINUE") throw new Error("unreachable");
+
+    const step2 = await engine.step(
+      "BILLING_BALANCE",
+      baseInput("RESPOND_PAYMENT_METHODS", step1.context, gateway),
+    );
+    expect(step2).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT" });
+    expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
+  });
 });

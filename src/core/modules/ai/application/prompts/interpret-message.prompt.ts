@@ -31,11 +31,12 @@ export function buildInterpretMessagePrompt(
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
 - support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio o sigue sin internet a pesar de haber pagado, prima soporte técnico).
 - billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
+- billing.payment_methods: consulta sobre números de cuenta, cuentas bancarias para depósito o transferencia, formas de pago autorizadas o a dónde/cómo pagar (ej: "número para depositar", "el número para de positarle", "a qué cuenta deposito", "dónde pago", "cuentas para transferir").
 - billing.record_payment: envío o reporte de comprobante, constancia, depósito o transferencia de pago YA realizado (en cualquier expresión del lenguaje natural: cuando el objetivo del cliente es registrar, reportar o confirmar su pago sin reportar fallas técnicas activas).`;
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
     ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
-    : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, cuentas bancarias para depósito/transferencia, formas de pago disponibles, RUC, cobertura por ciudades/sectores, información institucional) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida.
+    : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, RUC, cobertura por ciudades/sectores, información institucional) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida.
 - sales.new_contract: el cliente manifiesta intención explícita de contratar, adquirir, solicitar instalación o dar de alta el servicio nuevo de internet (ej: "Hola, me gustaría contratar el servicio", "quiero contratar", "deseo adquirir internet").
 - sales.plans: consulta sobre planes, paquetes, precios, tarifas, promociones o velocidades de internet (ej: "¿Qué planes tienen?", "¿Cuánto cuesta el de 500 megas?", "precios de planes").
 - sales.upgrade: el cliente YA cuenta con el servicio o ya recibió información previa y solicita mejorar, aumentar velocidad o cambiar a un plan superior.
@@ -170,8 +171,8 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 8. Mensaje: "Vivo en Yanuncay" (después de hablar de cobertura/planes)
    → {"type":"CONTINUE","intent":"general.inquiry","entities":{"location":"Yanuncay","question":"Cobertura en Yanuncay"},"confidence":0.90}
 
-9. Mensaje: "Ayudame con las cuentas para poder realizar el pago" (o "¿Cuáles son las cuentas bancarias para pagar?")
-   → {"type":"NEW_INTENT","intent":"general.inquiry","entities":{"question":"Cuentas bancarias para depósito o transferencia"},"confidence":0.95}
+9. Mensaje: "Me podría mandar el número para de positarle gracias" (o "¿Cuáles son las cuentas bancarias para pagar?", "a qué cuenta deposito", "pásame el número de cuenta", "número para depositar")
+   → {"type":"NEW_INTENT","intent":"billing.payment_methods","entities":{"question":"Cuentas bancarias autorizadas para depósito o transferencia","paymentRequest":true},"confidence":0.95}
 
 10. Mensaje: "Ya no tengo deuda pendiente, valida mi problema de internet."
    → {"type":"NEW_INTENT","intent":"support.internet","entities":{},"confidence":0.85}

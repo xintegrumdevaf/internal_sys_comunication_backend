@@ -46,6 +46,7 @@ export type ComposeReplyInput = {
   };
   templateHint?: string;
   missingFields?: string[];
+  customerText?: string;
 };
 
 export type ReceiptData = {

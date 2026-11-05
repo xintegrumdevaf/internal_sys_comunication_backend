@@ -24,6 +24,11 @@ export const INTENT_CATALOG = [
     description: "quiere saber cuánto debe / su saldo",
   },
   {
+    intent: "billing.payment_methods",
+    workflowType: "BILLING_BALANCE",
+    description: "consulta sobre números de cuenta, formas de pago o dónde/cómo pagar o transferir",
+  },
+  {
     intent: "billing.record_payment",
     workflowType: "BILLING_BALANCE",
     description: "envía o menciona un comprobante de pago",
@@ -71,7 +76,7 @@ export const INTENT_CATALOG = [
   {
     intent: "general.inquiry",
     workflowType: "GENERAL_INQUIRY",
-    description: "pregunta general de la empresa (oficinas, horarios, cuentas, cobertura, sectores)",
+    description: "pregunta general de la empresa (oficinas, horarios, cobertura, sectores)",
   },
   {
     intent: "unknown",

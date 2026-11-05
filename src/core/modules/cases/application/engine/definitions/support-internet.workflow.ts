@@ -272,6 +272,7 @@ const validateClient: WorkflowStateHandler = async ({
     const nextData: SupportInternetContext = {
       ...data,
       pendingContracts,
+      availableContracts: pendingContracts,
       client: {
         nationalId: client.nationalId,
         fullName: clientFullName,
@@ -410,6 +411,7 @@ const disambiguateContract: WorkflowStateHandler = async ({
   const nextData: SupportInternetContext = {
     ...data,
     pendingContracts: undefined,
+    availableContracts: data.availableContracts ?? pending,
     client: {
       nationalId,
       fullName: matched.name,

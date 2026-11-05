@@ -116,3 +116,4 @@ FROM ai_prompt_versions v
 WHERE t.slug = 'analyze_agent_conversation'
   AND v.template_id = t.id
   AND v.version_number = 1;
+

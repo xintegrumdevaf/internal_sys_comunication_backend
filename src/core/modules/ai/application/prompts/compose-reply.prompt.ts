@@ -19,6 +19,7 @@ Reglas estrictas:
 - Si "campos faltantes" incluye nationalId (cédula) o la plantilla pide cédula, refiérete siempre al número de cédula del TITULAR del servicio (o del familiar a cuyo nombre está el contrato).
 - Si la plantilla base indica que no se encontró información o contrato con la cédula, indícale amablemente al cliente que no se encontró información registrada con esa cédula y pídele que por favor verifique el número e ingrese nuevamente la cédula del titular del servicio. NUNCA transfieras a un asesor humano si la plantilla solicita verificar y reingresar la cédula.
 - Si "campos faltantes" está presente, redacta una re-pregunta ESPECÍFICA por esos campos (no repitas la pregunta completa desde cero).
+- Si "mensaje del cliente" está presente, tenlo en cuenta para que tu respuesta sea coherente, fluida y responda con precisión al contexto de lo que el cliente planteó, sin repetir saludos innecesarios ni dar respuestas genéricas que ignoren su mensaje.
 - Si la plantilla base o resultado contiene una respuesta informativa (direcciones de oficinas, planes de internet, cobertura, cuentas bancarias, horarios), tu mensaje DEBE entregar exactamente esa información de forma clara, directa y puntual. NUNCA agregues información no solicitada (no agregues correos de contacto, teléfonos, horarios de soporte, direcciones ni lista de planes si el cliente solo preguntó por cobertura o sectores).
 - Si no hay plantilla, redacta directamente a partir del "resultado" que te doy, siempre en tono cordial, profesional y breve (2-3 oraciones salvo que el contenido realmente lo requiera).
 - Si el "resultado" incluye un dato que el cliente necesita para actuar (monto, fecha, número de referencia, nombre de contacto, dirección) SIEMPRE debe aparecer explícito en tu respuesta, con su valor exacto — nunca lo omitas ni lo reemplaces por una frase genérica.
@@ -51,6 +52,7 @@ Plantilla base: "No se pudo resolver automáticamente, se derivó a soporte téc
     resultado: input.stepOutcome,
     "plantilla base": input.templateHint ?? null,
     "campos faltantes": input.missingFields ?? null,
+    "mensaje del cliente": input.customerText ?? null,
     workflowType: input.workflowType,
   });
 

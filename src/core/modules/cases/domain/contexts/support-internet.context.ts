@@ -46,7 +46,7 @@ export type SupportInternetDiagnosticTechnical = {
   phaseState?: string;
   onuNumber?: string;
 };
-// ... (rest of file)
+
 export type SupportInternetContext = {
   client?: { nationalId: string; fullName: string };
   lastSearchedNationalId?: string;
@@ -74,6 +74,8 @@ export type SupportInternetContext = {
   };
   /** Contratos candidatos cuando VALIDATE_CLIENT devuelve mas de uno (§13 desambiguar). */
   pendingContracts?: SupportInternetPendingContract[];
+  /** Todos los contratos descubiertos para el cliente (preservados tras desambiguar para el panel del agente). */
+  availableContracts?: SupportInternetPendingContract[];
   balance?: { hasDebt: boolean; amount?: number };
   diagnostic?: {
     status: string;

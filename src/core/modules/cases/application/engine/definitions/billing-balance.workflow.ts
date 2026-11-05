@@ -89,8 +89,9 @@ function hasCompletePayment(data: BillingBalanceContext): boolean {
 function resolvePurpose(
   data: BillingBalanceContext,
   entities?: Record<string, unknown>,
-): "balance" | "record_payment" {
-  if (data.purpose === "record_payment" || data.purpose === "balance") return data.purpose;
+): "balance" | "record_payment" | "payment_methods" {
+  if (data.purpose === "record_payment" || data.purpose === "balance" || data.purpose === "payment_methods") return data.purpose;
+  if (entities?.billingPurpose === "payment_methods") return "payment_methods";
   if (entities?.billingPurpose === "record_payment") return "record_payment";
   if (hasCompletePayment(mergePaymentFromEntities(data, entities))) return "record_payment";
   return "balance";
@@ -111,6 +112,10 @@ const validateClient: WorkflowStateHandler = async ({
     purpose: resolvePurpose(data, entities),
   };
   data = mergePaymentFromEntities(data, entities);
+
+  if (data.purpose === "payment_methods") {
+    return { type: "CONTINUE", nextState: "RESPOND_PAYMENT_METHODS", context: withContext(data, context) };
+  }
 
   // §14: identidad ya validada en esta conversación → saltar cédula y n8n.
   if (identity) {
@@ -344,6 +349,10 @@ const recordPayment: WorkflowStateHandler = async ({
   return { type: "COMPLETED", context: withContext(nextData, context) };
 };
 
+const respondPaymentMethods: WorkflowStateHandler = async ({ context }) => {
+  return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context };
+};
+
 export const billingBalanceWorkflow: WorkflowDefinition = {
   workflowType: "BILLING_BALANCE",
   initialState: "VALIDATE_CLIENT",
@@ -371,8 +380,10 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
       "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
     COMPLETED:
       "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
+    RESPOND_PAYMENT_METHODS:
+      "Puedes realizar tu pago mediante depósito o transferencia en nuestras cuentas corrientes autorizadas:\n\n🏦 Banco Pichincha: Cta. Cte. 2200998877\n🏦 Banco Guayaquil: Cta. Cte. 004455667788\n🏦 Produbanco: Cta. Cte. 1234567890\nTitular: XGO Telecomunicaciones S.A. (RUC 1799999999001)\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.",
     ESCALATED:
-      "¡Recibido, gracias! 🙌 Estamos verificando tu pago y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!",
+      "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para ayudarte con tu solicitud.",
     ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
   },
   states: {
@@ -381,6 +392,7 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
     CHECK_BALANCE: checkBalance,
     RESPOND_NO_DEBT: respondNoDebt,
     RESPOND_DEBT_WITH_OPTIONS: respondDebtWithOptions,
+    RESPOND_PAYMENT_METHODS: respondPaymentMethods,
     WAITING_USER_RECEIPT: waitingReceipt,
     RECORD_PAYMENT: recordPayment,
   },

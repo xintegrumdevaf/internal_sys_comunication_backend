@@ -398,6 +398,7 @@ export class ProcessBufferedMessagesUseCase {
           caseId: activeAggregate?.case.id ?? "none",
           workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
           decision: "CLARIFY",
+          customerText: text,
           log,
         });
         return;
@@ -442,6 +443,7 @@ export class ProcessBufferedMessagesUseCase {
           caseId: decision.caseId ?? "none",
           workflowType: activeAggregate?.case.workflowType ?? "UNCLASSIFIED",
           decision: "REQUEST_HUMAN",
+          customerText: text,
           log,
         });
         return;
@@ -461,6 +463,7 @@ export class ProcessBufferedMessagesUseCase {
           workflowType: advanced.case.workflowType,
           outcome: advanced.outcome,
           context: advanced.case.context,
+          customerText: text,
           log,
         });
         return;
@@ -585,40 +588,53 @@ export class ProcessBufferedMessagesUseCase {
           });
         }
 
-        if (this.deps.escalationService) {
-          await this.deps.escalationService.escalateExistingCase({
-            caseId: targetCaseId,
-            reason: "Comprobante de pago adjunto (documento/imagen)",
-            correlationId,
+        if (visualReceipt) {
+          if (this.deps.escalationService) {
+            await this.deps.escalationService.escalateExistingCase({
+              caseId: targetCaseId,
+              reason: "Comprobante de pago adjunto (documento/imagen)",
+              correlationId,
+            });
+          }
+
+          await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
+            reason: "PAYMENT_RECEIPT_ESCALATED",
           });
+          await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
+
+          const amountFromEntities = typeof interpretation.entities?.amount === "number" ? interpretation.entities.amount : undefined;
+          const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
+          const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
+          const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
+          const rawAmount = amountFromEntities ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount;
+          const amountFormatted =
+            typeof rawAmount === "number" && Number.isFinite(rawAmount)
+              ? '$' + rawAmount.toFixed(2).replace('.', ',')
+              : null;
+
+          const amountStr = amountFormatted ? 'de ' + amountFormatted + ' ' : '';
+          const replyMessage =
+            ('¡Recibido, gracias! 🙌 Estamos verificando tu comprobante de pago ' + amountStr + 'y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!').replace("  ", " ");
+
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: replyMessage,
+            log,
+          });
+          return;
+        } else {
+          // NO hay comprobante visual adjunto: no mentir diciendo que se recibió el comprobante
+          const replyMessage =
+            "Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario.";
+          await this.deliverFixedReply({
+            conversationId,
+            correlationId,
+            body: replyMessage,
+            log,
+          });
+          return;
         }
-
-        await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
-          reason: "PAYMENT_RECEIPT_ESCALATED",
-        });
-        await this.deps.conversationRepo.setActiveCaseId(conversationId, targetCaseId);
-
-        const amountFromEntities = typeof interpretation.entities?.amount === "number" ? interpretation.entities.amount : undefined;
-        const amountFromTextMatch = text.match(/\$\s*(\d+[\.,]\d{2})|\b(\d+[\.,]\d{2})\b/);
-        const textAmountRaw = amountFromTextMatch ? (amountFromTextMatch[1] ?? amountFromTextMatch[2])?.replace(',', '.') : undefined;
-        const textAmount = textAmountRaw && Number.isFinite(Number(textAmountRaw)) ? Number(textAmountRaw) : undefined;
-        const rawAmount = amountFromEntities ?? textAmount ?? (inheritedContext.balance as { amount?: number; debt?: number } | undefined)?.amount;
-        const amountFormatted =
-          typeof rawAmount === "number" && Number.isFinite(rawAmount)
-            ? `$${rawAmount.toFixed(2).replace('.', ',')}`
-            : null;
-
-        const amountStr = amountFormatted ? `de ${amountFormatted} ` : "";
-        const replyMessage =
-          `¡Recibido, gracias! 🙌 Estamos verificando tu pago ${amountStr}y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!`.replace("  ", " ");
-
-        await this.deliverFixedReply({
-          conversationId,
-          correlationId,
-          body: replyMessage,
-          log,
-        });
-        return;
         }
       }
 
@@ -659,6 +675,7 @@ export class ProcessBufferedMessagesUseCase {
         workflowType: advanced.case.workflowType,
         outcome: advanced.outcome,
         context: advanced.case.context,
+        customerText: text,
         log,
       });
     } catch (error) {
@@ -920,6 +937,7 @@ export class ProcessBufferedMessagesUseCase {
     outcome?: Parameters<typeof resolveReplyTemplate>[0]["outcome"];
     context?: CaseContext;
     decision?: "CLARIFY" | "REQUEST_HUMAN";
+    customerText?: string;
     log: Logger;
   }): Promise<void> {
     const definition = this.deps.engine.getDefinition(input.workflowType);
@@ -940,6 +958,7 @@ export class ProcessBufferedMessagesUseCase {
       },
       templateHint: resolved.templateHint,
       missingFields: resolved.missingFields,
+      customerText: input.customerText,
     });
 
     const conversation = await this.deps.conversationRepo.findById(input.conversationId);
@@ -1180,6 +1199,9 @@ function seedPurposeEntities(
   }
   if (intent === "billing.balance") {
     return { ...entities, billingPurpose: "balance" };
+  }
+  if (intent === "billing.payment_methods") {
+    return { ...entities, billingPurpose: "payment_methods" };
   }
   if (intent === "sales.new_contract") {
     return { ...entities, salesPurpose: "sales" };

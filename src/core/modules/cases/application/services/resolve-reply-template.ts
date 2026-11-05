@@ -2,10 +2,10 @@ import type { CaseContext } from "../../domain/contexts/case-context";
 import type { WorkflowDefinition, WorkflowStepOutcome } from "../engine/workflow-definition";
 
 const CLARIFY_TEMPLATE =
-  "¡Hola! 👋 ¿En qué te puedo ayudar hoy? ¿Tienes algún inconveniente con tu internet, pagos, o prefieres hablar con un especialista?";
+  "No logré comprender del todo tu solicitud. ¿Podrías indicarme si necesitas ayuda con soporte técnico de internet, pagos y facturación, o prefieres comunicarte con un asesor?";
 
 const REQUEST_HUMAN_TEMPLATE =
-  "¡Recibido, gracias! 🙌 Estamos revisando tu solicitud y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!";
+  "¡Recibido! Con mucho gusto, ya te comunico con un asesor de nuestro equipo para ayudarte directamente.";
 
 /**
  * Formatea montos para plantillas/compose (ej. 45.5 → "45.50").
