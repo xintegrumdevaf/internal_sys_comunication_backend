@@ -91,6 +91,14 @@ export type DashboardMetricsInput = {
   primaryDepartmentId: string | null;
 };
 
+export type DepartmentBreakdownMetric = {
+  departmentId: string | null;
+  departmentName: string;
+  activeCases: number;
+  queueCases?: number;
+  handledCases?: number;
+};
+
 export type DashboardMetricsResult = {
   openConversations: number;
   myAssignedCases: number;
@@ -100,5 +108,5 @@ export type DashboardMetricsResult = {
   departmentCases?: number;
   unassignedQueue?: number;
   teamLoad?: Array<{ agentId: string; agentName: string; activeCases: number }>;
-  departmentBreakdown?: Array<{ departmentId: string | null; departmentName: string; activeCases: number }>;
+  departmentBreakdown?: DepartmentBreakdownMetric[];
 };

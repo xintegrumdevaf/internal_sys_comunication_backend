@@ -13,7 +13,13 @@ export type DashboardDto = {
   departmentCases?: number;
   unassignedQueue?: number;
   teamLoad?: Array<{ agentId: string; agentName: string; activeCases: number }>;
-  departmentBreakdown?: Array<{ departmentId: string | null; departmentName: string; activeCases: number }>;
+  departmentBreakdown?: Array<{
+    departmentId: string | null;
+    departmentName: string;
+    activeCases: number;
+    queueCases?: number;
+    handledCases?: number;
+  }>;
 };
 
 export type GetDashboardInput =

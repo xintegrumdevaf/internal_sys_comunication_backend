@@ -41,14 +41,20 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
                  COALESCE(
                    (SELECT MIN(we.occurred_at) FROM workflow_event we
                     WHERE we.case_id = e.case_id AND we.type IN ('CASE_CLAIMED', 'CASE_ASSIGNED', 'HUMAN_ACTIVE')),
-                   e.resolved_at,
-                   now()
+                   e.resolved_at
                  ) - e.created_at
                )) AS wait_sec
         FROM escalation e
         JOIN "case" c ON c.id = e.case_id
         WHERE e.created_at >= $1 AND e.created_at <= $2
           AND ($3::uuid[] IS NULL OR COALESCE(e.department_id, c.department_id) = ANY($3::uuid[]))
+          AND (
+            e.resolved_at IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM workflow_event we
+              WHERE we.case_id = e.case_id AND we.type IN ('CASE_CLAIMED', 'CASE_ASSIGNED', 'HUMAN_ACTIVE')
+            )
+          )
       )
       SELECT
         COUNT(*)::int AS total_cases,
@@ -141,14 +147,14 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
 
     // 3. Top Escalation Reasons
     const reasonsQuery = `
-      SELECT e.reason, COUNT(*)::int AS count
+      SELECT e.reason, c.workflow_type, COUNT(*)::int AS count
       FROM escalation e
       JOIN "case" c ON c.id = e.case_id
       WHERE e.created_at >= $1 AND e.created_at <= $2
         AND ($3::uuid[] IS NULL OR COALESCE(e.department_id, c.department_id) = ANY($3::uuid[]))
-      GROUP BY e.reason
+      GROUP BY e.reason, c.workflow_type
       ORDER BY count DESC
-      LIMIT 5;
+      LIMIT 15;
     `;
     const reasonsResult = await this.pool.query(reasonsQuery, [filter.from, filter.to, scopedDept]);
 
@@ -165,6 +171,50 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       ORDER BY count DESC;
     `;
     const departmentResult = await this.pool.query(departmentQuery, [filter.from, filter.to, scopedDept]);
+
+    // 5. Hourly Demand (0..23)
+    const hourlyQuery = `
+      SELECT EXTRACT(HOUR FROM c.created_at)::int AS hour, COUNT(*)::int AS count
+      FROM "case" c
+      WHERE c.created_at >= $1 AND c.created_at <= $2
+        AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+      GROUP BY 1
+      ORDER BY 1 ASC;
+    `;
+    const hourlyResult = await this.pool.query(hourlyQuery, [filter.from, filter.to, scopedDept]);
+    const hourlyMap = new Map<number, number>();
+    for (const row of hourlyResult.rows) {
+      hourlyMap.set(Number(row.hour), Number(row.count));
+    }
+    const hourlyDemand = Array.from({ length: 24 }).map((_, h) => ({
+      hour: h,
+      label: `${String(h).padStart(2, "0")}:00`,
+      count: hourlyMap.get(h) ?? 0,
+    }));
+
+    // 6. Daily Trend (Incoming vs Completed)
+    const dailyTrendQuery = `
+      SELECT
+        to_char(d.day, 'YYYY-MM-DD') AS date,
+        COUNT(c_in.id)::int AS incoming,
+        COUNT(c_out.id)::int AS resolved
+      FROM generate_series(date_trunc('day', $1::timestamptz), date_trunc('day', $2::timestamptz), '1 day'::interval) d(day)
+      LEFT JOIN "case" c_in
+        ON date_trunc('day', c_in.created_at) = d.day
+        AND ($3::uuid[] IS NULL OR COALESCE(c_in.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_in.id LIMIT 1)) = ANY($3::uuid[]))
+      LEFT JOIN "case" c_out
+        ON date_trunc('day', c_out.updated_at) = d.day
+        AND c_out.status = 'COMPLETED'
+        AND ($3::uuid[] IS NULL OR COALESCE(c_out.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_out.id LIMIT 1)) = ANY($3::uuid[]))
+      GROUP BY d.day
+      ORDER BY d.day ASC;
+    `;
+    const dailyTrendResult = await this.pool.query(dailyTrendQuery, [filter.from, filter.to, scopedDept]);
+    const dailyTrend = dailyTrendResult.rows.map((row) => ({
+      date: String(row.date),
+      incoming: Number(row.incoming ?? 0),
+      resolved: Number(row.resolved ?? 0),
+    }));
 
     const totalCases = statusResult.rows.reduce((acc, row) => acc + Number(row.count), 0);
     const totalEscalations = reasonsResult.rows.reduce((acc, row) => acc + Number(row.count), 0);
@@ -183,6 +233,7 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       })),
       topEscalationReasons: reasonsResult.rows.map((row) => ({
         reason: row.reason,
+        workflowType: row.workflow_type || undefined,
         count: Number(row.count),
         percentage: totalEscalations > 0 ? Math.round((Number(row.count) / totalEscalations) * 1000) / 10 : 0,
       })),
@@ -192,6 +243,8 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         count: Number(row.count),
         percentage: totalCases > 0 ? Math.round((Number(row.count) / totalCases) * 1000) / 10 : 0,
       })),
+      hourlyDemand,
+      dailyTrend,
     };
   }
 

@@ -23,6 +23,9 @@ type EscalationRow = {
   assigned_agent_id: string | null;
   created_at: Date;
   resolved_at: Date | null;
+  conversation_id?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
 };
 
 function mapRow(row: EscalationRow): Escalation {
@@ -37,6 +40,9 @@ function mapRow(row: EscalationRow): Escalation {
     assignedAgentId: row.assigned_agent_id,
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
+    conversationId: row.conversation_id ?? undefined,
+    customerName: row.customer_name ?? undefined,
+    customerPhone: row.customer_phone ?? undefined,
   };
 }
 
@@ -61,15 +67,36 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
   }
 
   async findById(id: string): Promise<Escalation | null> {
-    const { rows } = await this.pool.query<EscalationRow>(`SELECT * FROM escalation WHERE id = $1`, [
-      id,
-    ]);
+    const { rows } = await this.pool.query<EscalationRow>(
+      `SELECT
+         e.*,
+         c.conversation_id,
+         COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
+         conv.wa_phone AS customer_phone
+       FROM escalation e
+       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN conversation conv ON conv.id = c.conversation_id
+       LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
+       WHERE e.id = $1`,
+      [id],
+    );
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
   async findByCaseId(caseId: string): Promise<Escalation | null> {
     const { rows } = await this.pool.query<EscalationRow>(
-      `SELECT * FROM escalation WHERE case_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      `SELECT
+         e.*,
+         c.conversation_id,
+         COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
+         conv.wa_phone AS customer_phone
+       FROM escalation e
+       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN conversation conv ON conv.id = c.conversation_id
+       LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
+       WHERE e.case_id = $1
+       ORDER BY e.created_at DESC
+       LIMIT 1`,
       [caseId],
     );
     return rows[0] ? mapRow(rows[0]) : null;
@@ -80,20 +107,30 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
     const params: unknown[] = [];
 
     if (filter.triage) {
-      clauses.push(`department_id IS NULL`);
+      clauses.push(`e.department_id IS NULL`);
     } else if (filter.departmentId !== undefined) {
       params.push(filter.departmentId);
-      clauses.push(`department_id = $${params.length}`);
+      clauses.push(`e.department_id = $${params.length}`);
     }
 
     if (filter.status) {
       params.push(filter.status);
-      clauses.push(`status = $${params.length}`);
+      clauses.push(`e.status = $${params.length}`);
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const { rows } = await this.pool.query<EscalationRow>(
-      `SELECT * FROM escalation ${where} ORDER BY created_at DESC`,
+      `SELECT
+         e.*,
+         c.conversation_id,
+         COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
+         conv.wa_phone AS customer_phone
+       FROM escalation e
+       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN conversation conv ON conv.id = c.conversation_id
+       LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
+       ${where}
+       ORDER BY e.created_at DESC`,
       params,
     );
     return rows.map(mapRow);

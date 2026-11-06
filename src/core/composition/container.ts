@@ -1113,7 +1113,13 @@ export function createContainer(): Container {
       broadcaster,
     }),
   );
-  app.use(createEscalationsRouter({ listEscalations }));
+  app.use(
+    createEscalationsRouter({
+      listEscalations,
+      drainQueue: drainDepartmentQueue,
+      departmentRepo,
+    }),
+  );
   app.use(createRealtimeRouter({ broadcaster, drainQueue: drainDepartmentQueue }));
   app.use(
     createQualityRouter({

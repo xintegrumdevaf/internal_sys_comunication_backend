@@ -29,4 +29,7 @@ export interface Escalation {
   assignedAgentId: string | null;
   createdAt: Date;
   resolvedAt: Date | null;
+  conversationId?: string;
+  customerName?: string;
+  customerPhone?: string;
 }

@@ -456,15 +456,43 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
           GROUP BY a.id, a.name
           ORDER BY active_cases DESC, a.name ASC
         )
+        dept_breakdown AS (
+          SELECT d.id AS department_id, d.name AS department_name,
+                 COUNT(c.id)::int AS active_cases,
+                 COUNT(c.id) FILTER (WHERE c.assigned_agent_id IS NULL)::int AS queue_cases,
+                 COUNT(c.id) FILTER (WHERE c.assigned_agent_id IS NOT NULL)::int AS handled_cases
+          FROM department d
+          LEFT JOIN "case" c ON c.department_id = d.id AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE', 'WAITING_USER')
+          WHERE d.active = true
+            AND ($2::uuid[] IS NULL OR d.id IN (SELECT dept_id FROM dept_scope))
+          GROUP BY d.id, d.name
+          ORDER BY active_cases DESC, d.name ASC
+        )
         SELECT
           COALESCE((SELECT count FROM dept_open_convs), 0)::int AS open_conversations,
           COALESCE((SELECT COUNT(*)::int FROM dept_cases WHERE assigned_agent_id = $1::uuid AND status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
           COALESCE((SELECT count FROM dept_escalations), 0)::int AS escalated_pending,
-          COALESCE((SELECT count FROM dept_escalations), 0)::int AS unassigned_queue,
+          COALESCE((SELECT COUNT(conv.id)::int FROM conversation conv JOIN "case" c ON c.id = conv.active_case_id WHERE conv.status = 'open' AND c.assigned_agent_id IS NULL AND ($2::uuid[] IS NULL OR c.department_id IN (SELECT dept_id FROM dept_scope))), (SELECT count FROM dept_escalations), 0)::int AS unassigned_queue,
           COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
           COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE')), 0)::int AS department_cases,
           COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
-          COALESCE((SELECT json_agg(json_build_object('agentId', agent_id, 'agentName', agent_name, 'activeCases', active_cases)) FROM agent_loads), '[]'::json) AS team_load
+          COALESCE((SELECT json_agg(json_build_object('agentId', agent_id, 'agentName', agent_name, 'activeCases', active_cases)) FROM agent_loads), '[]'::json) AS team_load,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', department_id,
+            'departmentId', department_id,
+            'department_id', department_id,
+            'name', department_name,
+            'departmentName', department_name,
+            'department_name', department_name,
+            'activeCases', active_cases,
+            'active_cases', active_cases,
+            'queueCases', queue_cases,
+            'queue_cases', queue_cases,
+            'handledCases', handled_cases,
+            'handled_cases', handled_cases,
+            'count', active_cases,
+            'casesCount', active_cases
+          )) FROM dept_breakdown), '[]'::json) AS department_breakdown
         FROM dept_cases;
       `;
       const { rows } = await this.pool.query(query, [input.targetUserId, deptIds]);
@@ -478,6 +506,7 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
         departmentCases: Number(r.department_cases ?? 0),
         unattendedCases: Number(r.unattended_cases ?? 0),
         teamLoad: (r.team_load as Array<{ agentId: string; agentName: string; activeCases: number }>) ?? [],
+        departmentBreakdown: (r.department_breakdown as Array<{ departmentId: string | null; departmentName: string; activeCases: number; queueCases?: number; handledCases?: number }>) ?? [],
       };
     }
 
@@ -500,9 +529,17 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
         FROM escalation e
         WHERE e.status = 'PENDING'
       ),
+      all_unassigned_convs AS (
+        SELECT COUNT(conv.id)::int AS count
+        FROM conversation conv
+        JOIN "case" c ON c.id = conv.active_case_id
+        WHERE conv.status = 'open' AND c.assigned_agent_id IS NULL
+      ),
       dept_breakdown AS (
         SELECT d.id AS department_id, d.name AS department_name,
-               COUNT(c.id)::int AS active_cases
+               COUNT(c.id)::int AS active_cases,
+               COUNT(c.id) FILTER (WHERE c.assigned_agent_id IS NULL)::int AS queue_cases,
+               COUNT(c.id) FILTER (WHERE c.assigned_agent_id IS NOT NULL)::int AS handled_cases
         FROM department d
         LEFT JOIN "case" c ON c.department_id = d.id AND c.status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE', 'WAITING_USER')
         WHERE d.active = true
@@ -513,7 +550,7 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
         COALESCE((SELECT count FROM all_open_convs), 0)::int AS open_conversations,
         COALESCE((SELECT COUNT(*)::int FROM all_active_cases WHERE assigned_agent_id = $1::uuid AND status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
         COALESCE((SELECT count FROM all_escalations), 0)::int AS escalated_pending,
-        COALESCE((SELECT count FROM all_escalations), 0)::int AS unassigned_queue,
+        COALESCE((SELECT count FROM all_unassigned_convs), (SELECT count FROM all_escalations), 0)::int AS unassigned_queue,
         COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
         COALESCE(COUNT(*), 0)::int AS department_cases,
         COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
@@ -526,6 +563,10 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
           'department_name', department_name,
           'activeCases', active_cases,
           'active_cases', active_cases,
+          'queueCases', queue_cases,
+          'queue_cases', queue_cases,
+          'handledCases', handled_cases,
+          'handled_cases', handled_cases,
           'count', active_cases,
           'casesCount', active_cases
         )) FROM dept_breakdown), '[]'::json) AS department_breakdown
@@ -541,7 +582,7 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       waitingUser: Number(r.waiting_user ?? 0),
       departmentCases: Number(r.department_cases ?? 0),
       unattendedCases: Number(r.unattended_cases ?? 0),
-      departmentBreakdown: (r.department_breakdown as Array<{ departmentId: string | null; departmentName: string; activeCases: number }>) ?? [],
+      departmentBreakdown: (r.department_breakdown as Array<{ departmentId: string | null; departmentName: string; activeCases: number; queueCases?: number; handledCases?: number }>) ?? [],
     };
   }
 }

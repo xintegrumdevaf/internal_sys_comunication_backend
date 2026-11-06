@@ -32,8 +32,21 @@ export type FinalStatusDistributionItem = {
 
 export type EscalationReasonItem = {
   reason: string;
+  workflowType?: string;
   count: number;
   percentage: number;
+};
+
+export type HourlyDemandItem = {
+  hour: number;
+  label: string;
+  count: number;
+};
+
+export type DailyTrendItem = {
+  date: string;
+  incoming: number;
+  resolved: number;
 };
 
 export type CasesDistributionDto = {
@@ -42,6 +55,8 @@ export type CasesDistributionDto = {
   byFinalStatus: FinalStatusDistributionItem[];
   topEscalationReasons: EscalationReasonItem[];
   byDepartment?: DepartmentDistributionItem[];
+  hourlyDemand?: HourlyDemandItem[];
+  dailyTrend?: DailyTrendItem[];
 };
 
 export type WorkflowDropOffItem = {

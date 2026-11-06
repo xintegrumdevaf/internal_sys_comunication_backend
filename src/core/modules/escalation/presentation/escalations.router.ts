@@ -2,9 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../../../../shared/http/require-auth";
 import type { ListEscalationsUseCase } from "../application/use-cases/list-escalations.use-case";
+import type { DrainDepartmentQueueService } from "../application/services/drain-department-queue.service";
+import type { DepartmentRepositoryPort } from "../../departments/application/ports/department.repository.port";
 
 export type EscalationsRouterDeps = {
   listEscalations: ListEscalationsUseCase;
+  drainQueue?: DrainDepartmentQueueService;
+  departmentRepo?: DepartmentRepositoryPort;
 };
 
 /**
@@ -34,6 +38,37 @@ export function createEscalationsRouter(deps: EscalationsRouterDeps): Router {
         status,
       });
       res.json({ data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/api/escalations/drain", async (req, res, next) => {
+    try {
+      requireAuth(req);
+      if (!deps.drainQueue) {
+        return res.status(501).json({ error: { message: "Servicio de drenaje no configurado" } });
+      }
+
+      const rawDept = req.body?.departmentId;
+      const departmentId =
+        typeof rawDept === "string" && rawDept.trim() && rawDept.trim() !== "all"
+          ? rawDept.trim()
+          : undefined;
+
+      let drainedCount = 0;
+      if (departmentId) {
+        drainedCount = await deps.drainQueue.drainQueueForDepartment(departmentId);
+      } else if (deps.departmentRepo) {
+        const depts = await deps.departmentRepo.list();
+        for (const dept of depts) {
+          if (dept.active) {
+            drainedCount += await deps.drainQueue.drainQueueForDepartment(dept.id);
+          }
+        }
+      }
+
+      res.json({ data: { drainedCount } });
     } catch (error) {
       next(error);
     }
