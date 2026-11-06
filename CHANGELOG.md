@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2026-11-05
+
+- **Automatic Queue Drain Dispatch Endpoint (`escalations.router.ts`, `container.ts`, `escalations-router.test.ts`)**:
+  - *Context*: While `DrainDepartmentQueueService` existed for event-driven reactive draining upon connection or case closure, operational managers had no way to manually trigger an immediate re-balance or evacuation of pending queues from the UI.
+  - *Resolution*:
+    1. Implemented `POST /api/escalations/drain`, guarded by session authentication. Supports draining a specific department via `{ departmentId }` or iterating all active departments when omitted.
+    2. Integrates with `DrainDepartmentQueueService` using atomic PostgreSQL `FOR UPDATE OF e SKIP LOCKED` and Least-Connections distribution to ensure safe, race-condition-free allocation without exceeding concurrency caps.
+    3. Added test suite in `test/escalation/presentation/escalations-router.test.ts` verifying both targeted and global drain executions.
+
+- **Enriched Escalation Entities with Client and Conversation Context (`escalation.entity.ts`, `escalation.repository.pg.ts`)**:
+  - *Context*: The operational triage and SLA rescue desk needed customer name, contact phone, and direct deep links to conversations without requiring client-side N+1 roundtrips across multiple endpoints.
+  - *Resolution*:
+    1. Extended domain interface `Escalation` with optional `conversationId`, `customerName`, and `customerPhone`.
+    2. Rewrote queries in `EscalationRepositoryPg` (`list`, `findById`, `findByCaseId`) to execute a unified query joining `cases c ON c.id = e.case_id`, `conversation conv ON conv.id = c.conversation_id`, and `customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)`.
+    3. Automatically maps `COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone)` as `customerName` and `conv.wa_phone` as `customerPhone`.
+
+- **Queue Wait Times & Escalation Analytics Optimization (`analytics.repository.pg.ts`)**:
+  - *Bug Fix*: Fixed average queue wait time calculation in `AnalyticsRepositoryPg`. Previously, active unassigned escalations skewed the average wait time calculation up to 378,946 seconds. The query was corrected to average wait times exclusively for escalations that reached a human agent or were resolved (`e.resolved_at IS NOT NULL OR e.assigned_agent_id IS NOT NULL`).
+  - Added workflow type categorization (`c.workflow_type`) into `topEscalationReasons` to allow the root-cause chart to drill down into specific sub-reasons by area.
+
 ## [0.2.8] - 2026-11-05
 
 - **Deep Historical Message Search via PostgreSQL Trigram GIN (`search-conversations.use-case.ts`, `conversation.repository.pg.ts`, `0046_message_search_index.sql`)**:

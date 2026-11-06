@@ -145,6 +145,7 @@ Respuesta típica (campos relevantes):
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | `GET` | `/api/escalations` | sesión | Bandeja. Query: `?departmentId=`, `?status=PENDING\|ASSIGNED\|RESOLVED`, `?triage=true` (pool sin departamento) |
+| `POST` | `/api/escalations/drain` | sesión | Despacho automático de cola por departamento o global. Body: `{ departmentId?: string }`. Retorna `{ data: { drainedCount } }` |
 | `GET` | `/api/dashboard` | sesión (`?userId=` opcional para ver el de otro agente) | KPIs del agente |
 
 ---
