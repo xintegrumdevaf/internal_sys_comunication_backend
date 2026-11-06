@@ -351,6 +351,22 @@ type CaseDto = {
   expiresAt: string | null;
 };
 
+type EscalationDto = {
+  id: string;
+  caseId: string;
+  departmentId: string | null;      // null = pool de triage sin clasificar
+  priority: "low" | "normal" | "high" | "urgent";
+  reason: string;
+  summary: EscalationSummary;
+  status: "PENDING" | "ASSIGNED" | "RESOLVED";
+  assignedAgentId: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  conversationId?: string;          // Enriquecido vía JOIN "case" c ON c.id = e.case_id
+  customerName?: string;            // Resuelto desde Customer o waProfileName/waPhone
+  customerPhone?: string;           // Teléfono WhatsApp asociado
+};
+
 type AgentDto = {
   id: string;
   name: string;

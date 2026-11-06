@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.10] - 2026-11-06
+
+- **Fix PostgreSQL Relation Name for Escalation Queries (`escalation.repository.pg.ts`)**:
+  - *Context & Problem*:
+    - Navigating to the **Mesa de Triaje y Rescate SLA** in the frontend triggered an immediate red toast error: `"Error interno inesperado"`.
+    - The desk showed 0 cases in queue, 0 min wait time, and empty SLA metrics despite pending escalated cases existing in the database.
+    - Triggering **⚡ Auto-distribuir cola** (`POST /api/escalations/drain`) was also prone to fail when querying pending cases with row locks.
+  - *Root Cause Analysis*:
+    - In PostgreSQL, the cases table is named `"case"` (quoted because `CASE` is a reserved SQL keyword defined in `migrations/0001_init.sql`).
+    - The recent client enrichment and queue locking queries in `EscalationRepositoryPg` (`findById`, `findByCaseId`, `list`, and `findNextPendingForDepartment`) introduced joins targeting `cases c ON c.id = e.case_id`.
+    - Executing `GET /api/escalations` caused PostgreSQL to throw error `relation "cases" does not exist`, which was caught by `error-handler.middleware.ts` as an unhandled database error and returned as HTTP 500 (`{ error: { type: "EXTERNAL_SERVICE_ERROR", message: "Error interno inesperado" } }`).
+  - *Resolution & Justification*:
+    1. Corrected all 4 queries in `EscalationRepositoryPg`:
+       - `findById`: `LEFT JOIN cases c` → `LEFT JOIN "case" c`.
+       - `findByCaseId`: `LEFT JOIN cases c` → `LEFT JOIN "case" c`.
+       - `list`: `LEFT JOIN cases c` → `LEFT JOIN "case" c`.
+       - `findNextPendingForDepartment`: `JOIN cases c` → `JOIN "case" c`.
+    2. Restores proper population of enriched metadata (`conversationId`, `customerName`, `customerPhone`) for every escalation item without breaking runtime table resolution in PostgreSQL.
+    3. Validated end-to-end with the full test suite (513 tests passing) and TypeScript compilation.
+
 ## [0.2.9] - 2026-11-05
 
 - **Automatic Queue Drain Dispatch Endpoint (`escalations.router.ts`, `container.ts`, `escalations-router.test.ts`)**:

@@ -144,9 +144,12 @@ Respuesta típica (campos relevantes):
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| `GET` | `/api/escalations` | sesión | Bandeja. Query: `?departmentId=`, `?status=PENDING\|ASSIGNED\|RESOLVED`, `?triage=true` (pool sin departamento) |
-| `POST` | `/api/escalations/drain` | sesión | Despacho automático de cola por departamento o global. Body: `{ departmentId?: string }`. Retorna `{ data: { drainedCount } }` |
+| `GET` | `/api/escalations` | sesión | Bandeja de escalaciones y triaje. Query: `?departmentId=`, `?status=PENDING\|ASSIGNED\|RESOLVED`, `?triage=true`. Retorna `{ data: EscalationDto[] }` enriquecido con datos del cliente (`customerName`, `customerPhone`) y `conversationId`. |
+| `POST` | `/api/escalations/drain` | sesión | Despacho automático de cola por departamento o global con bloqueo atómico `FOR UPDATE OF e SKIP LOCKED`. Body: `{ departmentId?: string }`. Retorna `{ data: { drainedCount: number } }` |
 | `GET` | `/api/dashboard` | sesión (`?userId=` opcional para ver el de otro agente) | KPIs del agente |
+
+> **Nota sobre queries y persistencia (`escalation.repository.pg.ts`)**:  
+> Al unir la tabla `escalation` con la entidad de casos, siempre debe utilizarse el identificador entre comillas dobles `"case"` (ej: `LEFT JOIN "case" c ON c.id = e.case_id`), debido a que `CASE` es una palabra reservada en la gramática estándar de PostgreSQL. Nunca usar el plural sin comillas `cases`.
 
 ---
 

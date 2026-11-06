@@ -227,7 +227,7 @@ CREATE TABLE automation_state (
 
 CREATE TABLE escalation (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  case_id           UUID NOT NULL REFERENCES case(id),
+  case_id           UUID NOT NULL REFERENCES "case"(id),
   department_id     UUID REFERENCES department(id),   -- NULL = pool de triage sin clasificar (02_STATE_MACHINE.md §9), visible a manager/admin
   priority          TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
   reason            TEXT NOT NULL,
@@ -238,6 +238,9 @@ CREATE TABLE escalation (
   resolved_at       TIMESTAMPTZ
 );
 CREATE INDEX idx_escalation_department_status ON escalation(department_id, status);
+
+-- NOTA CONVENCIÓN SQL: La tabla de casos es obligatoriamente "case" (entre comillas dobles en cualquier SELECT/JOIN),
+-- dado que 'case' es una palabra reservada del estándar SQL. Nunca hacer JOIN a un identificador no existente como 'cases'.
 
 -- Catálogo de workflows de n8n (acción -> URL), editable sin redeploy vía /api/admin/n8n-workflows.
 -- Reemplaza el enfoque de una variable de entorno por acción (04_N8N_WORKFLOW_SPEC.md §7).

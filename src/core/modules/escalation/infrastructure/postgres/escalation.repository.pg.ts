@@ -74,7 +74,7 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
          COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
          conv.wa_phone AS customer_phone
        FROM escalation e
-       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN "case" c ON c.id = e.case_id
        LEFT JOIN conversation conv ON conv.id = c.conversation_id
        LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
        WHERE e.id = $1`,
@@ -91,7 +91,7 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
          COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
          conv.wa_phone AS customer_phone
        FROM escalation e
-       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN "case" c ON c.id = e.case_id
        LEFT JOIN conversation conv ON conv.id = c.conversation_id
        LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
        WHERE e.case_id = $1
@@ -126,7 +126,7 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
          COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
          conv.wa_phone AS customer_phone
        FROM escalation e
-       LEFT JOIN cases c ON c.id = e.case_id
+       LEFT JOIN "case" c ON c.id = e.case_id
        LEFT JOIN conversation conv ON conv.id = c.conversation_id
        LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
        ${where}
@@ -139,7 +139,7 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
   async findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]> {
     const { rows } = await this.pool.query<EscalationRow>(
       `SELECT e.* FROM escalation e
-       JOIN cases c ON c.id = e.case_id
+       JOIN "case" c ON c.id = e.case_id
        WHERE e.status = 'PENDING'
          AND e.department_id = $1
          AND c.status = 'ESCALATED'
