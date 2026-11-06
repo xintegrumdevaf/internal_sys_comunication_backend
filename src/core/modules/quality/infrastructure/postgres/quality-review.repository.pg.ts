@@ -268,24 +268,29 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     // Una fila por caso+agente (la review más reciente) — evita duplicados por reintentos.
     const { rows } = await this.pool.query<ListRow>(
-      `SELECT DISTINCT ON (qr.case_id, qr.agent_id)
-              qr.*,
+      `WITH distinct_reviews AS (
+         SELECT DISTINCT ON (qr.case_id, qr.agent_id)
+                qr.*
+         FROM quality_review qr
+         ${where}
+         ORDER BY qr.case_id, qr.agent_id, qr.created_at DESC
+       )
+       SELECT dr.*,
               conv.wa_phone,
               conv.wa_profile_name,
               cust.full_name AS customer_full_name,
               COALESCE(fc.finding_count, 0)::text AS finding_count,
               COALESCE(fc.high_finding_count, 0)::text AS high_finding_count
-       FROM quality_review qr
-       LEFT JOIN conversation conv ON conv.id = qr.conversation_id
+       FROM distinct_reviews dr
+       LEFT JOIN conversation conv ON conv.id = dr.conversation_id
        LEFT JOIN customer cust ON cust.id = conv.customer_id
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS finding_count,
                 COUNT(*) FILTER (WHERE qf.severity = 'high')::int AS high_finding_count
          FROM quality_finding qf
-         WHERE qf.review_id = qr.id
+         WHERE qf.review_id = dr.id
        ) fc ON true
-       ${where}
-       ORDER BY qr.case_id, qr.agent_id, qr.created_at DESC`,
+       ORDER BY dr.created_at DESC`,
       params,
     );
     // Reordenar por fecha reciente para la UI.
@@ -613,12 +618,13 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
       avg_first_reply_ms: string | null;
     }>(
       `WITH completed_cases AS (
-         SELECT c.id, c.conversation_id, c.assigned_agent_id, c.department_id, c.updated_at
+         SELECT c.assigned_agent_id AS agent_id, COUNT(*)::int AS n
          FROM "case" c
          WHERE c.status = 'COMPLETED'
            AND c.assigned_agent_id IS NOT NULL
            AND c.updated_at >= $1 AND c.updated_at <= $2
            ${deptCaseFilter}
+         GROUP BY c.assigned_agent_id
        ),
        closed_with_agent AS (
          SELECT c.assigned_agent_id AS agent_id, COUNT(*)::int AS n
@@ -627,10 +633,17 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
            AND c.assigned_agent_id IS NOT NULL
            AND c.updated_at >= $1 AND c.updated_at <= $2
            ${deptCaseFilter}
-           AND EXISTS (
-             SELECT 1 FROM message m
-             WHERE (m.case_id = c.id OR (m.conversation_id = c.conversation_id AND m.agent_id = c.assigned_agent_id))
-               AND m.author = 'agent'
+           AND (
+             EXISTS (
+               SELECT 1 FROM message m
+               WHERE m.case_id = c.id AND m.author = 'agent'
+             )
+             OR EXISTS (
+               SELECT 1 FROM message m
+               WHERE m.conversation_id = c.conversation_id
+                 AND m.agent_id = c.assigned_agent_id
+                 AND m.author = 'agent'
+             )
            )
          GROUP BY c.assigned_agent_id
        ),
@@ -649,40 +662,51 @@ export class QualityReviewRepositoryPg implements QualityReviewRepositoryPort {
          GROUP BY qr.agent_id
        ),
        first_reply AS (
-         SELECT cc.id AS case_id,
-                cc.assigned_agent_id,
-                EXTRACT(EPOCH FROM (
-                  (SELECT MIN(m.created_at) FROM message m
-                   WHERE (m.case_id = cc.id OR (m.conversation_id = cc.conversation_id AND m.agent_id = cc.assigned_agent_id))
-                     AND m.author = 'agent')
-                  -
-                  COALESCE(
-                    (SELECT MIN(we.occurred_at) FROM workflow_event we
-                     WHERE we.case_id = cc.id
-                       AND we.type IN ('CASE_ESCALATED', 'HUMAN_ACTIVE', 'CASE_CLAIMED', 'CASE_ASSIGNED')),
-                    cc.updated_at
-                  )
-                )) * 1000 AS reply_ms
-         FROM completed_cases cc
+         SELECT sub.assigned_agent_id AS agent_id,
+                AVG(sub.reply_ms) FILTER (WHERE sub.reply_ms IS NOT NULL AND sub.reply_ms >= 0) AS avg_reply_ms
+         FROM (
+           SELECT c.assigned_agent_id,
+                  EXTRACT(EPOCH FROM (
+                    COALESCE(
+                      (SELECT MIN(m.created_at) FROM message m
+                       WHERE m.case_id = c.id AND m.author = 'agent'),
+                      (SELECT MIN(m.created_at) FROM message m
+                       WHERE m.conversation_id = c.conversation_id
+                         AND m.agent_id = c.assigned_agent_id
+                         AND m.author = 'agent')
+                    )
+                    -
+                    COALESCE(
+                      (SELECT MIN(we.occurred_at) FROM workflow_event we
+                       WHERE we.case_id = c.id
+                         AND we.type IN ('CASE_ESCALATED', 'HUMAN_ACTIVE', 'CASE_CLAIMED', 'CASE_ASSIGNED')),
+                      c.updated_at
+                    )
+                  )) * 1000 AS reply_ms
+           FROM "case" c
+           WHERE c.status = 'COMPLETED'
+             AND c.assigned_agent_id IS NOT NULL
+             AND c.updated_at >= $1 AND c.updated_at <= $2
+             ${deptCaseFilter}
+         ) sub
+         GROUP BY sub.assigned_agent_id
        )
        SELECT a.id AS agent_id,
               a.name AS agent_name,
-              COUNT(DISTINCT cc.id)::text AS cases_completed,
+              COALESCE(cc.n, 0)::text AS cases_completed,
               COALESCE(cwa.n, 0)::text AS closed_with_agent,
               COALESCE(rs.analyzed_count, 0)::text AS analyzed_count,
               COALESCE(rs.pending_count, 0)::text AS pending_count,
               COALESCE(rs.failed_count, 0)::text AS failed_count,
               rs.avg_score::text AS avg_cordiality,
               COALESCE(rs.critical_count, 0)::text AS critical_count,
-              AVG(fr.reply_ms) FILTER (WHERE fr.reply_ms IS NOT NULL AND fr.reply_ms >= 0)::text AS avg_first_reply_ms
+              fr.avg_reply_ms::text AS avg_first_reply_ms
        FROM agent a
-       LEFT JOIN completed_cases cc ON cc.assigned_agent_id = a.id
+       LEFT JOIN completed_cases cc ON cc.agent_id = a.id
        LEFT JOIN closed_with_agent cwa ON cwa.agent_id = a.id
        LEFT JOIN review_status rs ON rs.agent_id = a.id
-       LEFT JOIN first_reply fr ON fr.assigned_agent_id = a.id
+       LEFT JOIN first_reply fr ON fr.agent_id = a.id
        WHERE a.active = true
-       GROUP BY a.id, a.name, cwa.n, rs.analyzed_count, rs.pending_count, rs.failed_count,
-                rs.avg_score, rs.critical_count
        ORDER BY a.name ASC`,
       [from, to, scoped],
     );

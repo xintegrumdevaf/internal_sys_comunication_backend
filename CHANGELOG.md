@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.11] - 2026-11-06
+
+- **Optimización de Big O y Alta Eficiencia en Consultas de Calidad (`quality-review.repository.pg.ts`, `0047_quality_performance_indexes.sql`)**:
+  - *Contexto y Problema*:
+    - La carga inicial y cambio de filtros en Supervisión de Calidad (`/calidad`) demoraba entre 7 y 10 segundos para rangos mensuales (30 días).
+    - Los endpoints `GET /api/quality/agents` y `GET /api/quality/reviews` saturaban la CPU de PostgreSQL con escaneos secuenciales y altos consumos de memoria de ordenamiento.
+  - *Causa Raíz*:
+    1. **Producto cartesiano ($O(C^2)$) en `getAgentStats`**: Se ejecutaba un `LEFT JOIN` simultáneo entre `completed_cases cc` y `first_reply fr` a nivel de `assigned_agent_id` sin pre-agrupar. Para un asesor con 100 casos en el mes, PostgreSQL generaba $100 \times 100 = 10.000$ tuplas intermedias en memoria antes del `GROUP BY`.
+    2. **Escaneos secuenciales sobre la tabla `message` ($O(C \cdot M)$)**: Las subconsultas de `closed_with_agent` y `first_reply` utilizaban la condición `WHERE (m.case_id = c.id OR (m.conversation_id = c.conversation_id AND m.agent_id = c.assigned_agent_id))` sin índice en `message.case_id`. PostgreSQL se veía forzado a escanear la tabla `message` repetidamente para cada caso cerrado.
+    3. **Join prematuro en `listReviews`**: Se ejecutaban `LEFT JOIN conversation`, `LEFT JOIN customer` y un `LEFT JOIN LATERAL` sobre `quality_finding` para todas las filas candidatas antes de descartar duplicados con `DISTINCT ON (qr.case_id, qr.agent_id)`.
+  - *Resolución*:
+    1. **Migración `0047_quality_performance_indexes.sql`**:
+       - `idx_case_assigned_status_updated`: Índice compuesto en `"case" (assigned_agent_id, status, updated_at)`.
+       - `idx_message_case_author`: Índice condicional en `message (case_id, author) WHERE case_id IS NOT NULL` para búsquedas en tiempo $O(\log M)$.
+       - `idx_message_conv_agent_author`: Índice en `message (conversation_id, agent_id, author)`.
+       - `idx_quality_review_agent_created`: Índice en `quality_review (agent_id, created_at, status, cordiality_score)` para agregación de semáforo.
+       - `idx_quality_review_distinct_case_agent`: Índice compuesto en `quality_review (case_id, agent_id, created_at DESC)` que permite a PostgreSQL resolver el `DISTINCT ON` directamente por índice sin volcar a `work_mem`.
+       - `idx_quality_finding_review_severity`: Índice Index-Only Scan en `quality_finding (review_id, severity)`.
+    2. **Reescritura de `getAgentStats`**:
+       - Cada CTE (`completed_cases`, `closed_with_agent`, `review_status`, `first_reply`) pre-agrupa sus métricas para emitir estrictamente 1 fila por asesor (`agent_id`).
+       - Se desacopló la condición `OR` en dos expresiones `EXISTS` cortocircuitadas y un `COALESCE` de subconsultas indexadas.
+       - El `SELECT` principal une las CTEs 1 a 1 sobre `agent a` en complejidad $O(A)$ lineal según el número de asesores activos, eliminando por completo el producto cartesiano y el `GROUP BY` externo.
+    3. **Reescritura de `listReviews`**:
+       - Se aisló la deduplicación en la CTE `distinct_reviews` apoyada en el nuevo índice B-tree.
+       - Los joins con `conversation`, `customer` y el conteo LATERAL de `quality_finding` se aplican únicamente sobre el subconjunto final deduplicado, ordenado de forma nativa por `dr.created_at DESC`.
+
 ## [0.2.10] - 2026-11-06
 
 - **Fix PostgreSQL Relation Name for Escalation Queries (`escalation.repository.pg.ts`)**:
