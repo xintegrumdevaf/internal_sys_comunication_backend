@@ -676,6 +676,7 @@ export function createContainer(): Container {
     transcribeAudio,
     extractReceiptData,
     logger: casesLogger,
+    identity: conversationIdentity,
     escalationService,
     broadcaster,
     expirationService,

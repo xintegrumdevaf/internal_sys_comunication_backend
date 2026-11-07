@@ -158,6 +158,15 @@ const validateClient: WorkflowStateHandler = async ({
       };
       return { type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS", context: withContext(nextData, context) };
     }
+    if (!data.client?.nationalId) {
+      const customerIdentity = await identity.tryGetCustomerIdentity?.(conversationId);
+      if (customerIdentity?.nationalId) {
+        data = {
+          ...data,
+          client: { nationalId: customerIdentity.nationalId, fullName: customerIdentity.fullName },
+        };
+      }
+    }
   }
 
   // Fusionar entities del WaitingStep (nationalId) antes de llamar a n8n.

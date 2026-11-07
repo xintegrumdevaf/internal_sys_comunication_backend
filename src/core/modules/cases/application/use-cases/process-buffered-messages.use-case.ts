@@ -23,6 +23,7 @@ import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
 import { ExpirationService } from "../services/expiration.service";
 import { checkCustomerGuardrails } from "../../domain/guardrails";
+import type { ConversationIdentityPort } from "../../../customers/application/ports/conversation-identity.port";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -39,6 +40,7 @@ export type ProcessBufferedMessagesDeps = {
   transcribeAudio: TranscribeAudioUseCase;
   extractReceiptData: ExtractReceiptDataUseCase;
   logger: Logger;
+  identity?: ConversationIdentityPort;
   escalationService?: EscalationService;
   broadcaster?: RealtimeBroadcaster;
   expirationService?: ExpirationService;
@@ -102,8 +104,11 @@ export class ProcessBufferedMessagesUseCase {
       const lastPrior = [...priorMessages]
         .reverse()
         .find((message) => !inboundIds.has(message.id) && message.author !== "system");
-      const agentStartedRecently =
-        lastPrior?.author === "agent" &&
+      const isRealHumanAgent = lastPrior?.author === "agent" && Boolean(lastPrior?.agentId);
+      const isCaseActive = Boolean(targetCase && !TERMINAL_CASE_STATUSES.includes(targetCase.status));
+      const humanIntervenedRecently =
+        isRealHumanAgent &&
+        isCaseActive &&
         Date.now() - lastPrior.createdAt.getTime() < 24 * 60 * 60 * 1000;
 
       if (targetCase) {
@@ -115,10 +120,10 @@ export class ProcessBufferedMessagesUseCase {
           : (targetCase.expiresAt !== null && targetCase.expiresAt.getTime() <= Date.now()) ||
             (targetCase.expiresAt === null && Date.now() - targetCase.lastActivityAt.getTime() >= 24 * 60 * 60 * 1000);
 
-        if (isCaseExpired && agentStartedRecently) {
+        if (isCaseExpired && humanIntervenedRecently) {
           log.info(
             { caseId: targetCase.id, messageId: lastPrior?.id, agentId: lastPrior?.agentId },
-            "el agente inició la conversación: silenciando bot",
+            "el agente humano inició la conversación en caso activo: silenciando bot",
           );
           return;
         }
@@ -170,10 +175,10 @@ export class ProcessBufferedMessagesUseCase {
         }
       }
 
-      if (agentStartedRecently) {
+      if (humanIntervenedRecently) {
         log.info(
-          { messageId: lastPrior?.id, agentId: lastPrior?.agentId },
-          "el último mensaje lo envió un agente: silenciando bot",
+          { messageId: lastPrior?.id, agentId: lastPrior?.agentId, caseId: targetCase?.id },
+          "el último mensaje lo envió un agente humano en caso activo: silenciando bot",
         );
         return;
       }
@@ -290,6 +295,20 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
+      // Salvaguarda anti-repetición y bucles: Si el cliente envía una cortesía, confirmación o agradecimiento puro
+      // (ej: "ok", "gracias", "muchas gracias", "listo", "de acuerdo", "perfecto") luego de que se resolvió su duda,
+      // NUNCA disparar una nueva consulta de saldo (billing.balance); clasificar como agradecimiento/cierre en general.inquiry.
+      const isPureCourtesyOrClosing =
+        /^(ok|gracias|muchas\s+gracias|listo(\s+gracias)?|de\s+acuerdo|perfecto|muy\s+amable|entendido|dale\s+gracias)[!.\s]*$/i.test(customerText);
+      if (isPureCourtesyOrClosing && (!activeAggregate || interpretation.intent === "billing.balance")) {
+        interpretation = {
+          type: "CANCEL",
+          intent: "general.inquiry",
+          entities: { ...interpretation.entities, isThankYou: true, isClosing: true },
+          confidence: 0.95,
+        };
+      }
+
       // Auto-extracción de cédula SOLO cuando el intent activo o entrante es de soporte/facturación
       // (nunca inyectar nationalId en flujos de ventas, consultas generales, etc.)
       const identityRelatedIntents = ["support.internet", "support.slow_internet", "support.home_relocation", "billing.balance", "billing.record_payment"];
@@ -299,19 +318,50 @@ export class ProcessBufferedMessagesUseCase {
         (activeAggregate && identityRelatedWorkflows.includes(activeAggregate.case.workflowType));
 
       if (isIdentityContext && !interpretation.entities?.nationalId) {
-        const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 10 });
-        const customerMessages = history.filter((m) => m.author === "customer");
-        for (const msg of customerMessages) {
-          const body = msg.body.trim();
-          const match = body.match(/\b\d{9,13}\b/);
-          if (match) {
-            const normalized = normalizeNationalId(match[0]);
+        // 1. Reutilizar desde identidad conocida del cliente
+        if (this.deps.identity) {
+          const stored = await this.deps.identity.tryGetCustomerIdentity(conversationId);
+          if (stored?.nationalId) {
             interpretation.entities = {
               ...interpretation.entities,
-              nationalId: normalized,
+              nationalId: normalizeNationalId(stored.nationalId),
             };
-            log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
-            break;
+            log.info({ nationalId: stored.nationalId }, "cédula reutilizada automáticamente desde la identidad del cliente");
+          }
+        }
+        // 2. Reutilizar desde casos resueltos o completados anteriormente en la misma conversación
+        if (!interpretation.entities?.nationalId) {
+          for (const pc of prevCases) {
+            if (!TERMINAL_CASE_STATUSES.includes(pc.status)) continue;
+            const raw = (pc.context as Record<string, unknown>)?.data ?? pc.context;
+            const clientObj = (raw as Record<string, unknown>)?.client as { nationalId?: string } | undefined;
+            if (clientObj?.nationalId) {
+              const normalized = normalizeNationalId(clientObj.nationalId);
+              interpretation.entities = {
+                ...interpretation.entities,
+                nationalId: normalized,
+              };
+              log.info({ nationalId: normalized, caseId: pc.id }, "cédula reutilizada automáticamente desde caso previo");
+              break;
+            }
+          }
+        }
+        // 3. Fallback: extraer desde historial de mensajes
+        if (!interpretation.entities?.nationalId) {
+          const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 15 });
+          const customerMessages = history.filter((m) => m.author === "customer");
+          for (const msg of customerMessages) {
+            const body = msg.body.trim();
+            const match = body.match(/\b\d{9,13}\b/);
+            if (match) {
+              const normalized = normalizeNationalId(match[0]);
+              interpretation.entities = {
+                ...interpretation.entities,
+                nationalId: normalized,
+              };
+              log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
+              break;
+            }
           }
         }
       }

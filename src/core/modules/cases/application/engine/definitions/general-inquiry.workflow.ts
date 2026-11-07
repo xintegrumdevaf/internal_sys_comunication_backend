@@ -121,6 +121,10 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     const isThankYou =
       entities?.isThankYou === true ||
       entities?.is_thank_you === true ||
+      entities?.isClosing === true ||
+      /^(ok|gracias|muchas\s+gracias|listo(\s+gracias)?|de\s+acuerdo|perfecto|muy\s+amable|entendido|dale\s+gracias)[!.\s]*$/i.test(
+        (typeof text === "string" ? text : question).trim()
+      ) ||
       /gracias|agradecid[oa]|excelente|entendido|de\s+nada|mas\s+tarde\s+(le\s+)?pago|luego\s+pago|despu[eé]s\s+pago|listo\s+muchas\s+gracias/i.test(
         question.trim()
       );
@@ -128,7 +132,7 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     if (isThankYou) {
       const nextData: GeneralInquiryContext = {
         ...data,
-        answer: "¡Con mucho gusto! Es un placer ayudarte. Si necesitas cualquier otra información en el futuro, estamos a tu disposición. ¡Que tengas un excelente día!",
+        answer: "¡Con mucho gusto! Es un placer ayudarte. ¿Hay algo más en lo que te podamos colaborar o todo quedó claro? ¡Que tengas un excelente día!",
         found: true,
       };
       return {

@@ -5,6 +5,7 @@ import type {
 } from "../ports/customer.repository.port";
 import type {
   ConversationIdentityPort,
+  CustomerIdentitySnapshot,
   RememberCustomerContractsInput,
   RememberValidatedIdentityInput,
   ValidatedIdentitySnapshot,
@@ -20,6 +21,29 @@ export class ConversationIdentityService implements ConversationIdentityPort {
     private readonly customerRepo: CustomerRepositoryPort,
     private readonly contractRepo: ContractRepositoryPort,
   ) {}
+
+  async tryGetCustomerIdentity(conversationId: string): Promise<CustomerIdentitySnapshot | null> {
+    const conversation = await this.conversationRepo.findById(conversationId);
+    if (!conversation) return null;
+
+    let customerId = conversation.customerId;
+    if (!customerId && conversation.waPhone) {
+      const byPhone = await this.customerRepo.findByWaPhone(conversation.waPhone);
+      if (byPhone?.id && byPhone.nationalId) {
+        await this.conversationRepo.setCustomerId(conversationId, byPhone.id);
+        customerId = byPhone.id;
+      }
+    }
+
+    if (!customerId) return null;
+    const customer = await this.customerRepo.findById(customerId);
+    if (!customer?.nationalId) return null;
+
+    return {
+      nationalId: customer.nationalId,
+      fullName: customer.fullName ?? "",
+    };
+  }
 
   async tryGetValidatedIdentity(conversationId: string): Promise<ValidatedIdentitySnapshot | null> {
     const conversation = await this.conversationRepo.findById(conversationId);

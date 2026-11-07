@@ -133,6 +133,11 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
     Formula en \`entities.question\` la consulta completa: ej. "¿Tienen cobertura y en qué sectores prestan servicio en Cuenca?".
   - Si el cliente venía hablando de planes y pregunta "¿Cuánto cuesta?", "¿Qué incluye?", "¿La instalación es gratis?":
     Formula en \`entities.question\` la consulta completa: ej. "¿Cuánto cuestan los planes de internet y qué promociones de instalación tienen?".
+- RAZONAMIENTO DE CIERRE, AGRADECIMIENTO O CONFORMIDAD POST-RESPUESTA (CRÍTICO - NO REPETIR FLUJOS):
+  Analiza el contexto y el historial reciente. Si el mensaje del asistente previo ya respondió o resolvió la consulta del cliente (por ejemplo, ya le informó su saldo de facturación, ya le dio los métodos de pago, ya le explicó la cobertura o ya resolvió su inquietud técnica), y el cliente responde mostrando conformidad, satisfacción, cortesía o dando por concluida la interacción (ej: "Ok", "Gracias", "Muchas gracias", "Listo", "Entendido", "Perfecto", "De acuerdo", "Muy amable", "Listo muchas gracias más tarde pago"):
+  → El cliente NO está solicitando una nueva consulta de saldo ni soporte.
+  → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isThankYou": true, "isClosing": true}.
+  → NUNCA clasificar como billing.balance, support.internet ni reiniciar el flujo resuelto en bucle.
 - Si el cliente envía una ubicación o sector aislado ("Vivo en Yanuncay", "Estoy en Conocoto", "En San Sebastián"), contextualiza \`entities.question\`: ej. "Cobertura y servicio en el sector de Yanuncay".
 - ATENCIÓN - SALUDOS Y APERTURA DE CONVERSACIÓN: Si el cliente envía un saludo, cortesía o apertura de conversación (en cualquier forma o modismo del lenguaje natural, ej: "Hola", "Buenas", "Hola qué tal", "Cómo estás", "Qué más", "Buenos días", etc.) SIN una consulta técnica o comercial específica:
   → Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true}. NUNCA inventes ni agregues un campo \`question\` si no hubo una pregunta de negocio.
@@ -196,7 +201,10 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
    → {"type":"REQUEST_HUMAN","intent":"support.service_cancellation","entities":{"action":"cancel_service"},"confidence":0.95}
 
 17. Mensaje: "voy a cambiarme de domicilio, como puedo hacer con el servicio" (o "quiero cambiar la dirección de mi internet")
-   → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}`;
+   → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}
+
+18. Mensaje: "Ok \n Gracias" (o "Muchas gracias", "Listo", "Entendido") tras haber recibido el saldo o la respuesta del bot
+   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isThankYou":true,"isClosing":true},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

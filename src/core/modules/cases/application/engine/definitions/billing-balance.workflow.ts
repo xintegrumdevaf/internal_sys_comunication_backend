@@ -127,6 +127,14 @@ const validateClient: WorkflowStateHandler = async ({
       };
       return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
     }
+    const customerIdSnapshot = await identity.tryGetCustomerIdentity?.(conversationId);
+    if (customerIdSnapshot?.nationalId) {
+      const nextData: BillingBalanceContext = {
+        ...data,
+        client: { nationalId: customerIdSnapshot.nationalId, fullName: customerIdSnapshot.fullName },
+      };
+      return { type: "CONTINUE", nextState: "CHECK_BALANCE", context: withContext(nextData, context) };
+    }
   }
 
   const rawNationalId =
@@ -364,26 +372,19 @@ export const billingBalanceWorkflow: WorkflowDefinition = {
       maxAttempts: 3,
     },
     WAITING_USER_RECEIPT: {
-      pendingQuestion:
-        "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+      pendingQuestion: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
       requireAll: ["amount", "reference"],
       maxAttempts: 2,
     },
   },
   replyTemplates: {
     WAITING_USER_CLIENT: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
-    WAITING_USER_RECEIPT:
-      "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
-    RESPOND_NO_DEBT:
-      "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
-    RESPOND_DEBT_WITH_OPTIONS:
-      "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
-    COMPLETED:
-      "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
-    RESPOND_PAYMENT_METHODS:
-      "Puedes realizar tu pago mediante depósito o transferencia en nuestras cuentas corrientes autorizadas:\n\n🏦 Banco Pichincha: Cta. Cte. 2200998877\n🏦 Banco Guayaquil: Cta. Cte. 004455667788\n🏦 Produbanco: Cta. Cte. 1234567890\nTitular: XGO Telecomunicaciones S.A. (RUC 1799999999001)\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.",
-    ESCALATED:
-      "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para ayudarte con tu solicitud.",
+    WAITING_USER_RECEIPT: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+    RESPOND_NO_DEBT: "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
+    RESPOND_DEBT_WITH_OPTIONS: "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
+    COMPLETED: "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
+    RESPOND_PAYMENT_METHODS: "Puedes realizar tu pago mediante depósito o transferencia en nuestras cuentas corrientes autorizadas:\n\n🏦 Banco Pichincha: Cta. Cte. 2200998877\n🏦 Banco Guayaquil: Cta. Cte. 004455667788\n🏦 Produbanco: Cta. Cte. 1234567890\nTitular: XGO Telecomunicaciones S.A. (RUC 1799999999001)\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.",
+    ESCALATED: "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para ayudarte con tu solicitud.",
     ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
   },
   states: {

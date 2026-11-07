@@ -40,8 +40,14 @@ export type RememberCustomerContractsInput = {
   contracts: ContractIdentityInput[];
 };
 
+export type CustomerIdentitySnapshot = {
+  nationalId: string;
+  fullName: string;
+};
+
 export interface ConversationIdentityPort {
   tryGetValidatedIdentity(conversationId: string): Promise<ValidatedIdentitySnapshot | null>;
+  tryGetCustomerIdentity(conversationId: string): Promise<CustomerIdentitySnapshot | null>;
   rememberValidatedIdentity(input: RememberValidatedIdentityInput): Promise<void>;
   rememberCustomerContracts(input: RememberCustomerContractsInput): Promise<void>;
 }

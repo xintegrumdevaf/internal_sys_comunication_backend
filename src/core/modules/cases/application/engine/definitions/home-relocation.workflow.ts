@@ -71,6 +71,18 @@ export function createHomeRelocationWorkflow(ragService: RagService): WorkflowDe
         };
         return { type: "CONTINUE", nextState: "GATHER_RELOCATION_DETAILS", context: withContext(nextData, context) };
       }
+      if (!data.client?.nationalId) {
+        const customerIdentity = await identity.tryGetCustomerIdentity?.(conversationId);
+        if (customerIdentity?.nationalId) {
+          data = {
+            ...data,
+            client: {
+              nationalId: customerIdentity.nationalId,
+              fullName: customerIdentity.fullName,
+            },
+          };
+        }
+      }
     }
 
     // 3. Evaluar cédula desde entities o context
