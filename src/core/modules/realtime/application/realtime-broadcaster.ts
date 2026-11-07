@@ -42,6 +42,9 @@ export type RealtimeEvent =
       conversationId: string;
       departmentId: string | null;
       at: string;
+      customerName?: string | null;
+      customerPhone?: string | null;
+      reason?: string | null;
     }
   | {
       type: "CASE_CLAIMED";
@@ -53,6 +56,8 @@ export type RealtimeEvent =
       caseId: string;
       agentUserId: string;
       conversationId?: string;
+      customerName?: string | null;
+      customerPhone?: string | null;
     }
   | {
       type: "HUMAN_UNASSIGNED";

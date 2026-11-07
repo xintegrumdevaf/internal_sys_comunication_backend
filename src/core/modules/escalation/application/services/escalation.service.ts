@@ -129,12 +129,16 @@ export class EscalationService {
     // Se calcula el mensaje/evento ANTES del auto-assign (usa el status
     // ESCALATED "puro" para el catalogo de respuestas); el resultado que se
     // devuelve si usa el caso ya actualizado (puede quedar HUMAN_ACTIVE).
+    const conv = await conversationRepo.findById(caseEntity.conversationId);
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: caseEntity.id,
       conversationId: caseEntity.conversationId,
       departmentId: caseEntity.departmentId,
       at: new Date().toISOString(),
+      customerName: conv?.waProfileName ?? null,
+      customerPhone: conv?.waPhone ?? null,
+      reason: input.reason ?? null,
     });
 
     const persisted = await this.persistEscalation(caseEntity, input.reason, input.priority ?? "normal");
@@ -195,12 +199,16 @@ export class EscalationService {
       { caseId: transitioned.case.id, escalationId: escalation.id, departmentId: input.departmentId ?? null },
       "caso enviado al pool de triage / cola de departamento",
     );
+    const conv = await conversationRepo.findById(input.conversationId);
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: transitioned.case.id,
       conversationId: input.conversationId,
       departmentId: input.departmentId ?? null,
       at: new Date().toISOString(),
+      customerName: conv?.waProfileName ?? null,
+      customerPhone: conv?.waPhone ?? null,
+      reason: input.reason ?? null,
     });
     return { case: caseEntity, escalation, customerMessage };
   }

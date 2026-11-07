@@ -83,6 +83,9 @@ export class ClaimCaseUseCase {
     }
 
     if (this.deps.broadcaster) {
+      const conv = this.deps.conversationRepo
+        ? await this.deps.conversationRepo.findById(aggregate.case.conversationId)
+        : null;
       this.deps.broadcaster.publish({
         type: "AUTOMATION_DISABLED",
         caseId: aggregate.case.id,
@@ -93,6 +96,8 @@ export class ClaimCaseUseCase {
         caseId: aggregate.case.id,
         agentUserId: agent.id,
         conversationId: aggregate.case.conversationId,
+        customerName: conv?.waProfileName ?? null,
+        customerPhone: conv?.waPhone ?? null,
       });
     }
 

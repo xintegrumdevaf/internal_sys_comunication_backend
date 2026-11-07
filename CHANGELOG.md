@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.12] - 2026-11-07
+
+- **Contexto de cliente en eventos SSE de escalamiento y asignación (`realtime-broadcaster.ts`, `escalation.service.ts`, `assign-case.use-case.ts`, `claim-case.use-case.ts`)**:
+  - Se incluyeron los campos `customerName` y `customerPhone` en los eventos `CASE_ESCALATED` y `HUMAN_ASSIGNED` para que las notificaciones a los asesores muestren nombre y teléfono legible en lugar de truncar UUIDs internos.
+
 ## [0.2.11] - 2026-11-06
 
 - **Optimización de Big O y Alta Eficiencia en Consultas de Calidad (`quality-review.repository.pg.ts`, `0047_quality_performance_indexes.sql`)**:
