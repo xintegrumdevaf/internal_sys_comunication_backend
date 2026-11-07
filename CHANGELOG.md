@@ -2,7 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.12] - 2026-11-07
+## [0.2.13] - 2026-11-07
+
+- **Desacople de Campañas/Plantillas, Desbloqueo Inmediato de IA y Reutilización de Identidad (`process-buffered-messages.use-case.ts`, `interpret-message.prompt.ts`, `general-inquiry.workflow.ts`, `conversation-identity.service.ts`, `billing-balance.workflow.ts`, `support-internet.workflow.ts`, `home-relocation.workflow.ts`)**:
+  - *Contexto y Problema*:
+    1. Al enviarse una campaña masiva o plantilla de cobro, los mensajes salientes automáticos tenían `author: "agent"` sin `agentId`. La condición de guardia `agentStartedRecently` asumía erróneamente que un humano había intervenido y silenciaba la IA por 24 horas completas para todos los destinatarios que respondían.
+    2. Cuando un agente humano cerraba o resolvía un caso (como Aracely Novillo), si el cliente enviaba un comprobante u otra consulta horas más tarde, el bot seguía silenciado por la ventana de 24 horas y el comprobante quedaba sin atención ni asignación.
+    3. En cada nuevo flujo o consulta (Facturación, Soporte, Traslado), el sistema volvía a solicitar el número de cédula al cliente a pesar de que ya existía en la base de datos o en casos previos de la conversación.
+    4. Cuando el cliente respondía con cortesía, conformidad o cierre post-atención (ej: *"Ok"*, *"Gracias"*), el NLU asociaba el mensaje al último tema tocado y reiniciaba la consulta de saldo (`billing.balance`), repitiendo mecánicamente *"Revisé tu cuenta..."*.
+  - *Resolución*:
+    1. **Desacople estricto de campañas**: `humanIntervenedRecently` solo se activa cuando el mensaje fue enviado por un asesor humano real (`Boolean(lastPrior.agentId)`) y pertenece a un caso activo no terminal. Las plantillas y campañas automáticas permiten a la IA atender inmediatamente la respuesta del cliente.
+    2. **Retoma inmediata de la IA**: Si el caso anterior ya está resuelto (`COMPLETED` o `RESOLVED`), la IA asume de inmediato los nuevos mensajes entrantes (incluyendo la clasificación de comprobantes de pago hacia cartera).
+    3. **Persistencia y Reutilización de Cédula en Cascada**:
+       - Nuevo método `tryGetCustomerIdentity(conversationId)` en `ConversationIdentityPort` y `ConversationIdentityService` para recuperar la cédula asociada al cliente o su teléfono.
+       - En `process-buffered-messages.use-case.ts`, `BILLING_BALANCE`, `SUPPORT_INTERNET` y `HOME_RELOCATION`, si la cédula ya es conocida, se reutiliza automáticamente sin volver a pedirla al usuario.
+    4. **Razonamiento Semántico en NLU (Sin regex rígidos)**:
+       - Se eliminaron las listas de términos quemados en código.
+       - En `interpret-message.prompt.ts`, se instruyó al LLM a discriminar pragmáticamente si el nuevo mensaje expresa conformidad o cierre post-atención. En tal caso, emite `isClosing: true`, `isThankYou: true`, y `GENERAL_INQUIRY` responde amablemente preguntando si requiere asistencia adicional o despidiéndose, concluyendo el caso limpiamente sin bucles.
+- **Enriquecimiento de Previsualizaciones Multimedia en Conversaciones (`list-conversations.use-case.ts`, `search-conversations.use-case.ts`)**:
+  - Se incluyeron los metadatos `type`, `caption` y `filename` en el DTO `lastMessagePreview` para renderizar etiquetas humanas amigables estilo WhatsApp (📷 Foto, 🎵 Audio, 🎥 Video, etc.).
 
 - **Contexto de cliente en eventos SSE de escalamiento y asignación (`realtime-broadcaster.ts`, `escalation.service.ts`, `assign-case.use-case.ts`, `claim-case.use-case.ts`)**:
   - Se incluyeron los campos `customerName` y `customerPhone` en los eventos `CASE_ESCALATED` y `HUMAN_ASSIGNED` para que las notificaciones a los asesores muestren nombre y teléfono legible en lugar de truncar UUIDs internos.

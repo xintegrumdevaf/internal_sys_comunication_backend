@@ -1,5 +1,6 @@
 import type {
   ConversationIdentityPort,
+  CustomerIdentitySnapshot,
   RememberCustomerContractsInput,
   RememberValidatedIdentityInput,
   ValidatedIdentitySnapshot,
@@ -13,6 +14,15 @@ export class ConversationIdentityFake implements ConversationIdentityPort {
 
   seed(conversationId: string, snapshot: ValidatedIdentitySnapshot): void {
     this.byConversation.set(conversationId, snapshot);
+  }
+
+  async tryGetCustomerIdentity(conversationId: string): Promise<CustomerIdentitySnapshot | null> {
+    const validated = this.byConversation.get(conversationId);
+    if (!validated) return null;
+    return {
+      nationalId: validated.nationalId,
+      fullName: validated.fullName,
+    };
   }
 
   async tryGetValidatedIdentity(conversationId: string): Promise<ValidatedIdentitySnapshot | null> {
