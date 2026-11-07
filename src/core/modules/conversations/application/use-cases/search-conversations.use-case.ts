@@ -142,7 +142,11 @@ export class SearchConversationsUseCase {
         ...conv,
         lastMessagePreview: last
           ? {
+              id: last.id,
               body: last.body,
+              type: last.type,
+              caption: last.caption,
+              filename: last.filename,
               author: last.author,
               direction: last.direction,
               createdAt: last.createdAt,

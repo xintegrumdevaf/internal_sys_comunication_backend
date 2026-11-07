@@ -15,7 +15,11 @@ export type LastAttendedByDto = {
 
 export type ConversationDto = Conversation & {
   lastMessagePreview: {
+    id?: string;
     body: string;
+    type?: string;
+    caption?: string | null;
+    filename?: string | null;
     author: MessageAuthor;
     direction: "inbound" | "outbound";
     createdAt: Date;
@@ -165,7 +169,11 @@ export class ListConversationsUseCase {
         ...conv,
         lastMessagePreview: last
           ? {
+              id: last.id,
               body: last.body,
+              type: last.type,
+              caption: last.caption,
+              filename: last.filename,
               author: last.author,
               direction: last.direction,
               createdAt: last.createdAt,
