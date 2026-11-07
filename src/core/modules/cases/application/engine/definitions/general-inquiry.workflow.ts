@@ -117,22 +117,17 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
             : data.question || "";
 
     // Si el mensaje es un agradecimiento o cierre (ej: "muchas gracias por la informacion", "gracias", "ok gracias", "listo muchas gracias mas tarde le pago"):
-    // responder amablemente y completar el caso sin consultar RAG ni escalar a un asesor.
-    const isThankYou =
+    // Si la IA identificó que la intención del cliente es de cierre, satisfacción o cortesía:
+    // responder amablemente, consultar si requiere asistencia adicional y completar el caso sin bucles.
+    const isClosingOrThankYou =
       entities?.isThankYou === true ||
       entities?.is_thank_you === true ||
-      entities?.isClosing === true ||
-      /^(ok|gracias|muchas\s+gracias|listo(\s+gracias)?|de\s+acuerdo|perfecto|muy\s+amable|entendido|dale\s+gracias)[!.\s]*$/i.test(
-        (typeof text === "string" ? text : question).trim()
-      ) ||
-      /gracias|agradecid[oa]|excelente|entendido|de\s+nada|mas\s+tarde\s+(le\s+)?pago|luego\s+pago|despu[eé]s\s+pago|listo\s+muchas\s+gracias/i.test(
-        question.trim()
-      );
+      entities?.isClosing === true;
 
-    if (isThankYou) {
+    if (isClosingOrThankYou) {
       const nextData: GeneralInquiryContext = {
         ...data,
-        answer: "¡Con mucho gusto! Es un placer ayudarte. ¿Hay algo más en lo que te podamos colaborar o todo quedó claro? ¡Que tengas un excelente día!",
+        answer: "¡Con gusto! ¿Hay algo más en lo que te podamos ayudar o todo quedó claro? ¡Que tengas un excelente día!",
         found: true,
       };
       return {

@@ -295,17 +295,16 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Salvaguarda anti-repetición y bucles: Si el cliente envía una cortesía, confirmación o agradecimiento puro
-      // (ej: "ok", "gracias", "muchas gracias", "listo", "de acuerdo", "perfecto") luego de que se resolvió su duda,
-      // NUNCA disparar una nueva consulta de saldo (billing.balance); clasificar como agradecimiento/cierre en general.inquiry.
-      const isPureCourtesyOrClosing =
-        /^(ok|gracias|muchas\s+gracias|listo(\s+gracias)?|de\s+acuerdo|perfecto|muy\s+amable|entendido|dale\s+gracias)[!.\s]*$/i.test(customerText);
-      if (isPureCourtesyOrClosing && (!activeAggregate || interpretation.intent === "billing.balance")) {
+      // Si la IA descubrió una intención de cierre, satisfacción o cortesía del cliente,
+      // asegurar que el flujo se encamine a cortesía/cierre general y no reinicie procesos ya resueltos.
+      const isClosingOrThankYou =
+        Boolean(interpretation.entities?.isClosing || interpretation.entities?.isThankYou || interpretation.type === "CANCEL");
+      if (isClosingOrThankYou && interpretation.intent === "billing.balance") {
         interpretation = {
+          ...interpretation,
           type: "CANCEL",
           intent: "general.inquiry",
-          entities: { ...interpretation.entities, isThankYou: true, isClosing: true },
-          confidence: 0.95,
+          entities: { ...interpretation.entities, isClosing: true, isThankYou: true },
         };
       }
 
