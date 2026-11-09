@@ -27,13 +27,14 @@
 | `PAUSED` | usuario retoma el tema | `ACTIVE` | caso no expirado |
 | `ACTIVE`/`WAITING_USER` | error no recuperable / baja confianza sostenida / excepción técnica / solicitud explícita de humano | `ESCALATED` | ver §4 |
 | `ESCALATED` | agente toma el caso | `HUMAN_ACTIVE` | agente pertenece al `department` del caso (o es admin global) |
-| `HUMAN_ACTIVE`/`ESCALATED`/`ACTIVE`/`WAITING_USER` | agente cierra manualmente | `COMPLETED` | `closeReason ∈ {'RESOLVED', 'CLIENT_NO_RESPONSE'}` |
-| `ACTIVE`/`HUMAN_ACTIVE` | agente o sistema agenda seguimiento | `WAITING_USER` | `scheduled_at` configurado; pasa a sección "En Espera" |
+| `HUMAN_ACTIVE`/`ESCALATED`/`ACTIVE`/`WAITING_USER` | agente cierra manualmente | `COMPLETED` | `closeReason ∈ {'RESOLVED', 'CLIENT_NO_RESPONSE'}`; drena cola de departamento reactivamente |
+| `ACTIVE`/`HUMAN_ACTIVE` | agente o sistema agenda seguimiento | `WAITING_USER` | `scheduled_at` configurado; pasa a sección "En Espera", libera cupo concurrente de agente y drena cola reactivamente |
 | `WAITING_USER` (`scheduled_at <= NOW()`) | vence fecha agendada | `WAITING_USER` | Emite `CASE_SCHEDULED_REMINDER` (notificación interna a agentes); agente envía plantilla WhatsApp |
 | `ACTIVE` | workflow llega a paso terminal exitoso | `COMPLETED` | — |
 | `ACTIVE`/`PAUSED`/`WAITING_USER` | cancelación explícita | `CANCELLED` | — |
 
 **Regla dura:** El cierre del caso es responsabilidad manual del agente. Al completar un caso, el agente debe especificar si se trata de un **Cierre normal** (`RESOLVED`) o un **Cierre por falta de respuesta** (`CLIENT_NO_RESPONSE`). Ningún proceso automatizado cierra casos sin intervención del personal. Retomar nunca es reiniciar.
+Al pasar un caso a `WAITING_USER` ("En Espera") o `COMPLETED`, el cupo concurrente en `HUMAN_ACTIVE` se libera inmediatamente y se invoca reactivamente el despachador FIFO (`DrainDepartmentQueueService`) para asignar el próximo ticket en cola.
 
 ## 3. `SUPPORT_INTERNET` — ejemplo de referencia para construir el motor
 

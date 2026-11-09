@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Drenado Reactivo de Cola Departamental al Pasar Casos a "En Espera" (`ScheduleCaseUseCase`, `container.ts`, `schedule-and-close-reasons.test.ts`)**:
+  - *Contexto y Problema*:
+    Cuando un asesor agendaba o pasaba un caso a estado "En espera" (`ScheduleCaseUseCase`), el caso cambiaba a `WAITING_USER` y la conversación pasaba a `pending`. A nivel de cálculo de concurrencia (`countActiveCasesByAgent`), el sistema mide únicamente casos en `status = 'HUMAN_ACTIVE'`, por lo que en base de datos el asesor liberaba de inmediato 1 cupo disponible. Sin embargo, `ScheduleCaseUseCase` no invocaba a `DrainDepartmentQueueService`, provocando que la cola de espera del departamento no se drenara de forma reactiva y el siguiente cliente permaneciera encolado hasta que ocurriera otro evento externo (cierre de otro caso, cambio manual de disponibilidad o reconexión SSE).
+  - *Resolución*:
+    1. Se inyectó `drainQueue?: DrainDepartmentQueueService` en `ScheduleCaseUseCase`.
+    2. Tras persistir la transición a `WAITING_USER` y registrar la auditoría, se invoca reactivamente `drainQueue.drainQueueForDepartment(case.departmentId)` (o `drainQueueForAgent(agentUserId)` como alternativa si el caso no tiene área asignada).
+    3. Se cableó la instancia `drainDepartmentQueue` en `container.ts` y se añadieron pruebas unitarias en `test/cases/use-cases/schedule-and-close-reasons.test.ts`.
+
 - **Corrección de Enrutamiento Departamental, Fallback Ciego a Facturación y Clasificación de Soporte/Ubicación (`department-resolver.service.ts`, `department-routing.service.ts`, `interpret-message.prompt.ts`, `intent-catalog.ts`, `resolve-reply-template.ts`, `process-buffered-messages.use-case.ts`)**:
   - *Contexto y Problema*:
     1. **Contaminación de Facturación**: Casos con saludos, consultas generales o intenciones no clasificadas aparecían asignados al departamento de Facturación, a pesar de que los clientes no mencionaban facturas, deudas ni pagos.
