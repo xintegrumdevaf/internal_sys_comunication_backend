@@ -626,12 +626,12 @@ export class ProcessBufferedMessagesUseCase {
             caseId: targetCaseId,
             expectedCaseVersion: fresh.case.version,
             expectedWorkflowVersion: fresh.workflowInstance.version,
-            status: fresh.case.status,
+            status: visualReceipt ? fresh.case.status : "WAITING_USER",
             context: {
               workflowType: "BILLING_BALANCE",
               data: mergedContext,
             },
-            currentState: fresh.workflowInstance.currentState,
+            currentState: visualReceipt ? fresh.workflowInstance.currentState : "WAITING_USER_RECEIPT",
             expiresAt: null,
             departmentId: billingDeptId,
           });
@@ -674,6 +674,11 @@ export class ProcessBufferedMessagesUseCase {
           return;
         } else {
           // NO hay comprobante visual adjunto: no mentir diciendo que se recibió el comprobante
+          await this.deps.caseRepo.appendEvent(targetCaseId, "WAITING_USER", {
+            nextState: "WAITING_USER_RECEIPT",
+            missingFields: ["amount", "reference"],
+            waitingAttempts: 0,
+          });
           const replyMessage =
             "Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario.";
           await this.deliverFixedReply({

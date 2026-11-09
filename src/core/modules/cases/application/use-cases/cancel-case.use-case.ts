@@ -6,7 +6,7 @@ import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";
 
-const CANCELLABLE_STATUSES: CaseStatus[] = ["ACTIVE", "PAUSED", "WAITING_USER"];
+const CANCELLABLE_STATUSES: CaseStatus[] = ["NEW", "ACTIVE", "PAUSED", "WAITING_USER"];
 
 export type CancelCaseDeps = {
   caseRepo: CaseRepositoryPort;

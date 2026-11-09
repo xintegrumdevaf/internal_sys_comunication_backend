@@ -85,4 +85,31 @@ describe("CompleteCaseUseCase — solo lectura para agentes no asignados (docs/s
     const result = await useCase.execute({ caseId: created.id, agentUserId: anyAgent.id });
     expect(result.status).toBe("COMPLETED");
   });
+
+  it("un caso en estado NEW (recién creado o pendiente) puede completarse directamente por un agente autenticado", async () => {
+    const { caseRepo, agentRepo, departmentRepo, useCase } = build();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const agent = agentRepo.seed({ name: "Carlos", email: "carlos@isp.local", role: "agent", primaryDepartmentId: support.id });
+    const { case: created } = await caseRepo.create({
+      conversationId: "conv-3",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    // El caso se crea en estado 'NEW'
+    expect(created.status).toBe("NEW");
+
+    const result = await useCase.execute({
+      caseId: created.id,
+      agentUserId: agent.id,
+      closeReason: "RESOLVED",
+      resolutionNote: "Cerrado desde estado NEW",
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.context.closeReason).toBe("RESOLVED");
+    expect(result.context.resolutionNote).toBe("Cerrado desde estado NEW");
+  });
 });

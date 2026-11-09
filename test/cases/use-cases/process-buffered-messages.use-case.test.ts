@@ -1203,6 +1203,10 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       "Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario."
     );
     expect(whatsappSender.sent[0]!.body).not.toContain("¡Recibido, gracias!");
+
+    const convCases = await caseRepo.listByConversation(conversation.id);
+    expect(convCases).toHaveLength(1);
+    expect(convCases[0]!.status).toBe("WAITING_USER");
   });
 
   it("permite que el bot responda inmediatamente si el mensaje previo fue una plantilla o campaña (agentId: null)", async () => {

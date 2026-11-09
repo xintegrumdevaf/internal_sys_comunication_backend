@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Cierre y Cancelación Robusta de Casos en Estado `NEW` (`complete-case.use-case.ts`, `cancel-case.use-case.ts`, `case.entity.ts`, `process-buffered-messages.use-case.ts`, frontend `case.ts`)**:
+  - *Contexto y Problema*: Al intentar cerrar o completar un caso que acababa de crearse o reabrirse (por ejemplo, minutos u horas después de un caso anterior resuelto), los agentes recibían el error de negocio `No se puede completar un caso en estado NEW`.
+  - *Causas Raíz*:
+    1. En `CompleteCaseUseCase`, la lista `COMPLETABLE: CaseStatus[]` permitía únicamente `["ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"]`, omitiendo `NEW`. Por ende, cualquier caso recién instanciado o en espera inicial era imposible de cerrar por los agentes.
+    2. En `CancelCaseUseCase`, la lista `CANCELLABLE_STATUSES` tampoco admitía `NEW`.
+    3. En `case.entity.ts`, `ACTIVATABLE_CASE_STATUSES` no incluía `NEW`, impidiendo liberar adecuadamente `active_case_id` en la conversación al cancelar un caso en estado nuevo.
+    4. En `process-buffered-messages.use-case.ts`, en la rama de `billing.record_payment` sin comprobante visual (`!canAutoRecord && !visualReceipt`), el bot solicitaba la foto del comprobante al cliente pero dejaba el caso en `status: "NEW"`, quedando varado en ese estado como `active_case_id`.
+  - *Resolución*:
+    1. Se añadió `NEW` a `COMPLETABLE` en `complete-case.use-case.ts` y a `CANCELLABLE_STATUSES` en `cancel-case.use-case.ts` (y en el frontend `case.ts`).
+    2. Se actualizó `ACTIVATABLE_CASE_STATUSES` en `case.entity.ts` para reconocer `NEW`.
+    3. En `process-buffered-messages.use-case.ts`, cuando se solicita la foto del comprobante al cliente, el caso transiciona limpiamente a `status: "WAITING_USER"` con `currentState: "WAITING_USER_RECEIPT"` y registra el evento `WAITING_USER`.
+    4. Se agregaron tests unitarios en `complete-case-authorization.test.ts`, `cancel-case.use-case.test.ts` y `process-buffered-messages.use-case.test.ts` verificando la finalización, cancelación y transición correcta.
+
 - **Jerarquía de Confianza Activa y Filtrado de Contratos Inactivos (`contract-status-filter.helper.ts`, `support-internet.workflow.ts`, `billing-balance.workflow.ts`, `home-relocation.workflow.ts`, `resolve-reply-template.ts`, `find-cliend-contract.json`)**:
   - *Contexto y Problema*: Al consultar contratos históricos por cédula en el ISP/Google Sheets (`VALIDATE_CLIENT`), el sistema recibía contratos en estados `ANULADO`, `RETIRADO`, `RECHAZADO` o `INACTIVO`. Al detectar más de un contrato, el motor obligaba a desambiguar (`WAITING_USER_DISAMBIGUATE`) presentando contratos dados de baja en los botones interactivos de WhatsApp. Esto generaba confusión y alarma en clientes que creían que se les seguía cobrando por servicios cancelados años atrás, además de forzar pasos de desambiguación innecesarios a clientes que en realidad solo contaban con un único servicio activo.
   - *Resolución*:

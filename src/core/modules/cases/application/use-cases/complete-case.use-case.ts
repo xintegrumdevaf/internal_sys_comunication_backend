@@ -12,7 +12,7 @@ import type { RealtimeBroadcaster } from "../../../realtime/application/realtime
 import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";
 import type { DrainDepartmentQueueService } from "../../../escalation/application/services/drain-department-queue.service";
 
-const COMPLETABLE: CaseStatus[] = ["ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
+const COMPLETABLE: CaseStatus[] = ["NEW", "ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
 const ASSIGNMENT_GUARDED: CaseStatus[] = ["HUMAN_ACTIVE", "ESCALATED"];
 
 export type CaseCloseReason = "RESOLVED" | "CLIENT_NO_RESPONSE";

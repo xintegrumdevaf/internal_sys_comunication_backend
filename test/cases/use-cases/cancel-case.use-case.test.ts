@@ -39,6 +39,29 @@ describe("CancelCaseUseCase (docs/spec/02_STATE_MACHINE.md §2)", () => {
     );
   });
 
+  it("cancela un caso en estado NEW y libera el active_case_id de la conversacion", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const conversationRepo = new ConversationRepositoryFake();
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    expect(created.status).toBe("NEW");
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    const useCase = new CancelCaseUseCase({ caseRepo, conversationRepo, logger: silentLogger });
+    const result = await useCase.execute({ caseId: created.id, reason: "Descartado antes de iniciar" });
+
+    expect(result.status).toBe("CANCELLED");
+    const conversationAfter = await conversationRepo.findById(conversation.id);
+    expect(conversationAfter?.activeCaseId).toBeNull();
+  });
+
   it("rechaza cancelar un caso ya terminal", async () => {
     const caseRepo = new CaseRepositoryFake();
     const conversationRepo = new ConversationRepositoryFake();

@@ -33,7 +33,7 @@ export interface Case {
 }
 
 /** Estados en los que un caso puede ser el `active_case_id` de su conversacion. */
-export const ACTIVATABLE_CASE_STATUSES: CaseStatus[] = ["ACTIVE", "WAITING_USER"];
+export const ACTIVATABLE_CASE_STATUSES: CaseStatus[] = ["NEW", "ACTIVE", "WAITING_USER"];
 
 /** Estados desde los que se puede pausar/escalar/cancelar (automatizables, §1). */
 export const AUTOMATABLE_CASE_STATUSES: CaseStatus[] = ["NEW", "ACTIVE", "WAITING_USER", "PAUSED"];
