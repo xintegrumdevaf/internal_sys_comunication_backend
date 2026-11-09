@@ -7,6 +7,7 @@ import type { AuditRepositoryPort } from "../../../audit/application/ports/audit
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 import type { CaseScheduleTag, CaseSchedulingMetadata } from "../../domain/contexts/case-context";
+import type { DrainDepartmentQueueService } from "../../../escalation/application/services/drain-department-queue.service";
 
 const SCHEDULABLE: CaseStatus[] = ["NEW", "ACTIVE", "WAITING_USER", "HUMAN_ACTIVE", "ESCALATED", "PAUSED"];
 
@@ -18,6 +19,7 @@ export class ScheduleCaseUseCase {
       auditRepo: AuditRepositoryPort;
       logger: Logger;
       broadcaster?: RealtimeBroadcaster;
+      drainQueue?: DrainDepartmentQueueService;
     },
   ) {}
 
@@ -89,6 +91,25 @@ export class ScheduleCaseUseCase {
       { caseId: result.case.id, scheduledAt: input.scheduledAt.toISOString() },
       "caso agendado exitosamente en sección En Espera",
     );
+
+    if (this.deps.drainQueue) {
+      const deptId = aggregate.case.departmentId;
+      if (deptId) {
+        void this.deps.drainQueue.drainQueueForDepartment(deptId).catch((err) => {
+          this.deps.logger.warn(
+            { err, departmentId: deptId, caseId: aggregate.case.id },
+            "error al drenar cola del departamento tras agendar caso en espera",
+          );
+        });
+      } else if (input.agentUserId) {
+        void this.deps.drainQueue.drainQueueForAgent(input.agentUserId).catch((err) => {
+          this.deps.logger.warn(
+            { err, agentId: input.agentUserId, caseId: aggregate.case.id },
+            "error al drenar cola del asesor tras agendar caso en espera",
+          );
+        });
+      }
+    }
 
     return result.case;
   }

@@ -60,6 +60,10 @@ export class OllamaAdapter implements AIProviderPort {
       messageId: input.messageId,
     });
     const dynamicIntents = this.routingService ? await this.routingService.getPromptIntents() : undefined;
+    const dynamicCatalogText =
+      dynamicIntents && dynamicIntents.length > 0
+        ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n")
+        : "";
     const fallback = () => buildInterpretMessagePrompt(input, dynamicIntents);
     const resolved = this.promptResolver
       ? await this.promptResolver.resolvePrompt(
@@ -68,14 +72,27 @@ export class OllamaAdapter implements AIProviderPort {
             text: input.text,
             recentMessages: input.conversationSnapshot?.recentMessages,
             activeCase: input.conversationSnapshot?.activeCase,
+            dynamicIntents: dynamicCatalogText,
+            dynamicCatalog: dynamicCatalogText,
           },
           fallback,
         )
       : { ...fallback(), modelConfig: { temperature: 0.2 }, versionNumber: 0, source: "fallback_code" as const };
 
+    let effectiveSystemPrompt = resolved.system;
+    if (
+      resolved.source === "database" &&
+      dynamicCatalogText.length > 0 &&
+      dynamicIntents &&
+      dynamicIntents[0] &&
+      !effectiveSystemPrompt.includes(dynamicIntents[0].intent)
+    ) {
+      effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n## Catálogo dinámico de casos y motivos departamentales:\n${dynamicCatalogText}`;
+    }
+
     const started = Date.now();
     try {
-      const raw = await this.chat(resolved.system, resolved.user, {
+      const raw = await this.chat(effectiveSystemPrompt, resolved.user, {
         jsonMode: true,
         temperature: (resolved.modelConfig.temperature as number) ?? 0.2,
       });

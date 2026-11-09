@@ -222,4 +222,48 @@ describe("Cierre manual y agendamiento de casos", () => {
 
     expect(scheduledCase.context.schedulingMetadata?.scheduleTag).toBe("REVISION_TECNICA");
   });
+
+  it("dispara reactivamente el drenado de la cola del departamento al agendar un caso en espera", async () => {
+    const { caseRepo, agentRepo, departmentRepo, auditRepo, broadcaster } = buildSetup();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const agent = agentRepo.seed({ name: "Carlos", email: "carlos@isp.local", role: "agent", primaryDepartmentId: support.id });
+
+    const drainedDepts: string[] = [];
+    const drainQueueMock = {
+      drainQueueForDepartment: async (deptId: string) => {
+        drainedDepts.push(deptId);
+        return 1;
+      },
+      drainQueueForAgent: async () => 0,
+    } as any;
+
+    const scheduleCaseWithDrain = new ScheduleCaseUseCase({
+      caseRepo,
+      auditRepo,
+      logger: silentLogger,
+      broadcaster,
+      drainQueue: drainQueueMock,
+    });
+
+    const { case: created } = await caseRepo.create({
+      conversationId: "conv-5",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    await scheduleCaseWithDrain.execute({
+      caseId: created.id,
+      agentUserId: agent.id,
+      scheduledAt: new Date(Date.now() + 60000),
+      scheduleTag: "SEGUIMIENTO",
+    });
+
+    // Esperar microtasks para que el void drainQueue.catch(...) se complete
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(drainedDepts).toContain(support.id);
+  });
 });

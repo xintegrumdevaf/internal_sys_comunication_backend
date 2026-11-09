@@ -704,6 +704,7 @@ export function createContainer(): Container {
     auditRepo,
     logger: casesLogger,
     broadcaster,
+    drainQueue: drainDepartmentQueue,
   });
   const scheduledReminderNotifier = new ScheduledReminderNotifierService({
     caseRepo,
