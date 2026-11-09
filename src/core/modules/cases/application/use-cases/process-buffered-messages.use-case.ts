@@ -1083,6 +1083,7 @@ export class ProcessBufferedMessagesUseCase {
       outcome: input.outcome,
       decision: input.decision,
       context: input.context,
+      customerText: input.customerText,
     });
 
     const body = await this.deps.composeReply.execute({

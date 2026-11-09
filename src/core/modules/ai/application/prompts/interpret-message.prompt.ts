@@ -30,7 +30,7 @@ export function buildInterpretMessagePrompt(
   const previousCompleted = input.conversationSnapshot?.previousCompletedCase;
 
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
-- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio o sigue sin internet a pesar de haber pagado, prima soporte técnico).
+- support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio, O TAMBIÉN asistencia técnica de equipos, cambio de clave/contraseña de Wi-Fi, nombre de red (SSID), reseteo o configuración de router/módem (ej: "Me pueden ayudar cambiando la clave x favor", "cambiar la clave de mi wifi", "contraseña del router", "no me entra el wifi") (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio, falla técnica o pide cambio de clave/configuración de router, prima soporte técnico).
 - billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
 - billing.payment_methods: consulta sobre números de cuenta, cuentas bancarias para depósito o transferencia, formas de pago autorizadas o a dónde/cómo pagar (ej: "número para depositar", "el número para de positarle", "a qué cuenta deposito", "dónde pago", "cuentas para transferir").
 - billing.record_payment: envío o reporte de comprobante, constancia, depósito o transferencia de pago YA realizado (en cualquier expresión del lenguaje natural: cuando el objetivo del cliente es registrar, reportar o confirmar su pago sin reportar fallas técnicas activas).`;
@@ -96,6 +96,14 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   Si el caso activo es de traslado de domicilio (HOME_RELOCATION) y está esperando la nueva dirección, referencias o ubicación:
   → Clasifica SIEMPRE como type="ANSWER" con intent="support.home_relocation".
   → Extrae en \`entities\`: \`newAddress\` (dirección), \`references\` (referencias físicas como cerca de la escuela, frente a, etc.) y \`mapLocation\` (link, ubicación o coordenadas). Si la dirección y referencias vienen juntas, extrae ambas.
+- SOPORTE TÉCNICO Y CONFIGURACIÓN DE ROUTER / WIFI (support.internet):
+  Si el cliente solicita soporte técnico, cambio de clave, contraseña del Wi-Fi, nombre de red SSID, configuración de router o reseteo de módem (ej: "Me pueden ayudar cambiando la clave x favor", "cambiar la clave de mi wifi", "contraseña del router", "no me entra el wifi", "cambio de clave"):
+  → Clasifica SIEMPRE como intent="support.internet".
+  → NUNCA clasificar como sales ni como billing.
+- UBICACIÓN GPS O COORDENADAS AISLADAS (SIN CASO ACTIVO):
+  Si el cliente envía ÚNICAMENTE una ubicación GPS, link de mapa o coordenadas numéricas (ej: "Ubicación GPS: -2.89876, -79.03233") SIN texto explicativo y NO existe un caso activo de ventas ni de traslado:
+  → NUNCA asumir que el cliente quiere contratar un servicio nuevo ni clasificar directamente como sales.new_contract.
+  → Clasifica como type="UNCLEAR" con intent="general.inquiry" y extrae \`mapLocation\` o \`coordinates\` en entities, para que el sistema le consulte al cliente qué gestión necesita.
 - CONTRATACIÓN NUEVA Y CONSULTA DE PLANES (FLUJO SALES):
   - Si el cliente manifiesta intención explícita de CONTRATAR o instalar el servicio nuevo (ej: "Hola, me gustaría contratar el servicio", "quiero contratar", "deseo adquirir internet", "me interesa contratar"):
     → Clasifica como intent="sales.new_contract".

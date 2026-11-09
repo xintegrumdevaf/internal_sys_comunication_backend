@@ -157,6 +157,12 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
 
       expect(createdCase.workflowType).toBe("BILLING_BALANCE");
     });
+
+    it("retorna null en lugar de asignar a ciegas el primer departamento cuando no hay coincidencia", async () => {
+      const resolver = new DepartmentResolverService(departmentRepo, routingService);
+      const resolved = await resolver.resolveDepartmentId("UNKNOWN_OR_UNCLASSIFIED");
+      expect(resolved).toBeNull();
+    });
   });
 
   describe("CaseArbitrationService con intents dinámicos", () => {

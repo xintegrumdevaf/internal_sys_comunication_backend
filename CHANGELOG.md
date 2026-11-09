@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Corrección de Enrutamiento Departamental, Fallback Ciego a Facturación y Clasificación de Soporte/Ubicación (`department-resolver.service.ts`, `department-routing.service.ts`, `interpret-message.prompt.ts`, `intent-catalog.ts`, `resolve-reply-template.ts`, `process-buffered-messages.use-case.ts`)**:
+  - *Contexto y Problema*:
+    1. **Contaminación de Facturación**: Casos con saludos, consultas generales o intenciones no clasificadas aparecían asignados al departamento de Facturación, a pesar de que los clientes no mencionaban facturas, deudas ni pagos.
+    2. **Desvío Erróneo a Ventas**: Clientes que enviaban una ubicación GPS aislada eran clasificados automáticamente como `sales.new_contract`, derivándose a Ventas. Cuando el cliente luego pedía soporte técnico (ej. *"Me pueden ayudar cambiando la clave x favor"*), el caso ya estaba atrapado en Ventas con el bot silenciado.
+  - *Causas Raíz*:
+    1. En `DepartmentResolverService` (línea 57) y `DepartmentRoutingService` (línea 162), cuando un tipo de flujo o intención no coincidía con ningún slug de departamento, existía un fallback ciego: `return activeDepts[0]!.id;`. En la base de datos, el primer departamento activo era Facturación (`billing`), provocando que cualquier caso sin departamento asignado se volcara indebidamente a Facturación.
+    2. En `interpret-message.prompt.ts`, no existía regla para mensajes que contenían únicamente una ubicación GPS sin caso activo de ventas o traslado, llevando a que la IA asumiera contratación nueva (`sales.new_contract`) y activara la verificación de cobertura KML.
+    3. No existía mención explícita de solicitudes técnicas de router (cambio de clave Wi-Fi, contraseña, SSID, configuración) en el catálogo ni en el prompt de interpretación, por lo que solicitudes como *"cambiando la clave x favor"* no tenían una ruta clara a `support.internet`.
+  - *Resolución*:
+    1. **Eliminación del Fallback Ciego**: En `department-resolver.service.ts` y `department-routing.service.ts`, se eliminó `return activeDepts[0]!.id;`. Si no hay coincidencia válida de departamento, se retorna `null` para que el caso quede en el pool general de triage (`department_id: null`) y sea supervisado por administradores/managers en lugar de saturar Facturación.
+    2. **Ubicaciones GPS Aisladas Clarificadas**: Si un cliente envía una ubicación GPS o coordenadas numéricas sin caso previo ni texto, el sistema no asume Ventas ni traslado; clasifica como `UNCLEAR` y solicita aclaración amigable: *"Recibimos tu ubicación 📍. ¿Podrías indicarnos en qué te podemos colaborar hoy? (Por ejemplo: consultar cobertura para contratar un servicio nuevo, solicitar soporte técnico o realizar el traslado de tu domicilio)"*.
+    3. **Ruta Explícita de Soporte de Router y Clave Wi-Fi**: Se incorporó en `intent-catalog.ts` y en `interpret-message.prompt.ts` que solicitudes de cambio de clave Wi-Fi, reseteo o configuración de router pertenecen indefectiblemente a `support.internet` (Soporte Técnico).
+
+
+
 - **Aislamiento Departamental y Mitigación de Alertas Sonoras Indiscriminadas en Tiempo Real (`realtime-broadcaster.ts`, `receive-inbound-message.use-case.ts`, frontend `use-realtime.tsx`, `notifications.state.ts`, `realtime-event.ts`, `AppShell.tsx`)**:
   - *Contexto y Problema*:
     1. Asesores con rol `agent` escuchaban notificaciones sonoras (`playNotificationSound`) y recibían alertas de escritorio en el navegador para mensajes entrantes de toda la empresa de forma indiscriminada, como si tuvieran rol de supervisión global (`admin` o `manager`).

@@ -50,16 +50,9 @@ export class DepartmentResolverService {
       }
     }
 
-    try {
-      const allDepts = await this.departmentRepo.list();
-      const activeDepts = allDepts.filter((d) => d.active !== false);
-      if (activeDepts.length > 0) {
-        return activeDepts[0]!.id;
-      }
-    } catch {
-      // Ignorar
-    }
-
+    // Si no coincide con ningún departamento específico, no asignar departamento a ciegas.
+    // Debe quedar en null (pool general de triage) para que los supervisores/admin lo enruten,
+    // en lugar de enviarlo erróneamente al primer departamento de la lista (ej. Facturación).
     return null;
   }
 

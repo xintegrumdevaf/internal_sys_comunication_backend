@@ -6,7 +6,7 @@ export const INTENT_CATALOG = [
   {
     intent: "support.internet",
     workflowType: "SUPPORT_INTERNET",
-    description: "no tiene servicio de internet / está caído",
+    description: "no tiene servicio de internet, caído, intermitente, o soporte técnico/configuración de router y cambio de clave wifi",
   },
   {
     intent: "support.slow_internet",

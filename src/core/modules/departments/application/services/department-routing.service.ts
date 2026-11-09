@@ -158,9 +158,9 @@ export class DepartmentRoutingService {
         }
       }
 
-      if (activeDepts.length > 0) {
-        return activeDepts[0]!.id;
-      }
+      // Si no coincide con ninguna palabra clave, retornar null (pool general de triage)
+      // para evitar forzar el caso al primer departamento de la lista (ej. Facturación).
+      return null;
     } catch {
       // Ignorar error de lista si ocurre en fakes incompletos
     }

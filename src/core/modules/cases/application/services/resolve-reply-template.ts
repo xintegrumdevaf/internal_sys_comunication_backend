@@ -30,10 +30,15 @@ export function resolveReplyTemplate(input: {
   outcome?: WorkflowStepOutcome;
   decision?: "CLARIFY" | "REQUEST_HUMAN";
   context?: CaseContext;
+  customerText?: string;
 }): { templateHint: string; resultVars: Record<string, unknown>; action: string; status: string; missingFields?: string[] } {
   if (input.decision === "CLARIFY") {
+    let hint = CLARIFY_TEMPLATE;
+    if (input.customerText && /Ubicaci[oó]n GPS|[-+]?\d{1,2}\.\d+\s*,\s*[-+]?\d{1,3}\.\d+/i.test(input.customerText)) {
+      hint = "Recibimos tu ubicación 📍. ¿Podrías indicarnos en qué te podemos colaborar hoy? (Por ejemplo: consultar cobertura para contratar un servicio nuevo, solicitar soporte técnico o realizar el traslado de tu domicilio).";
+    }
     return {
-      templateHint: CLARIFY_TEMPLATE,
+      templateHint: hint,
       resultVars: {},
       action: "CLARIFY",
       status: "CLARIFY",
