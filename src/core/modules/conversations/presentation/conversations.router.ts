@@ -632,36 +632,19 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
           cases.find((c) => c.status === "NEW");
         if (active) {
           effectiveCaseId = active.id;
-        } else {
-          const newCase = await deps.caseRepo.create({
-            conversationId: conversation.id,
-            workflowType: "GENERAL_INQUIRY",
-            departmentId: null,
-            context: emptyContextFor("GENERAL_INQUIRY"),
-            initialState: "HUMAN_DIRECT",
-            expiresAt: null,
-          });
-          effectiveCaseId = newCase.case.id;
-          await deps.caseRepo.setAssignedAgent(effectiveCaseId, agent.id);
-          await deps.caseRepo.applyTransition({
-            caseId: effectiveCaseId,
-            expectedCaseVersion: newCase.case.version,
-            expectedWorkflowVersion: newCase.workflowInstance.version,
-            status: "HUMAN_ACTIVE",
-            context: newCase.case.context,
-            currentState: newCase.workflowInstance.currentState,
-            expiresAt: null,
-          });
-          await deps.conversationRepo.setActiveCaseId(conversation.id, effectiveCaseId);
         }
       }
 
+      // Desacople de plantillas: el envío de plantilla saliente no debe forzar un caso
+      // HUMAN_ACTIVE ni asignarse como interacción humana de chat 1:1 (agentId: null).
+      // Si el cliente responde, la IA debe poder retomar el control de inmediato.
       const message = await deps.messageRepo.insertOutbound({
         conversationId: conversation.id,
         author: "agent",
         body: templateBodyText,
         externalId,
-        agentId: agent.id,
+        agentId: null,
+        caption: `template:${parsed.data.templateName}`,
         caseId: effectiveCaseId ?? undefined,
       });
 

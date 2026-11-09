@@ -1204,4 +1204,68 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     );
     expect(whatsappSender.sent[0]!.body).not.toContain("¡Recibido, gracias!");
   });
+
+  it("permite que el bot responda inmediatamente si el mensaje previo fue una plantilla o campaña (agentId: null)", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "📋 [Plantilla: recordatorio_pago_v1] Bienvenido a un nuevo mes...",
+      agentId: null,
+      caption: "template:recordatorio_pago_v1",
+    });
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "billing.balance",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const newClientMsg = messageRepo.seedText(
+      conversation.id,
+      "Buenas tardes me ayuda con el valor a cancelar",
+    );
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-template-reply",
+      messages: [newClientMsg],
+    });
+
+    expect(whatsappSender.sent.length).toBeGreaterThan(0);
+  });
 });

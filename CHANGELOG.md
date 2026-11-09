@@ -2,7 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.13] - 2026-11-07
+## [0.2.13] - 2026-11-09
+
+- **Desacople Total de Plantillas Salientes Manuales (`conversations.router.ts`)**:
+  - *Contexto y Causa Raíz*: Al enviar una plantilla desde la UI mediante `POST /api/conversations/:id/template` a un chat sin caso activo, el endpoint forzaba la creación de un caso en estado `HUMAN_ACTIVE` asignado al agente que despachó la plantilla (`setAssignedAgent(agent.id)`) e insertaba el mensaje con `agentId: agent.id`. Cuando el cliente respondía horas después (por ejemplo pidiendo su saldo), `ProcessBufferedMessagesUseCase` detectaba que la conversación tenía un caso `HUMAN_ACTIVE` asignado y silenciaba la IA de forma fulminante (`return;`), dejando al cliente en espera sin respuesta por horas mientras la UI indicaba erróneamente que la IA estaba activa.
+  - *Resolución*: Se eliminó la creación forzada de casos `HUMAN_ACTIVE` en el envío de plantillas. Las plantillas salientes se registran con `agentId: null` y `caption: template:<name>`, identificándolas como notificaciones salientes desacopladas de atención humana exclusiva. Cuando el cliente responde, la IA retoma inmediatamente el control del caso.
 
 - **Desacople de Campañas/Plantillas, Desbloqueo Inmediato de IA y Reutilización de Identidad (`process-buffered-messages.use-case.ts`, `interpret-message.prompt.ts`, `general-inquiry.workflow.ts`, `conversation-identity.service.ts`, `billing-balance.workflow.ts`, `support-internet.workflow.ts`, `home-relocation.workflow.ts`)**:
   - *Contexto y Problema*:
