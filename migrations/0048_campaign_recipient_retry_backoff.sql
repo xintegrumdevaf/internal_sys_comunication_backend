@@ -5,3 +5,4 @@ ALTER TABLE campaign_recipient
 
 CREATE INDEX IF NOT EXISTS idx_campaign_recipient_retry
   ON campaign_recipient (campaign_id, status, next_retry_at);
+
