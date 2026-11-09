@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Reintentos Automáticos con Backoff Exponencial en Campañas Masivas (`process-campaign-batch.use-case.ts`, `campaign.repository.pg.ts`, `0048_campaign_recipient_retry_backoff.sql`)**:
+  - *Contexto y Problema*: Al procesar lotes de destinatarios en campañas masivas, cualquier error temporal en el proveedor de WhatsApp (Meta API error 429 por saturación de QPS, caídas 5xx, timeouts o microcortes de red) marcaba de inmediato al destinatario como `FAILED` e incrementaba el contador de fallidos de la campaña. Los clientes con fallos transitorios quedaban permanentemente sin recibir la notificación.
+  - *Resolución*:
+    1. Se introdujo discriminación de errores transitorios (`isTransientCampaignError`) vs permanentes/fatales (número inválido, plantilla inexistente).
+    2. Política de reintentos con backoff exponencial y jitter (`calculateCampaignBackoffMs`) de hasta 3 intentos (`MAX_RECIPIENT_RETRIES = 3`).
+    3. Los destinatarios con fallos transitorios se mantienen en estado `PENDING` con fecha futura `next_retry_at` y mensaje de reintento.
+    4. La consulta de lotes pendientes `findPendingBatch` filtra por `(next_retry_at IS NULL OR next_retry_at <= NOW())`, permitiendo que el worker reintente los mensajes en el momento exacto sin bloquear el resto del lote.
+    5. Si se agotan los 3 reintentos o el error es fatal, el destinatario pasa a `FAILED` y se incrementa el contador de fallidos.
+
 - **Desacople Total de Plantillas Salientes Manuales (`conversations.router.ts`)**:
   - *Contexto y Causa Raíz*: Al enviar una plantilla desde la UI mediante `POST /api/conversations/:id/template` a un chat sin caso activo, el endpoint forzaba la creación de un caso en estado `HUMAN_ACTIVE` asignado al agente que despachó la plantilla (`setAssignedAgent(agent.id)`) e insertaba el mensaje con `agentId: agent.id`. Cuando el cliente respondía horas después (por ejemplo pidiendo su saldo), `ProcessBufferedMessagesUseCase` detectaba que la conversación tenía un caso `HUMAN_ACTIVE` asignado y silenciaba la IA de forma fulminante (`return;`), dejando al cliente en espera sin respuesta por horas mientras la UI indicaba erróneamente que la IA estaba activa.
   - *Resolución*: Se eliminó la creación forzada de casos `HUMAN_ACTIVE` en el envío de plantillas. Las plantillas salientes se registran con `agentId: null` y `caption: template:<name>`, identificándolas como notificaciones salientes desacopladas de atención humana exclusiva. Cuando el cliente responde, la IA retoma inmediatamente el control del caso.

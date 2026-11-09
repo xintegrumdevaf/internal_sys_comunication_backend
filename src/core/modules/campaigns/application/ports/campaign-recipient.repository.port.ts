@@ -26,6 +26,8 @@ export interface CampaignRecipientRepositoryPort {
       errorMessage?: string | null;
       sentAt?: Date | null;
       customBody?: string | null;
+      retryCount?: number;
+      nextRetryAt?: Date | null;
     },
   ): Promise<CampaignRecipient>;
   updateStatusByExternalId(

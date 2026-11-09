@@ -11,4 +11,6 @@ export interface CampaignRecipient {
   externalId: string | null;
   errorMessage: string | null;
   sentAt: Date | null;
+  retryCount?: number;
+  nextRetryAt?: Date | null;
 }

@@ -52,6 +52,8 @@ type RecipientRow = {
   external_id: string | null;
   error_message: string | null;
   sent_at: Date | null;
+  retry_count?: number | null;
+  next_retry_at?: Date | null;
 };
 
 function mapCampaignRow(row: CampaignRow): Campaign {
@@ -99,6 +101,8 @@ function mapRecipientRow(row: RecipientRow): CampaignRecipient {
     externalId: row.external_id,
     errorMessage: row.error_message,
     sentAt: row.sent_at,
+    retryCount: row.retry_count != null ? Number(row.retry_count) : 0,
+    nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at) : null,
   };
 }
 
@@ -284,6 +288,7 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
     const { rows } = await this.pool.query<RecipientRow>(
       `SELECT * FROM campaign_recipient
        WHERE campaign_id = $1 AND status = 'PENDING'
+         AND (next_retry_at IS NULL OR next_retry_at <= NOW())
        ORDER BY id ASC
        LIMIT $2`,
       [campaignId, limit],
@@ -300,6 +305,8 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
       errorMessage?: string | null;
       sentAt?: Date | null;
       customBody?: string | null;
+      retryCount?: number;
+      nextRetryAt?: Date | null;
     },
   ): Promise<CampaignRecipient> {
     const { rows } = await this.pool.query<RecipientRow>(
@@ -308,7 +315,9 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
            external_id = COALESCE($3, external_id),
            error_message = COALESCE($4, error_message),
            sent_at = COALESCE($5, sent_at),
-           custom_body = COALESCE($6, custom_body)
+           custom_body = COALESCE($6, custom_body),
+           retry_count = COALESCE($7, retry_count),
+           next_retry_at = $8
        WHERE id = $1
        RETURNING *`,
       [
@@ -318,6 +327,8 @@ export class CampaignRecipientRepositoryPg implements CampaignRecipientRepositor
         data?.errorMessage ?? null,
         data?.sentAt ?? null,
         data?.customBody ?? null,
+        data?.retryCount ?? null,
+        data?.nextRetryAt ?? null,
       ],
     );
 
@@ -538,8 +549,14 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
   }
 
   async findPendingBatch(campaignId: string, limit: number): Promise<CampaignRecipient[]> {
+    const now = Date.now();
     return [...this.items.values()]
-      .filter((r) => r.campaignId === campaignId && r.status === "PENDING")
+      .filter(
+        (r) =>
+          r.campaignId === campaignId &&
+          r.status === "PENDING" &&
+          (!r.nextRetryAt || r.nextRetryAt.getTime() <= now),
+      )
       .slice(0, limit);
   }
 
@@ -551,6 +568,8 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
       errorMessage?: string | null;
       sentAt?: Date | null;
       customBody?: string | null;
+      retryCount?: number;
+      nextRetryAt?: Date | null;
     },
   ): Promise<CampaignRecipient> {
     const existing = this.items.get(id);
@@ -563,6 +582,8 @@ export class CampaignRecipientRepositoryFake implements CampaignRecipientReposit
       errorMessage: data?.errorMessage !== undefined ? data.errorMessage : existing.errorMessage,
       sentAt: data?.sentAt !== undefined ? data.sentAt : existing.sentAt,
       customBody: data?.customBody !== undefined ? data.customBody : existing.customBody,
+      retryCount: data?.retryCount !== undefined ? data.retryCount : (existing.retryCount ?? 0),
+      nextRetryAt: data?.nextRetryAt !== undefined ? data.nextRetryAt : existing.nextRetryAt,
     };
 
     this.items.set(id, updated);

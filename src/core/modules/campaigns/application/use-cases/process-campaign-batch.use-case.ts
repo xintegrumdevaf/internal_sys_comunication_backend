@@ -12,6 +12,56 @@ export type ProcessBatchResult = {
   stoppedReason?: string;
 };
 
+export const MAX_RECIPIENT_RETRIES = 3;
+
+export function isTransientCampaignError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+
+  // Rate limit / Too Many Requests / Meta QPS limit
+  if (msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests")) {
+    return true;
+  }
+  // Server errors (5xx)
+  if (
+    msg.includes("500") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504") ||
+    msg.includes("internal server error") ||
+    msg.includes("bad gateway") ||
+    msg.includes("service unavailable") ||
+    msg.includes("gateway timeout")
+  ) {
+    return true;
+  }
+  // Network / Connection glitches / Timeouts
+  if (
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network error")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function calculateCampaignBackoffMs(
+  retryCount: number,
+  baseDelayMs = 2000,
+  maxDelayMs = 30000,
+): number {
+  const exponent = Math.max(0, retryCount - 1);
+  const rawDelay = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, exponent));
+  const jitter = Math.floor(Math.random() * 500);
+  return rawDelay + jitter;
+}
+
 export class ProcessCampaignBatchUseCase {
   constructor(
     private readonly campaignRepo: CampaignRepositoryPort,
@@ -129,15 +179,45 @@ export class ProcessCampaignBatchUseCase {
         );
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        await this.recipientRepo.updateStatus(recipient.id, "FAILED", {
-          errorMessage,
-          customBody: finalSentBody ?? recipient.customBody,
-        });
-        await this.campaignRepo.incrementCounters(campaignId, { failed: 1 });
-        this.logger.error(
-          { campaignId, recipientId: recipient.id, phone: recipient.phone, err },
-          "Fallo al enviar mensaje de campaña a destinatario individual",
-        );
+        const currentRetry = recipient.retryCount ?? 0;
+        const isTransient = isTransientCampaignError(err);
+
+        if (isTransient && currentRetry < MAX_RECIPIENT_RETRIES) {
+          const nextRetry = currentRetry + 1;
+          const backoffMs = calculateCampaignBackoffMs(nextRetry);
+          const nextRetryAt = new Date(Date.now() + backoffMs);
+
+          await this.recipientRepo.updateStatus(recipient.id, "PENDING", {
+            errorMessage: `Reintento ${nextRetry}/${MAX_RECIPIENT_RETRIES}: ${errorMessage}`,
+            customBody: finalSentBody ?? recipient.customBody,
+            retryCount: nextRetry,
+            nextRetryAt,
+          });
+
+          this.logger.warn(
+            {
+              campaignId,
+              recipientId: recipient.id,
+              phone: recipient.phone,
+              retryCount: nextRetry,
+              nextRetryAt,
+              err: errorMessage,
+            },
+            `Fallo transitorio al enviar a destinatario; programado reintento #${nextRetry} en ${backoffMs}ms`,
+          );
+        } else {
+          await this.recipientRepo.updateStatus(recipient.id, "FAILED", {
+            errorMessage,
+            customBody: finalSentBody ?? recipient.customBody,
+            retryCount: currentRetry,
+            nextRetryAt: null,
+          });
+          await this.campaignRepo.incrementCounters(campaignId, { failed: 1 });
+          this.logger.error(
+            { campaignId, recipientId: recipient.id, phone: recipient.phone, err },
+            "Fallo permanente al enviar mensaje de campaña a destinatario individual",
+          );
+        }
       }
 
       processedCount++;

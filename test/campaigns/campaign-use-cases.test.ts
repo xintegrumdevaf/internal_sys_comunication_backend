@@ -534,4 +534,138 @@ describe("Campaign Use Cases", () => {
       ["23"],
     );
   });
+
+  it("ProcessCampaignBatchUseCase programa reintento con backoff y mantiene PENDING ante fallos transitorios (HTTP 429)", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn(),
+      sendTemplate: vi.fn().mockRejectedValue(new Error("WhatsApp sendTemplate fallo (429): Rate limit exceeded")),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña transitoria",
+      templateName: "promo_test",
+      templateLanguage: "es",
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      { phone: "+593999999999", name: "Carlos" },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 1);
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+
+    // No debe finalizar la campaña porque el destinatario queda PENDING para reintento
+    expect(result.finished).toBe(false);
+
+    const recipients = await recipientRepo.listByCampaignId(campaign.id);
+    expect(recipients[0]?.status).toBe("PENDING");
+    expect(recipients[0]?.retryCount).toBe(1);
+    expect(recipients[0]?.nextRetryAt).toBeInstanceOf(Date);
+    expect(recipients[0]?.errorMessage).toContain("Reintento 1/3");
+
+    // No incrementa contadores de fallidos
+    const counts = await campaignRepo.findById(campaign.id);
+    expect(counts?.failedCount).toBe(0);
+  });
+
+  it("ProcessCampaignBatchUseCase marca FAILED inmediatamente ante errores fatales no recuperables", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn(),
+      sendTemplate: vi.fn().mockRejectedValue(new Error("Número de teléfono no registrado en WhatsApp (131026)")),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña fatal",
+      templateName: "promo_test",
+      templateLanguage: "es",
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      { phone: "+593999999999", name: "Carlos" },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 1);
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+
+    // Campaña finaliza porque el destinatario pasó a FAILED
+    expect(result.finished).toBe(true);
+
+    const recipients = await recipientRepo.listByCampaignId(campaign.id);
+    expect(recipients[0]?.status).toBe("FAILED");
+    expect(recipients[0]?.retryCount).toBe(0);
+    expect(recipients[0]?.nextRetryAt).toBeNull();
+
+    // Incrementa contadores de fallidos
+    const counts = await campaignRepo.findById(campaign.id);
+    expect(counts?.failedCount).toBe(1);
+  });
+
+  it("ProcessCampaignBatchUseCase marca FAILED cuando se excede el máximo de reintentos (MAX_RECIPIENT_RETRIES = 3)", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn(),
+      sendTemplate: vi.fn().mockRejectedValue(new Error("ETIMEDOUT: Connection timed out")),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña max retries",
+      templateName: "promo_test",
+      templateLanguage: "es",
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      { phone: "+593999999999", name: "Carlos" },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 1);
+
+    // Simulamos que ya se reintentó 3 veces
+    const [recipient] = await recipientRepo.listByCampaignId(campaign.id);
+    await recipientRepo.updateStatus(recipient!.id, "PENDING", {
+      retryCount: 3,
+      nextRetryAt: new Date(Date.now() - 1000), // Ya listo para procesar
+    });
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+
+    expect(result.finished).toBe(true);
+
+    const recipients = await recipientRepo.listByCampaignId(campaign.id);
+    expect(recipients[0]?.status).toBe("FAILED");
+    expect(recipients[0]?.retryCount).toBe(3);
+
+    const counts = await campaignRepo.findById(campaign.id);
+    expect(counts?.failedCount).toBe(1);
+  });
 });
