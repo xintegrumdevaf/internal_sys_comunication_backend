@@ -1397,13 +1397,13 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     });
     await conversationRepo.setActiveCaseId(conversation.id, null);
 
-    // Simula que la IA devolvió general.inquiry pero sin bandera de thankYou explícita
+    // La IA analiza semánticamente el mensaje contextual y detecta agradecimiento / confirmación de servicio
     const interpretationProvider = new QueuedInterpretationProvider([
       {
-        type: "NEW_INTENT",
+        type: "CANCEL",
         intent: "general.inquiry",
-        entities: {},
-        confidence: 0.85,
+        entities: { isThankYou: true, serviceConfirmed: true, isClosing: true },
+        confidence: 0.95,
       },
     ]);
 

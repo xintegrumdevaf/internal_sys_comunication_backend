@@ -321,17 +321,14 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Detección pragmática y profunda de satisfacción, agradecimiento o cierre (incluso con erratas o modismos ecuatorianos)
-      const THANK_YOU_REGEX =
-        /\b(gracias|grasias|grasia|graciass|grax|graxx|grx|muchas\s+gracias|mil\s+gracias|dios\s+le\s+pague|dios\s+se\s+lo\s+pague|muy\s+amable|se\s+le\s+agradece|agradecido|qued[oó]\s+bien|ya\s+qued[oó]|ya\s+sirvi[oó]|ya\s+sirve|ya\s+sirbi[oó]|ya\s+funciona|ya\s+funcion[oó]|ya\s+vali[oó]|ya\s+vale|ya\s+bali[oó]|ya\s+bale|ya\s+tengo\s+internet|ya\s+hay\s+internet|ya\s+regres[oó]|ya\s+volvi[oó]|ya\s+lleg[oó]\s+el\s+internet|luz\s+verde|prendi[oó]\s+verde|ya\s+no\s+est[aá]\s+roja|ya\s+se\s+arregl[oó]|ya\s+se\s+solucion[oó]|se\s+compuso|todo\s+bien|todo\s+fino|todo\s+claro|todo\s+en\s+orden|todo\s+perfecto|ok\s+gracias|listo\s+gracias|dale\s+gracias|ya\s+gracias)\b/i;
-
-      const hasActiveComplaint =
-        /\b(no\s+vale|no\s+sirve|no\s+funciona|sigue\s+sin\s+internet|a[uú]n\s+no|todav[ií]a\s+no|no\s+hay\s+servicio|sigue\s+roja|problema)\b/i.test(text);
-
-      const isTextThankYou = THANK_YOU_REGEX.test(text) && !hasActiveComplaint;
-
-      const isClosingOrThankYou =
-        Boolean(interpretation.entities?.isClosing || interpretation.entities?.isThankYou || interpretation.entities?.serviceConfirmed || interpretation.type === "CANCEL" || isTextThankYou);
+      // La IA analiza y decide el propósito real del mensaje (cierre, satisfacción o cortesía)
+      // sin depender de listas de palabras ni expresiones regulares quemadas en código
+      const isClosingOrThankYou = Boolean(
+        interpretation.entities?.isClosing ||
+        interpretation.entities?.isThankYou ||
+        interpretation.entities?.serviceConfirmed ||
+        interpretation.type === "CANCEL",
+      );
 
       if (isClosingOrThankYou && interpretation.intent === "billing.balance") {
         interpretation = {
@@ -343,19 +340,36 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       // Si no hay un caso activo y el cliente está agradeciendo o confirmando satisfacción/cierre post-atención previa:
-      // Responder cordialmente reconociendo el caso resuelto y NO abrir casos nuevos ni enviar menús
+      // Redactar respuesta natural con composeReply adaptada a lo que el cliente escribió y NO abrir casos nuevos
       if (!activeAggregate && isClosingOrThankYou) {
         log.info(
           { interpretation, lastWorkflowType: lastCompletedCase?.workflowType },
-          "Agradecimiento / confirmación de servicio post-cierre recibido: respondiendo cordialmente sin abrir casos nuevos",
+          "Agradecimiento / confirmación de servicio post-cierre recibido: redactando respuesta natural sin abrir casos nuevos",
         );
-        let thankYouReply = "¡Con mucho gusto! Nos alegra mucho saber que todo quedó solucionado y tu servicio está funcionando correctamente. Si llegas a necesitar cualquier otra asistencia, estamos a la orden por aquí mismo. ¡Que tengas un excelente día! 🙌";
 
-        if (lastCompletedCase?.workflowType === "BILLING_BALANCE") {
-          thankYouReply = "¡Con mucho gusto! Tu pago quedó registrado correctamente. Si tienes cualquier otra consulta sobre tu cuenta o facturación, con gusto te ayudamos. ¡Excelente día! 🙌";
-        } else if (lastCompletedCase?.workflowType === "HOME_RELOCATION") {
-          thankYouReply = "¡Con mucho gusto! Seguimos atentos al seguimiento de tu traslado de domicilio. Si tienes cualquier otra inquietud, estamos para servirte. ¡Que tengas un excelente día! 🙌";
-        }
+        const templateHint =
+          lastCompletedCase?.workflowType === "SUPPORT_INTERNET"
+            ? "¡Con mucho gusto! Nos alegra mucho saber que todo quedó solucionado y tu servicio de internet está funcionando correctamente. Si llegas a necesitar cualquier otra ayuda, estamos a las órdenes por este medio. ¡Que tengas un excelente día! 🙌"
+            : lastCompletedCase?.workflowType === "BILLING_BALANCE"
+              ? "¡Con mucho gusto! Tu pago quedó registrado correctamente. Si tienes cualquier otra consulta sobre tu cuenta o facturación, con gusto te ayudamos. ¡Excelente día! 🙌"
+              : lastCompletedCase?.workflowType === "HOME_RELOCATION"
+                ? "¡Con mucho gusto! Seguimos atentos al seguimiento de tu traslado de domicilio. Si tienes cualquier otra inquietud, estamos para servirte. ¡Que tengas un excelente día! 🙌"
+                : "¡Con mucho gusto! Nos alegra haberte podido ayudar. Si tienes cualquier otra duda, estamos a tu disposición por este canal oficial. ¡Que tengas un excelente día! 🙌";
+
+        const thankYouReply = await this.deps.composeReply.execute({
+          caseId: lastCompletedCase?.id ?? "none",
+          workflowType: lastCompletedCase?.workflowType ?? "GENERAL_INQUIRY",
+          stepOutcome: {
+            action: "CLOSING_ACKNOWLEDGMENT",
+            status: "COMPLETED",
+            result: {
+              priorWorkflowType: lastCompletedCase?.workflowType,
+              serviceConfirmed: interpretation.entities?.serviceConfirmed ?? true,
+            },
+          },
+          templateHint,
+          customerText: text,
+        });
 
         await this.deliverFixedReply({
           conversationId,

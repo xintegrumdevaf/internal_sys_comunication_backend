@@ -242,6 +242,8 @@ describe("GENERAL_INQUIRY workflow", () => {
     };
 
     const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error("handler QUERY_KNOWLEDGE_BASE is undefined");
     const outcome = await handler({
       caseId: "case-1",
       conversationId: "conv-1",
