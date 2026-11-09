@@ -14,7 +14,7 @@ export type DisambiguationContractCandidate = {
 export type DisambiguationResult<T extends DisambiguationContractCandidate = DisambiguationContractCandidate> = {
   matched?: T;
   index: number;
-  matchType: "option" | "contract_code" | "sector" | "label" | "address" | "name" | "none";
+  matchType: "option" | "contract_code" | "sector" | "label" | "address" | "name" | "coincidence" | "none";
   confidence: number;
 };
 
@@ -27,7 +27,9 @@ const STOP_WORDS = new Set([
 
 const BUILDING_KEYWORDS = [
   "oficina",
+  "oficna",
   "casa",
+  "casita",
   "local",
   "departamento",
   "depa",
@@ -50,8 +52,83 @@ export function normalizeDisambiguationString(str: string): string {
 }
 
 /**
+ * Distancia de Levenshtein entre dos cadenas para detectar erratas y variaciones de caracteres.
+ */
+export function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  let prevRow = new Array<number>(b.length + 1);
+  let currRow = new Array<number>(b.length + 1);
+
+  for (let j = 0; j <= b.length; j++) prevRow[j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    currRow[0] = i;
+    const aChar = a.charCodeAt(i - 1);
+    for (let j = 1; j <= b.length; j++) {
+      const cost = aChar === b.charCodeAt(j - 1) ? 0 : 1;
+      currRow[j] = Math.min(
+        currRow[j - 1]! + 1,
+        prevRow[j]! + 1,
+        prevRow[j - 1]! + cost,
+      );
+    }
+    const temp = prevRow;
+    prevRow = currRow;
+    currRow = temp;
+  }
+
+  return prevRow[b.length]!;
+}
+
+/**
+ * Coeficiente de Dice sobre bigramas de caracteres.
+ * Captura similitud morfológica y transposiciones de letras sin requerir orden rígido.
+ */
+export function diceBigramSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+
+  const bgA = new Map<string, number>();
+  for (let i = 0; i < a.length - 1; i++) {
+    const bg = a.slice(i, i + 2);
+    bgA.set(bg, (bgA.get(bg) ?? 0) + 1);
+  }
+
+  let intersection = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const bg = b.slice(i, i + 2);
+    const count = bgA.get(bg);
+    if (count && count > 0) {
+      intersection++;
+      bgA.set(bg, count - 1);
+    }
+  }
+
+  const total = a.length - 1 + (b.length - 1);
+  return total > 0 ? (2 * intersection) / total : 0;
+}
+
+/**
+ * Coincidencia de caracteres combinada entre dos términos (0.0 a 1.0).
+ */
+export function calculateCharacterSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const levSim = 1 - levenshteinDistance(a, b) / maxLen;
+  const diceSim = diceBigramSimilarity(a, b);
+  return Math.max(levSim, diceSim);
+}
+
+/**
  * Resuelve qué contrato de la lista de pendientes corresponde a la respuesta
- * del usuario (número de opción, ordinal, código de contrato, sector, dirección o nombre).
+ * del usuario analizando coincidencia de caracteres y similitud semántica.
+ * No realiza búsquedas rígidas tipo base de datos, sino que pondera coincidencia
+ * de sectores, direcciones, inmuebles, códigos y opciones.
  */
 export function resolveContractDisambiguation<T extends DisambiguationContractCandidate>(params: {
   pending: T[];
@@ -124,7 +201,6 @@ export function resolveContractDisambiguation<T extends DisambiguationContractCa
       const normId = normalizeDisambiguationString(c.id);
       const normContractCode = c.contractCode ? normalizeDisambiguationString(c.contractCode) : "";
 
-      // Si el ID tiene al menos 3 dígitos y aparece delimitado por palabras o prefijos
       if (normId.length >= 3) {
         const idRegex = new RegExp(`(?:#|contrato\\s*#?|id\\s*#?)?\\b${normId}\\b`, "i");
         if (idRegex.test(normText)) {
@@ -190,128 +266,127 @@ export function resolveContractDisambiguation<T extends DisambiguationContractCa
     };
   }
 
-  // 4. Coincidencia por Sector o Ubicación
-  const entitySector =
-    typeof entities?.sector === "string"
-      ? normalizeDisambiguationString(entities.sector)
-      : typeof entities?.location === "string"
-        ? normalizeDisambiguationString(entities.location)
-        : "";
+  // 4. Análisis de coincidencia de caracteres sobre tokens significativos
+  const candidateScores = pending.map((c, idx) => {
+    let score = 0;
+    let bestReason: DisambiguationResult["matchType"] = "none";
 
-  const sectorMatches: number[] = [];
-  pending.forEach((c, idx) => {
-    if (!c.sector) return;
-    const normSector = normalizeDisambiguationString(c.sector);
-    if (normSector.length < 3) return;
+    const textTokens = normText
+      .split(/[\s,\.\-\/]+/)
+      .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
 
-    if (entitySector && (normSector.includes(entitySector) || entitySector.includes(normSector))) {
-      sectorMatches.push(idx);
-    } else if (normText.length >= 3 && normText.includes(normSector)) {
-      sectorMatches.push(idx);
-    }
-  });
+    const entityTokens = [
+      typeof entities?.address === "string" ? entities.address : "",
+      typeof entities?.sector === "string" ? entities.sector : "",
+      typeof entities?.location === "string" ? entities.location : "",
+    ]
+      .join(" ")
+      .split(/[\s,\.\-\/]+/)
+      .map((t) => normalizeDisambiguationString(t))
+      .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
 
-  if (sectorMatches.length === 1) {
-    const idx = sectorMatches[0]!;
-    return {
-      matched: pending[idx],
-      index: idx,
-      matchType: "sector",
-      confidence: 0.95,
-    };
-  }
+    const userTokens = Array.from(new Set([...textTokens, ...entityTokens]));
 
-  // 5. Coincidencia por Etiquetas o Tipo de Inmueble (Casa, Oficina, Local, Depa)
-  for (const keyword of BUILDING_KEYWORDS) {
-    if (
-      normText.includes(keyword) ||
-      (typeof entities?.address === "string" && normalizeDisambiguationString(entities.address).includes(keyword))
-    ) {
-      const labelMatches: number[] = [];
-      pending.forEach((c, idx) => {
-        const normLabel = c.label ? normalizeDisambiguationString(c.label) : "";
-        const normAddr = c.address ? normalizeDisambiguationString(c.address) : "";
-        if (normLabel.includes(keyword) || normAddr.includes(keyword)) {
-          labelMatches.push(idx);
+    // A. Coincidencia por Sector (con tolerancia a erratas mediante calculateCharacterSimilarity)
+    if (c.sector) {
+      const normSector = normalizeDisambiguationString(c.sector);
+      const entitySector = typeof entities?.sector === "string" ? normalizeDisambiguationString(entities.sector) : "";
+      if (entitySector) {
+        const sim = calculateCharacterSimilarity(entitySector, normSector);
+        if (sim >= 0.70) {
+          score += 12 * sim;
+          bestReason = "sector";
         }
-      });
-      if (labelMatches.length === 1) {
-        const idx = labelMatches[0]!;
-        return {
-          matched: pending[idx],
-          index: idx,
-          matchType: "label",
-          confidence: 0.9,
-        };
+      }
+      for (const token of userTokens) {
+        const sim = calculateCharacterSimilarity(token, normSector);
+        if (sim >= 0.75) {
+          score += 10 * sim;
+          bestReason = "sector";
+        }
+      }
+      if (normText.length >= 3 && normText.includes(normSector)) {
+        score += 8;
+        bestReason = "sector";
       }
     }
-  }
 
-  // 6. Coincidencia por Tokens y Calles de Dirección
-  const entityAddr =
-    typeof entities?.address === "string" ? normalizeDisambiguationString(entities.address) : "";
-  const addressQuery = entityAddr || normText;
+    // B. Coincidencia por Etiquetas y Tipo de Inmueble (Casa, Oficina, Local, Depa)
+    const normLabel = c.label ? normalizeDisambiguationString(c.label) : "";
+    const normAddr = c.address ? normalizeDisambiguationString(c.address) : "";
 
-  if (addressQuery.length >= 4) {
-    const queryTokens = addressQuery
+    for (const keyword of BUILDING_KEYWORDS) {
+      const mentionsKeyword = normText.includes(keyword) || (typeof entities?.address === "string" && normalizeDisambiguationString(entities.address).includes(keyword));
+      if (mentionsKeyword) {
+        // Tolerancia morfológica: casita -> casa, oficna -> oficina
+        const isHouse = keyword.startsWith("cas") && (normLabel.includes("casa") || normAddr.includes("casa"));
+        const isOffice = keyword.startsWith("ofi") && (normLabel.includes("oficina") || normAddr.includes("oficina"));
+        const isLocal = keyword.startsWith("loc") && (normLabel.includes("local") || normAddr.includes("local"));
+        const isDepa = (keyword.includes("depa") || keyword.includes("departamento")) && (normLabel.includes("dep") || normAddr.includes("dep"));
+
+        if (isHouse || isOffice || isLocal || isDepa || normLabel.includes(keyword) || normAddr.includes(keyword)) {
+          score += 8;
+          if (bestReason === "none") bestReason = "label";
+        }
+      }
+    }
+
+    // C. Coincidencia por Tokens y Calles de Dirección
+    const addrTokens = (c.address ?? "")
       .split(/[\s,\.\-\/]+/)
+      .map((t) => normalizeDisambiguationString(t))
       .filter((t) => t.length >= 4 && !STOP_WORDS.has(t));
 
-    if (queryTokens.length > 0) {
-      const scores = pending.map((c) => {
-        const candidateAddr = normalizeDisambiguationString(
-          `${c.address ?? ""} ${c.label ?? ""} ${c.sector ?? ""}`,
-        );
-        let score = 0;
-        for (const token of queryTokens) {
-          if (candidateAddr.includes(token)) {
-            score += 1;
-          }
-        }
-        if (c.address && c.address.length >= 6) {
-          const normCandidateAddr = normalizeDisambiguationString(c.address);
-          if (normText.includes(normCandidateAddr) || normCandidateAddr.includes(normText)) {
-            score += 3;
-          }
-        }
-        return score;
-      });
-
-      const maxScore = Math.max(...scores);
-      if (maxScore > 0) {
-        const topIndices = scores
-          .map((score, idx) => (score === maxScore ? idx : -1))
-          .filter((idx) => idx >= 0);
-        if (topIndices.length === 1) {
-          const idx = topIndices[0]!;
-          return {
-            matched: pending[idx],
-            index: idx,
-            matchType: "address",
-            confidence: 0.85,
-          };
+    for (const uToken of userTokens) {
+      for (const aToken of addrTokens) {
+        const sim = calculateCharacterSimilarity(uToken, aToken);
+        if (sim >= 0.75) {
+          score += 8 * sim;
+          if (bestReason === "none") bestReason = "address";
         }
       }
     }
-  }
 
-  // 7. Coincidencia por Nombre Completo del Titular
-  const entityFullName =
-    typeof entities?.fullName === "string"
-      ? normalizeDisambiguationString(entities.fullName)
-      : "";
-  if (entityFullName.length >= 4) {
-    const nameMatches = pending
-      .map((c, idx) => (c.name && normalizeDisambiguationString(c.name).includes(entityFullName) ? idx : -1))
-      .filter((idx) => idx >= 0);
-    if (nameMatches.length === 1) {
-      const idx = nameMatches[0]!;
-      return {
-        matched: pending[idx],
-        index: idx,
-        matchType: "name",
-        confidence: 0.85,
-      };
+    // Frase continua en la dirección
+    if (c.address && c.address.length >= 6) {
+      const normCandidateAddr = normalizeDisambiguationString(c.address);
+      if (normText.includes(normCandidateAddr) || normCandidateAddr.includes(normText)) {
+        score += 8;
+        if (bestReason === "none") bestReason = "address";
+      }
+    }
+
+    // D. Coincidencia por Nombre
+    const entityFullName = typeof entities?.fullName === "string" ? normalizeDisambiguationString(entities.fullName) : "";
+    if (c.name && entityFullName.length >= 4) {
+      const sim = calculateCharacterSimilarity(entityFullName, normalizeDisambiguationString(c.name));
+      if (sim >= 0.8) {
+        score += 6 * sim;
+        if (bestReason === "none") bestReason = "name";
+      }
+    }
+
+    return { index: idx, score, bestReason };
+  });
+
+  const maxScore = Math.max(...candidateScores.map((s) => s.score));
+  if (maxScore >= 5.0) {
+    const topScorers = candidateScores.filter((s) => s.score === maxScore);
+    if (topScorers.length === 1) {
+      const winner = topScorers[0]!;
+      const secondScore = Math.max(
+        0,
+        ...candidateScores.filter((s) => s.index !== winner.index).map((s) => s.score),
+      );
+      // Para salir de confusiones: el ganador debe superar con margen al segundo lugar
+      if (winner.score - secondScore >= 2.0 || secondScore === 0) {
+        return {
+          matched: pending[winner.index],
+          index: winner.index,
+          matchType: winner.bestReason !== "none" ? winner.bestReason : "coincidence",
+          confidence: Math.min(0.95, 0.75 + (winner.score / 20) * 0.2),
+        };
+      }
     }
   }
 

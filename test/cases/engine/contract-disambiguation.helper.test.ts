@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateCharacterSimilarity,
+  diceBigramSimilarity,
+  levenshteinDistance,
   normalizeDisambiguationString,
   resolveContractDisambiguation,
 } from "../../../src/core/modules/cases/application/engine/contract-disambiguation.helper";
@@ -207,6 +210,58 @@ describe("contract-disambiguation.helper", () => {
     });
   });
 
+  describe("Análisis de coincidencia de caracteres y tolerancia a erratas (anti-rigidez)", () => {
+    it("calcula similitud de caracteres alta ante erratas de una letra o transposición", () => {
+      expect(levenshteinDistance("pomasqui", "pomasqi")).toBe(1);
+      expect(calculateCharacterSimilarity("pomasqui", "pomasqi")).toBeGreaterThan(0.8);
+      expect(calculateCharacterSimilarity("carcelen", "carceln")).toBeGreaterThan(0.8);
+      expect(calculateCharacterSimilarity("cordova", "cordoba")).toBeGreaterThan(0.8);
+      expect(diceBigramSimilarity("pomasqui", "pomasqui")).toBe(1);
+    });
+
+    it("resuelve sector con errata de tipeo ('el de pomasqi' o 'el de carceln')", () => {
+      const resPomasqi = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "el que está en pomasqi",
+      });
+      expect(resPomasqi.matched?.id).toBe("10542");
+
+      const resCarceln = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "el de carceln por favor",
+      });
+      expect(resCarceln.matched?.id).toBe("20984");
+    });
+
+    it("resuelve calle con errata fonética o tipeo ('la manuel cordoba' o 'bellabista')", () => {
+      const resCordoba = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "el que queda en la manuel cordoba",
+      });
+      expect(resCordoba.matched?.id).toBe("10542");
+
+      const resBellabista = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "el servicio de bellabista",
+      });
+      expect(resBellabista.matched?.id).toBe("20984");
+    });
+
+    it("resuelve etiquetas con variaciones y diminutivos ('la casita', 'la oficna')", () => {
+      const resCasita = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "el de mi casita",
+      });
+      expect(resCasita.matched?.id).toBe("10542");
+
+      const resOficna = resolveContractDisambiguation({
+        pending: pendingContracts,
+        text: "en mi oficna no hay internet",
+      });
+      expect(resOficna.matched?.id).toBe("20984");
+    });
+  });
+
   describe("Manejo de ambigüedad y entradas no concluyentes", () => {
     it("retorna none si el texto es ambiguo o no coincide", () => {
       const res = resolveContractDisambiguation({
@@ -227,3 +282,4 @@ describe("contract-disambiguation.helper", () => {
     });
   });
 });
+

@@ -108,7 +108,11 @@ export function resolveReplyTemplate(input: {
           return `${num}️⃣ ${mainLabel}${extraAddress}`.trim();
         })
         .join("\n");
-      templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\nPor favor indícame cuál de ellos presenta el inconveniente (responde con el número 1, 2... o selecciónalo).`;
+      const actionInstruction =
+        contracts.length === 2
+          ? "Por favor presiona el botón del contrato que presenta el inconveniente a continuación (o responde con el número 1, 2... o selecciónalo indicando el sector o dirección):"
+          : "Por favor presiona 'Ver opciones' y selecciona el contrato de la lista a continuación (o responde con el número 1, 2... o selecciónalo indicando el sector o dirección):";
+      templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\n${actionInstruction}`;
     } else if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
       templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
     } else if (
