@@ -551,6 +551,91 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     expect(outcome.context.data.contract?.sector).toBe("calacali");
   });
 
+  it("WAITING_USER_DISAMBIGUATE selecciona contrato por sector en lenguaje natural ('el de pomasqui')", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({});
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        pendingContracts: [
+          {
+            id: "101",
+            name: "Juan Perez",
+            address: "Av. Manuel Cordova Galarza",
+            sector: "pomasqui",
+            oltName: "olt1",
+            pon: "1",
+            serial: "S1",
+          },
+          {
+            id: "102",
+            name: "Juan Perez",
+            address: "Calle Diego de Vasquez",
+            sector: "carcelen",
+            oltName: "olt2",
+            pon: "2",
+            serial: "S2",
+          },
+        ],
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "el que está en Pomasqui",
+    });
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.contract?.id).toBe("101");
+    expect(outcome.context.data.contract?.sector).toBe("pomasqui");
+  });
+
+  it("WAITING_USER_DISAMBIGUATE selecciona contrato por tipo de inmueble ('la de mi casa')", async () => {
+    const engine = new WorkflowEngine([supportInternetWorkflow]);
+    const gateway = new N8nGatewayFake({});
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        pendingContracts: [
+          {
+            id: "101",
+            name: "Juan Perez",
+            address: "Av. Manuel Cordova Galarza",
+            label: "Casa",
+            sector: "pomasqui",
+            oltName: "olt1",
+            pon: "1",
+            serial: "S1",
+          },
+          {
+            id: "102",
+            name: "Juan Perez",
+            address: "Edificio Amazonas Of. 402",
+            label: "Oficina",
+            sector: "iquique",
+            oltName: "olt2",
+            pon: "2",
+            serial: "S2",
+          },
+        ],
+      },
+    };
+
+    const outcome = await engine.step("SUPPORT_INTERNET", {
+      ...baseInput("WAITING_USER_DISAMBIGUATE", context, gateway),
+      text: "la de mi casa",
+    });
+    expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "CHECK_CLIENT_STATUS" });
+    if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "SUPPORT_INTERNET") {
+      throw new Error("unreachable");
+    }
+    expect(outcome.context.data.contract?.id).toBe("101");
+  });
+
   it("VALIDATE_CLIENT autocompleta con 0 si la cédula viene con 9 dígitos", async () => {
     const engine = new WorkflowEngine([supportInternetWorkflow]);
     let calledId = "";

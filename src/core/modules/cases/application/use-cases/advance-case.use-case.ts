@@ -20,6 +20,7 @@ import { maxAttemptsOf, missingRequiredFields } from "../engine/waiting-step";
 import { normalizeNationalId } from "../../../customers/domain/national-id";
 import type { DepartmentResolverService } from "../services/department-resolver.service";
 import { checkCustomerGuardrails } from "../../domain/guardrails";
+import { resolveContractDisambiguation } from "../engine/contract-disambiguation.helper";
 
 const MAX_STEPS_PER_RUN = 10;
 
@@ -86,7 +87,13 @@ export class AdvanceCaseUseCase {
       // Si estamos en WAITING_USER_DISAMBIGUATE y el usuario envía un número de cédula (9 a 13 dígitos):
       // El cliente intenta corregir o reingresar su cédula, no seleccionar un contrato existente.
       if (currentState === "WAITING_USER_DISAMBIGUATE" && input.text) {
-        const cedulaMatch = input.text.match(/\b\d{9,13}\b/);
+        const pending = Array.isArray((context as { data?: { pendingContracts?: unknown[] } })?.data?.pendingContracts)
+          ? ((context as { data?: { pendingContracts?: Array<{ id: string; contractCode?: string }> } }).data!.pendingContracts!)
+          : [];
+        const isPendingContract = pending.some(
+          (c) => input.text!.includes(c.id) || (c.contractCode && input.text!.includes(c.contractCode)),
+        );
+        const cedulaMatch = !isPendingContract ? input.text.match(/\b\d{9,13}\b/) : null;
         if (cedulaMatch) {
           const newCedula = normalizeNationalId(cedulaMatch[0]);
           log.info({ newCedula }, "WaitingStep DISAMBIGUATE: detectada cédula nueva/corregida, regresando a VALIDATE_CLIENT");
@@ -108,6 +115,26 @@ export class AdvanceCaseUseCase {
       }
 
       if (waitingStep) {
+        // En WAITING_USER_DISAMBIGUATE, resolver el contrato mediante el helper inteligente
+        if (currentState === "WAITING_USER_DISAMBIGUATE") {
+          const pending = Array.isArray((context as { data?: { pendingContracts?: unknown[] } })?.data?.pendingContracts)
+            ? ((context as { data?: { pendingContracts?: Array<{ id: string; contractCode?: string; sector?: string }> } }).data!.pendingContracts!)
+            : [];
+          const disambiguation = resolveContractDisambiguation({
+            pending,
+            text: input.text,
+            entities,
+          });
+          if (disambiguation.matched) {
+            entities = {
+              ...entities,
+              selectedOption: disambiguation.index + 1,
+              contractId: disambiguation.matched.id,
+              contractCode: disambiguation.matched.contractCode || disambiguation.matched.id,
+              ...(disambiguation.matched.sector ? { sector: disambiguation.matched.sector } : {}),
+            };
+          }
+        }
         // Si el paso pide "answer", el texto del usuario ES la respuesta.
         // Algunos modelos devuelven answer:true/boolean; forzamos el string.
         const needsAnswer =
@@ -120,22 +147,20 @@ export class AdvanceCaseUseCase {
           }
         }
 
-      // Si el paso pide "selectedOption" y no vino en entities, extraerlo del texto (ej: 1, 2, "option_1", "primero", etc.)
+      // Si el paso pide "selectedOption" y no vino en entities, extraerlo del texto
       const needsOption =
         waitingStep.requireAll?.includes("selectedOption") ||
         waitingStep.requireAny?.includes("selectedOption");
       if (needsOption && input.text && entities.selectedOption === undefined) {
         const trimmed = input.text.trim().toLowerCase();
-        const digitMatch =
-          trimmed.match(/^(?:option_|opci[oó]n\s*#?|el\s+|la\s+|n[uú]mero\s*#?|contrato\s*#?)?\s*([1-9]\d*)(?:[\.\-\:\s]|$)/i) ||
-          trimmed.match(/^([1-9]\d*)\b/);
-        if (digitMatch && digitMatch[1]) {
+        const digitMatch = trimmed.match(/^(?:option_|opci[oó]n\s*#?|[el|la]\s+|n[uú]mero\s*#?)?\s*([1-9]\d*)/i);
+        if (digitMatch?.[1]) {
           entities = { ...entities, selectedOption: parseInt(digitMatch[1], 10) };
-        } else if (trimmed === "primero" || trimmed === "primera" || trimmed === "el primero" || trimmed === "la primera" || trimmed.includes("opcion 1") || trimmed.includes("opción 1")) {
+        } else if (/primero|primera|1ro/i.test(trimmed)) {
           entities = { ...entities, selectedOption: 1 };
-        } else if (trimmed === "segundo" || trimmed === "segunda" || trimmed === "el segundo" || trimmed === "la segunda" || trimmed.includes("opcion 2") || trimmed.includes("opción 2")) {
+        } else if (/segundo|segunda|2do/i.test(trimmed)) {
           entities = { ...entities, selectedOption: 2 };
-        } else if (trimmed === "tercero" || trimmed === "tercera" || trimmed === "el tercero" || trimmed === "la tercera" || trimmed.includes("opcion 3") || trimmed.includes("opción 3")) {
+        } else if (/tercero|tercera|3ro/i.test(trimmed)) {
           entities = { ...entities, selectedOption: 3 };
         }
       }
@@ -167,21 +192,15 @@ export class AdvanceCaseUseCase {
         const currentMap = (entities.mapLocation ?? entities.locationUrl ?? entities.coordinates ?? entities.ubicacion) as string | undefined;
 
         const resolvedAddress = currentNewAddress || (rawText.length >= 5 ? rawText : undefined);
-        const resolvedRef =
-          currentRef ||
+        const resolvedRef = currentRef ||
           (/frente|junto|cerca|metros|escuela|bazar|lado|diagonal|detras|casa|esquina|referencia/i.test(rawText)
             ? rawText
-            : resolvedAddress && resolvedAddress.length >= 20
-              ? resolvedAddress
-              : undefined);
-        const resolvedMap =
-          currentMap ||
+            : resolvedAddress && resolvedAddress.length >= 20 ? resolvedAddress : undefined);
+        const resolvedMap = currentMap ||
           (rawText.match(/(https?:\/\/[^\s]+)/i)?.[1] ??
             (/mapa|ubicacion|ubicación|coordenadas|gps|pin|maps|google/i.test(rawText)
               ? "Ubicación compartida en chat"
-              : resolvedAddress && resolvedRef && rawText.length >= 25
-                ? `Ver dirección: ${resolvedAddress}`
-                : undefined));
+              : resolvedAddress && resolvedRef && rawText.length >= 25 ? `Ver dirección: ${resolvedAddress}` : undefined));
 
         if (resolvedAddress) entities = { ...entities, newAddress: resolvedAddress };
         if (resolvedRef) entities = { ...entities, references: resolvedRef };

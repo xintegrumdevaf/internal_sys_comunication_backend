@@ -334,5 +334,47 @@ describe("AdvanceCaseUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2 + §13)", () =>
     expect(data.clientNotFound).toBe(true);
     expect(data.lastSearchedNationalId).toBe("0172424482722");
   });
+
+  it("en WAITING_USER_DISAMBIGUATE, resuelve el contrato por sector en lenguaje natural sin quemar intentos", async () => {
+    const gateway = new N8nGatewayFake({
+      CHECK_CLIENT_STATUS: () => ({ success: true, result: { status: "ACTIVO" } }),
+      DIAGNOSTIC: () => ({ success: true, result: { status: "WAITING_USER", question: "¿Luz LOS roja?" } }),
+    });
+    const { caseRepo, conversationRepo, advanceCase } = buildUseCase(gateway);
+
+    const conversation = conversationRepo.createOpen();
+    const { case: created } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: {
+        workflowType: "SUPPORT_INTERNET",
+        data: {
+          client: { nationalId: "1710000001", fullName: "Cliente Existente" },
+          pendingContracts: [
+            { id: "101", name: "Cliente Existente", address: "Av. Cordova Galarza", sector: "pomasqui", oltName: "o1", pon: "1", serial: "s1" },
+            { id: "102", name: "Cliente Existente", address: "Calle Diego de Vasquez", sector: "carcelen", oltName: "o2", pon: "2", serial: "s2" },
+          ],
+        },
+      },
+      initialState: "WAITING_USER_DISAMBIGUATE",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, created.id);
+
+    // Cliente responde texto libre mencionando el sector
+    const result = await advanceCase.execute({
+      caseId: created.id,
+      correlationId: "corr-disambiguate-sector",
+      text: "el que está en Pomasqui",
+      entities: {},
+    });
+
+    expect(result.outcome.type).toBe("WAITING_USER");
+    if (result.outcome.type !== "WAITING_USER") throw new Error("unreachable");
+    expect(result.outcome.nextState).toBe("WAITING_USER_DIAGNOSTIC");
+    const data = result.outcome.context.data as Record<string, unknown>;
+    expect((data.contract as { id: string })?.id).toBe("101");
+  });
 });
 

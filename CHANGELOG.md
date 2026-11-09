@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Desambiguación Interactiva Robusta de Multi-Contratos con Lenguaje Natural (`contract-disambiguation.helper.ts`, `support-internet.workflow.ts`, `advance-case.use-case.ts`, `interpret-message.prompt.ts`)**:
+  - *Contexto y Problema*:
+    1. Cuando un cliente cuenta con más de un contrato asociado a su cédula, el sistema presentaba la lista interactiva (`WAITING_USER_DISAMBIGUATE`), pero la desambiguación solo aceptaba números ordinales ("1", "2") o códigos de contrato exactos.
+    2. Si el cliente respondía con texto libre describiendo el lugar o sector (ej: *"el de Pomasqui"*, *"el que está en Pomasquí"*, *"el de Carcelén"*, *"la de mi casa"*, *"el de la oficina"*), el sistema no reconocía el sector porque `disambiguateContract` nunca comparaba contra `c.sector` ni soportaba normalización de tildes/diacríticos.
+    3. Si el cliente escribía su número de contrato (ej: `10542`), `advance-case` interpretaba erróneamente el número como una opción ordinal (`selectedOption: 10542 > length`), fallando la coincidencia, o el matcher de cédula lo confundía con un reingreso de cédula de 9 a 13 dígitos.
+    4. En `support-internet.workflow.ts`, `requireAny` limitaba las entidades válidas a `["selectedOption", "contractCode", "address", "fullName"]`. Si el NLU extraía `sector` o `location`, el motor lo marcaba como campo faltante y consumía un intento de espera hasta escalar al cliente tras 3 intentos fallidos.
+  - *Resolución*:
+    1. Se creó el helper modular de desambiguación `contract-disambiguation.helper.ts` con una jerarquía de resolución determinista:
+       - Mapeo de opción ordinal / botón interactivo (1, 2, "el primero", "1ro", "opcion 2").
+       - Mapeo de código o número de contrato explícito (comparando contra `c.id` y `c.contractCode`, e impidiendo que un ID numérico de contrato se confunda con un índice ordinal inválido o con una nueva cédula).
+       - Mapeo semántico de sector y ubicación con normalización de diacríticos (ej: *"Pomasquí"* -> *"pomasqui"*, *"Carcelén"* -> *"carcelen"*).
+       - Mapeo por palabras clave de inmueble (`casa`, `oficina`, `local`, `departamento`, `depa`, `negocio`, `taller`).
+       - Mapeo por solapamiento de tokens de dirección y nombres de calle (excluyendo stopwords).
+    2. En `advance-case.use-case.ts`, se pre-resuelve la desambiguación en `WAITING_USER_DISAMBIGUATE` antes de evaluar campos faltantes, enriqueciendo las entidades (`selectedOption`, `contractId`, `contractCode`, `sector`) para evitar quemar intentos del usuario.
+    3. En `support-internet.workflow.ts`, se ampliaron los campos válidos de `requireAny` (`contractId`, `sector`, `location`, `answer`), y el handler `disambiguateContract` delega al helper modular.
+    4. En `interpret-message.prompt.ts`, se especificaron ejemplos y reglas para que el LLM clasifique las respuestas de contratos o sectores como `ANSWER` con `sector`, `address` o `contractCode`.
+
 - **Reintentos Automáticos con Backoff Exponencial en Campañas Masivas (`process-campaign-batch.use-case.ts`, `campaign.repository.pg.ts`, `0048_campaign_recipient_retry_backoff.sql`)**:
   - *Contexto y Problema*: Al procesar lotes de destinatarios en campañas masivas, cualquier error temporal en el proveedor de WhatsApp (Meta API error 429 por saturación de QPS, caídas 5xx, timeouts o microcortes de red) marcaba de inmediato al destinatario como `FAILED` e incrementaba el contador de fallidos de la campaña. Los clientes con fallos transitorios quedaban permanentemente sin recibir la notificación.
   - *Resolución*:

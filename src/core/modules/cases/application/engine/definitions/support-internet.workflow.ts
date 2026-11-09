@@ -7,6 +7,7 @@ import {
 import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
+import { resolveContractDisambiguation } from "../contract-disambiguation.helper";
 
 /**
  * docs/spec/02_STATE_MACHINE.md §3 + §13 — SUPPORT_INTERNET con WaitingSteps.
@@ -344,72 +345,11 @@ const disambiguateContract: WorkflowStateHandler = async ({
     };
   }
 
-  let matched: (typeof pending)[number] | undefined;
-
-  // 1. Coincidencia por número / opción ordinal (1, 2, 3...)
-  const rawOption = entities?.selectedOption;
-  let selectedIndex = -1;
-  if (typeof rawOption === "number" && Number.isInteger(rawOption)) {
-    selectedIndex = rawOption - 1;
-  } else if (typeof rawOption === "string") {
-    const parsed = parseInt(rawOption.trim(), 10);
-    if (!Number.isNaN(parsed)) selectedIndex = parsed - 1;
-  }
-
-  if (selectedIndex < 0 && text) {
-    const trimmed = text.trim().toLowerCase();
-    const digitMatch =
-      trimmed.match(/^(?:option_|opci[oó]n\s*#?|el\s+|la\s+|n[uú]mero\s*#?|contrato\s*#?)?\s*([1-9]\d*)(?:[\.\-\:\s]|$)/i) ||
-      trimmed.match(/^([1-9]\d*)\b/);
-    if (digitMatch && digitMatch[1]) {
-      selectedIndex = parseInt(digitMatch[1], 10) - 1;
-    } else if (trimmed === "primero" || trimmed === "primera" || trimmed === "el primero" || trimmed === "la primera") {
-      selectedIndex = 0;
-    } else if (trimmed === "segundo" || trimmed === "segunda" || trimmed === "el segundo" || trimmed === "la segunda") {
-      selectedIndex = 1;
-    } else if (trimmed === "tercero" || trimmed === "tercera" || trimmed === "el tercero" || trimmed === "la tercera") {
-      selectedIndex = 2;
-    }
-  }
-
-  if (selectedIndex >= 0 && selectedIndex < pending.length) {
-    matched = pending[selectedIndex];
-  }
-
-  // 2. Coincidencia por código de contrato o id
-  if (!matched) {
-    const code =
-      typeof entities?.contractCode === "string"
-        ? entities.contractCode.trim().toLowerCase()
-        : typeof entities?.contractId === "string"
-          ? entities.contractId.trim().toLowerCase()
-          : "";
-    if (code) {
-      matched = pending.find(
-        (c) =>
-          c.id.toLowerCase() === code ||
-          (c.contractCode && c.contractCode.toLowerCase() === code) ||
-          c.id.toLowerCase().includes(code),
-      );
-    }
-  }
-
-  // 3. Coincidencia por dirección o nombre
-  if (!matched) {
-    const address =
-      typeof entities?.address === "string" ? entities.address.trim().toLowerCase() : "";
-    const fullName =
-      typeof entities?.fullName === "string" ? entities.fullName.trim().toLowerCase() : "";
-    const rawText = (text || "").toLowerCase();
-
-    matched = pending.find((c) => {
-      if (fullName && c.name.toLowerCase().includes(fullName)) return true;
-      if (address && (c.address ?? "").toLowerCase().includes(address)) return true;
-      if (c.contractCode && rawText.includes(c.contractCode.toLowerCase())) return true;
-      if (c.address && rawText.length >= 4 && c.address.toLowerCase().includes(rawText)) return true;
-      return false;
-    });
-  }
+  const { matched } = resolveContractDisambiguation({
+    pending,
+    text,
+    entities,
+  });
 
   if (!matched) {
     const waiting = resetWaitingAttempts(context, "WAITING_USER_DISAMBIGUATE");
@@ -774,7 +714,16 @@ export const supportInternetWorkflow: WorkflowDefinition = {
     WAITING_USER_DISAMBIGUATE: {
       pendingQuestion:
         "Encontré más de un contrato asociado a tu cédula. Por favor indícame con cuál de ellos tienes inconvenientes (puedes responder con el número de opción o la dirección):",
-      requireAny: ["selectedOption", "contractCode", "address", "fullName"],
+      requireAny: [
+        "selectedOption",
+        "contractCode",
+        "contractId",
+        "address",
+        "sector",
+        "location",
+        "fullName",
+        "answer",
+      ],
       maxAttempts: 3,
     },
     WAITING_USER_DIAGNOSTIC: {

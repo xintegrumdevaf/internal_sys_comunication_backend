@@ -73,9 +73,9 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
 - ASENTIMIENTO O DEMORA MIENTRAS BUSCA EL DATO ("Si", "Claro", "Espera un momento", "Ya te la busco", "Déjame ver", "Un segundo", "Ya te paso", "Listo"): Si hay un caso activo esperando cédula u otro dato y el cliente envía una frase corta confirmando o avisando que ya la busca:
   → Clasifica SIEMPRE como type="CONTINUE" con el intent del caso activo (ej: intent="support.internet"), entities: {}.
   → NUNCA clasificar como REQUEST_HUMAN, CHANGE_TOPIC ni CANCEL. Mantén el hilo activo.
-- SELECCIÓN DE CONTRATO O LÍNEA PENDIENTE: Si el caso activo está esperando que el cliente seleccione o aclare cuál de sus contratos atender (ej: pregunta pendiente con opciones 1️⃣, 2️⃣ o datos requeridos como selectedOption/address), y el cliente responde con un número, opción, o referencia a su servicio (ej: "1", "el 1", "opción 2", "primero", "el de mi casa", "piso 2", "local"):
+- SELECCIÓN DE CONTRATO O LÍNEA PENDIENTE: Si el caso activo está esperando que el cliente seleccione o aclare cuál de sus contratos atender (ej: pregunta pendiente con opciones 1️⃣, 2️⃣ o datos requeridos como selectedOption/address/sector), y el cliente responde con un número, opción, o referencia a su servicio (ej: "1", "el 1", "opción 2", "primero", "el de mi casa", "piso 2", "local", "el de Pomasqui", "Carcelén", "el contrato 10542"):
   → Clasifica SIEMPRE como type="ANSWER" con el intent del caso activo (ej: intent="support.internet").
-  → Extrae en \`entities\`: \`selectedOption\` (número como 1, 2...), \`address\` o \`contractCode\` según lo indicado por el cliente.
+  → Extrae en \`entities\`: \`selectedOption\` (número como 1, 2...), \`sector\` (sector o zona si la menciona), \`address\` (dirección o referencia si la menciona) o \`contractCode\`/\`contractId\` según lo indicado por el cliente.
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC ni UNCLEAR.
 - RESPUESTAS A PREGUNTAS TÉCNICAS O ESTADO DE EQUIPOS (luces del router, colores, cables, estado del servicio, fotos o videos):
   Si el caso activo es de soporte técnico (SUPPORT_INTERNET) y está esperando respuesta del usuario sobre su equipo o conexión (ej: pregunta sobre luces del router, colores verde/rojo, estado encendido/apagado, reinicio, cables):
@@ -192,8 +192,8 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 12. Mensaje: "1" (o "la 1", "opción 2", "el primero") cuando el caso activo espera selección de contrato
    → {"type":"ANSWER","intent":"support.internet","entities":{"selectedOption":1},"confidence":0.95}
 
-13. Mensaje: "la de mi casa, piso 2" cuando el caso activo espera desambiguación de contratos
-   → {"type":"ANSWER","intent":"support.internet","entities":{"address":"piso 2"},"confidence":0.90}
+13. Mensaje: "la de mi casa, piso 2" (o "el de Pomasqui", "Carcelén", "el contrato 10542") cuando el caso activo espera desambiguación de contratos
+   → {"type":"ANSWER","intent":"support.internet","entities":{"sector":"Pomasqui","address":"piso 2"},"confidence":0.90}
 
 14. Mensaje: "Son verdes" (o "Verdes!!!", "Están rojas", "Prendidas") cuando el caso activo espera diagnóstico técnico (luces del router)
    → {"type":"ANSWER","intent":"support.internet","entities":{"answer":"Son verdes"},"confidence":0.95}
