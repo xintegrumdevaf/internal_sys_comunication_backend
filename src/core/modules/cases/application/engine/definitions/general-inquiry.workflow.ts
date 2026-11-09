@@ -79,23 +79,33 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
     // 2. Si la AI determino que es un saludo (isGreeting) o no extrajo ninguna pregunta de negocio:
     const rawText = typeof text === "string" ? text.trim() : "";
     const isRawGreetingOnly =
-      /^(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos|qu[eé]\s+tal|hola\s+que\s+tal)[!.\s]*$/i.test(rawText);
+      /^(hola\s+)?(hola|buenas|buenas\s+tardes|buenos\s+d[ií]as|buenas\s+noches|saludos|qu[eé]\s+tal|hola\s+que\s+tal|c[oó]mo\s+est[aá]s?)[!.\s]*$/i.test(rawText);
 
     const greetingStripped = rawText
-      .replace(/^(hola|buenas(\s+tardes|\s+d[ií]as|\s+noches)?|saludos|qu[eé]\s+tal|buenos\s+d[ií]as)[!.,\s]*/i, "")
+      .replace(/^(hola\s+)?(hola|buenas(\s+tardes|\s+d[ií]as|\s+noches)?|saludos|qu[eé]\s+tal|buenos\s+d[ií]as|c[oó]mo\s+est[aá]s?)[!.,\s]*/i, "")
       .trim();
+
+    const hasPriorHistory = Boolean(
+      entities?.hasPriorHistory === true ||
+      entities?.has_prior_history === true ||
+      data.hasPriorHistory === true,
+    );
 
     const isGreeting =
       isRawGreetingOnly ||
-      ((entities?.isGreeting === true || entities?.is_greeting === true) && greetingStripped.length <= 3) ||
+      ((entities?.isGreeting === true || entities?.is_greeting === true) && (!hasExplicitQuestion || greetingStripped.length <= 3)) ||
       (!hasExplicitQuestion && !entities?.location && greetingStripped.length <= 3);
 
     if (isGreeting) {
       const greetingPhrase = getGreetingPhrase(typeof text === "string" ? text : "");
+      const answer = hasPriorHistory
+        ? `${greetingPhrase} Qué gusto saludarte de nuevo. Cuéntanos, ¿en qué te podemos colaborar hoy o tienes alguna consulta sobre tu servicio?`
+        : `${greetingPhrase} ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.`;
       const nextData: GeneralInquiryContext = {
         ...data,
-        answer: `${greetingPhrase} ¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas, horarios o soporte técnico.`,
+        answer,
         found: true,
+        hasPriorHistory,
       };
       return {
         type: "WAITING_USER",

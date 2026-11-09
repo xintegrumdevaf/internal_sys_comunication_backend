@@ -232,4 +232,32 @@ describe("GENERAL_INQUIRY workflow", () => {
       }
     }
   });
+
+  it("saluda con mensaje contextual de cliente recurrente cuando hasPriorHistory es true y no con la plantilla genérica", async () => {
+    const fakeRagService = { query: async () => ({ answer: "", found: false }) } as unknown as RagService;
+    const workflow = createGeneralInquiryWorkflow(fakeRagService);
+    const context: CaseContext = {
+      workflowType: "GENERAL_INQUIRY",
+      data: { hasPriorHistory: true },
+    };
+
+    const handler = workflow.states.QUERY_KNOWLEDGE_BASE;
+    const outcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "QUERY_KNOWLEDGE_BASE",
+      context,
+      text: "Hola buenas tardes",
+      entities: { isGreeting: true, hasPriorHistory: true },
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+
+    expect(outcome.type).toBe("WAITING_USER");
+    if (outcome.type === "WAITING_USER" && outcome.context.workflowType === "GENERAL_INQUIRY") {
+      expect(outcome.context.data.answer).toContain("Qué gusto saludarte de nuevo");
+      expect(outcome.context.data.answer).toContain("¿en qué te podemos colaborar hoy o tienes alguna consulta sobre tu servicio?");
+      expect(outcome.context.data.answer).not.toContain("Puedes consultarnos sobre nuestros planes de internet");
+    }
+  });
 });

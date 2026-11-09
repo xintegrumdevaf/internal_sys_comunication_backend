@@ -231,11 +231,36 @@ export class ProcessBufferedMessagesUseCase {
           ]
         : undefined;
 
-      const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 6 });
+      const completedCases = prevCases
+        .filter((c) => TERMINAL_CASE_STATUSES.includes(c.status))
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+      const lastCompletedCase = completedCases[0] ?? null;
+
+      const closedMinutesAgo = lastCompletedCase
+        ? Math.max(0, Math.round((Date.now() - lastCompletedCase.updatedAt.getTime()) / (60 * 1000)))
+        : null;
+
+      const previousCompletedCase =
+        !activeAggregate && lastCompletedCase && closedMinutesAgo !== null && closedMinutesAgo <= 48 * 60
+          ? {
+              workflowType: lastCompletedCase.workflowType,
+              closeReason: (lastCompletedCase.context as Record<string, unknown>)?.closeReason as string | undefined,
+              resolutionNote: (lastCompletedCase.context as Record<string, unknown>)?.resolutionNote as string | null | undefined,
+              closedMinutesAgo,
+              summary:
+                lastCompletedCase.workflowType === "SUPPORT_INTERNET"
+                  ? `Soporte técnico previo resuelto hace ${closedMinutesAgo} min.`
+                  : lastCompletedCase.workflowType === "BILLING_BALANCE"
+                    ? `Consulta/pago de facturación previo atendido hace ${closedMinutesAgo} min.`
+                    : `Caso previo ${lastCompletedCase.workflowType} cerrado hace ${closedMinutesAgo} min.`,
+            }
+          : null;
+
+      const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 20 });
       const recentMessages = rawHistory
         .reverse()
-        .filter((m) => !messages.some((bm) => bm.id === m.id))
-        .slice(-4)
+        .filter((m) => !messages.some((bm) => bm.id === m.id) && m.body?.trim().length > 0)
+        .slice(-10)
         .map((m) => ({
           author: m.author,
           body: m.body,
@@ -259,6 +284,7 @@ export class ProcessBufferedMessagesUseCase {
             }
           : null,
         recentMessages,
+        previousCompletedCase,
       });
 
       // Un comprobante visual (aunque falte monto, referencia o fecha) ya es un caso de pago.
@@ -295,16 +321,59 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Si la IA descubrió una intención de cierre, satisfacción o cortesía del cliente,
-      // asegurar que el flujo se encamine a cortesía/cierre general y no reinicie procesos ya resueltos.
+      // Detección pragmática y profunda de satisfacción, agradecimiento o cierre (incluso con erratas o modismos ecuatorianos)
+      const THANK_YOU_REGEX =
+        /\b(gracias|grasias|grasia|graciass|grax|graxx|grx|muchas\s+gracias|mil\s+gracias|dios\s+le\s+pague|dios\s+se\s+lo\s+pague|muy\s+amable|se\s+le\s+agradece|agradecido|qued[oó]\s+bien|ya\s+qued[oó]|ya\s+sirvi[oó]|ya\s+sirve|ya\s+sirbi[oó]|ya\s+funciona|ya\s+funcion[oó]|ya\s+vali[oó]|ya\s+vale|ya\s+bali[oó]|ya\s+bale|ya\s+tengo\s+internet|ya\s+hay\s+internet|ya\s+regres[oó]|ya\s+volvi[oó]|ya\s+lleg[oó]\s+el\s+internet|luz\s+verde|prendi[oó]\s+verde|ya\s+no\s+est[aá]\s+roja|ya\s+se\s+arregl[oó]|ya\s+se\s+solucion[oó]|se\s+compuso|todo\s+bien|todo\s+fino|todo\s+claro|todo\s+en\s+orden|todo\s+perfecto|ok\s+gracias|listo\s+gracias|dale\s+gracias|ya\s+gracias)\b/i;
+
+      const hasActiveComplaint =
+        /\b(no\s+vale|no\s+sirve|no\s+funciona|sigue\s+sin\s+internet|a[uú]n\s+no|todav[ií]a\s+no|no\s+hay\s+servicio|sigue\s+roja|problema)\b/i.test(text);
+
+      const isTextThankYou = THANK_YOU_REGEX.test(text) && !hasActiveComplaint;
+
       const isClosingOrThankYou =
-        Boolean(interpretation.entities?.isClosing || interpretation.entities?.isThankYou || interpretation.type === "CANCEL");
+        Boolean(interpretation.entities?.isClosing || interpretation.entities?.isThankYou || interpretation.entities?.serviceConfirmed || interpretation.type === "CANCEL" || isTextThankYou);
+
       if (isClosingOrThankYou && interpretation.intent === "billing.balance") {
         interpretation = {
           ...interpretation,
           type: "CANCEL",
           intent: "general.inquiry",
           entities: { ...interpretation.entities, isClosing: true, isThankYou: true },
+        };
+      }
+
+      // Si no hay un caso activo y el cliente está agradeciendo o confirmando satisfacción/cierre post-atención previa:
+      // Responder cordialmente reconociendo el caso resuelto y NO abrir casos nuevos ni enviar menús
+      if (!activeAggregate && isClosingOrThankYou) {
+        log.info(
+          { interpretation, lastWorkflowType: lastCompletedCase?.workflowType },
+          "Agradecimiento / confirmación de servicio post-cierre recibido: respondiendo cordialmente sin abrir casos nuevos",
+        );
+        let thankYouReply = "¡Con mucho gusto! Nos alegra mucho saber que todo quedó solucionado y tu servicio está funcionando correctamente. Si llegas a necesitar cualquier otra asistencia, estamos a la orden por aquí mismo. ¡Que tengas un excelente día! 🙌";
+
+        if (lastCompletedCase?.workflowType === "BILLING_BALANCE") {
+          thankYouReply = "¡Con mucho gusto! Tu pago quedó registrado correctamente. Si tienes cualquier otra consulta sobre tu cuenta o facturación, con gusto te ayudamos. ¡Excelente día! 🙌";
+        } else if (lastCompletedCase?.workflowType === "HOME_RELOCATION") {
+          thankYouReply = "¡Con mucho gusto! Seguimos atentos al seguimiento de tu traslado de domicilio. Si tienes cualquier otra inquietud, estamos para servirte. ¡Que tengas un excelente día! 🙌";
+        }
+
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: thankYouReply,
+          log,
+        });
+        return;
+      }
+
+      // Si ya hay historial previo en la conversación o un caso previo resuelto, propagar hasPriorHistory en entities
+      if (previousCompletedCase || recentMessages.length > 0) {
+        interpretation = {
+          ...interpretation,
+          entities: {
+            ...interpretation.entities,
+            hasPriorHistory: true,
+          },
         };
       }
 

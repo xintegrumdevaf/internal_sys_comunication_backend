@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Análisis Contextual Continuo y Manejo Humano de Mensajes Post-Cierre sin Plantillas Genéricas (`process-buffered-messages.use-case.ts`, `general-inquiry.workflow.ts`, `interpret-message.prompt.ts`, `ai-provider.port.ts`, `interpretation.port.ts`, `ai-interpretation.adapter.ts`, `general-inquiry.context.ts`)**:
+  - *Contexto y Problema*:
+    1. Si un cliente escribía minutos u horas después de haberse cerrado un caso para agradecer o confirmar que su servicio se restableció (ej: *"muchas gracias, ya me sirvió el internet"*, *"ya quedó bien amigo"*, *"ya valió el internet gracias"*, *"Dios le pague"*), el sistema abría un caso nuevo huérfano en `GENERAL_INQUIRY` o enviaba la plantilla genérica de aclaración (`CLARIFY`), confundiendo al cliente y reabriendo casos cerrados.
+    2. Si el cliente escribía con dudas de seguimiento sobre el caso que se acababa de cerrar (ej: *"¿y qué hago si vuelve a fallar la luz roja?"*, *"¿en cuánto tiempo se refleja mi pago?"*), o si enviaba un saludo como *"Hola buenas tardes"*, el bot lo trataba como un cliente nuevo desconocido, enviándole la plantilla genérica de bienvenida comercial (*"Puedes consultarnos sobre nuestros planes de internet, ubicación de oficinas..."*).
+  - *Resolución*:
+    1. **Inyección de `previousCompletedCase` e Historial Ampliado (`limit: 20`)**: Al interpretar mensajes de conversaciones sin caso activo, se alimenta a la IA con el contexto estructurado del caso resuelto recientemente (tipo de workflow, diagnóstico previo, notas de resolución y minutos transcurridos) junto con los últimos 10 mensajes reales de la conversación.
+    2. **Agradecimientos y Confirmación de Servicio sin Reaperturas Innecesarias**: Si el cliente agradece o confirma que su servicio ya funciona post-cierre (incluso con modismos ecuatorianos como *"ya valió el internet"* o erratas ortográficas), el sistema responde cordialmente con un agradecimiento cálido y contextualizado reconociendo el éxito de la atención previa, sin abrir casos nuevos en la base de datos ni alterar el estado resuelto.
+    3. **Saludo de Cliente Recurrente vs. Desconocido**: En `general-inquiry.workflow.ts`, si el cliente saluda en una conversación con antecedentes recientes, se saluda reconociendo su retorno (*"Qué gusto saludarte de nuevo. Cuéntanos, ¿en qué te podemos colaborar hoy o tienes alguna consulta sobre tu servicio?"*), eliminando permanentemente el menú comercial genérico a clientes con atención previa.
+    4. **Detección Contextual de Consultas de Seguimiento**: En `interpret-message.prompt.ts`, las preguntas posteriores al cierre se contextualizan con el caso previo, evitando falsos positivos de saludos y asignando la intención correcta de soporte o facturación.
+
 - **Cierre y Cancelación Robusta de Casos en Estado `NEW` (`complete-case.use-case.ts`, `cancel-case.use-case.ts`, `case.entity.ts`, `process-buffered-messages.use-case.ts`, frontend `case.ts`)**:
   - *Contexto y Problema*: Al intentar cerrar o completar un caso que acababa de crearse o reabrirse (por ejemplo, minutos u horas después de un caso anterior resuelto), los agentes recibían el error de negocio `No se puede completar un caso en estado NEW`.
   - *Causas Raíz*:

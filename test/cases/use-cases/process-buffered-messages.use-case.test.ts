@@ -1272,4 +1272,171 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
     expect(whatsappSender.sent.length).toBeGreaterThan(0);
   });
+
+  it("responde cordialmente con agradecimiento post-cierre sin crear casos nuevos cuando el cliente agradece o confirma servicio", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    // 1. Caso previo completado de soporte técnico
+    const { case: prevCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: { client: { nationalId: "0102030405", fullName: "Cliente" } } },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: prevCase.id,
+      expectedCaseVersion: prevCase.version,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: { ...prevCase.context, closeReason: "RESOLVED" },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    // 2. Cliente escribe minutos/horas después agradeciendo que ya le funcionó el internet
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isClosing: true, isThankYou: true },
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const thankMsg = messageRepo.seedText(conversation.id, "muchas gracias amigo, ya me funcionó el internet");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-thank-you-post-close",
+      messages: [thankMsg],
+    });
+
+    // Verificaciones:
+    // 1. Debe haber enviado una respuesta cordial reconociendo el soporte resuelto
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
+    expect(whatsappSender.sent[0]!.body).toContain("funcionando correctamente");
+    expect(whatsappSender.sent[0]!.body).not.toContain("¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes");
+
+    // 2. NO debe haber creado un nuevo caso en la base de datos
+    const allCases = await caseRepo.listByConversation(conversation.id);
+    expect(allCases).toHaveLength(1); // Sólo el caso original completado
+    expect(allCases[0]!.status).toBe("COMPLETED");
+
+    // 3. activeCaseId debe permanecer null
+    const convAfter = await conversationRepo.findById(conversation.id);
+    expect(convAfter?.activeCaseId).toBeNull();
+  });
+
+  it("reconoce modismos y erratas coloquiales (ej. 'muchas grasias ya valio el internet') como confirmación de servicio post-cierre", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+    const conversation = conversationRepo.createOpen();
+
+    const { case: prevCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: prevCase.id,
+      expectedCaseVersion: prevCase.version,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: { ...prevCase.context, closeReason: "RESOLVED" },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    // Simula que la IA devolvió general.inquiry pero sin bandera de thankYou explícita
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "general.inquiry",
+        entities: {},
+        confidence: 0.85,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const colloquialMsg = messageRepo.seedText(conversation.id, "muchas grasias ya valio el internet");
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-colloquial-thank-you",
+      messages: [colloquialMsg],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
+    expect(whatsappSender.sent[0]!.body).toContain("funcionando correctamente");
+
+    const allCases = await caseRepo.listByConversation(conversation.id);
+    expect(allCases).toHaveLength(1);
+    expect(allCases[0]!.status).toBe("COMPLETED");
+  });
 });

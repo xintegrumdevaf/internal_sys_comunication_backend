@@ -27,6 +27,7 @@ export function buildInterpretMessagePrompt(
 
   const active = input.conversationSnapshot?.activeCase;
   const recentMessages = input.conversationSnapshot?.recentMessages ?? [];
+  const previousCompleted = input.conversationSnapshot?.previousCompletedCase;
 
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
 - support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio o sigue sin internet a pesar de haber pagado, prima soporte técnico).
@@ -144,9 +145,20 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
      → NUNCA devuelvas billing.balance ni reinicies procesos ya resueltos; el sistema responderá con calidez humana consultando si necesita algo más o despidiéndose sin bucles.
 - Si el cliente envía una ubicación o sector aislado ("Vivo en Yanuncay", "Estoy en Conocoto", "En San Sebastián"), contextualiza \`entities.question\`: ej. "Cobertura y servicio en el sector de Yanuncay".
 - ATENCIÓN - SALUDOS Y APERTURA DE CONVERSACIÓN: Si el cliente envía un saludo, cortesía o apertura de conversación (en cualquier forma o modismo del lenguaje natural, ej: "Hola", "Buenas", "Hola qué tal", "Cómo estás", "Qué más", "Buenos días", etc.) SIN una consulta técnica o comercial específica:
-  → Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true}. NUNCA inventes ni agregues un campo \`question\` si no hubo una pregunta de negocio.
-- ATENCIÓN COMPUESTA: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenas tardes en qué horario atienden", "Hola quiero información de los planes", "Hola qué tal, cuánto cuesta el plan de 500?"):
-  → Asigna el intent correspondiente a la consulta e incluye en \`entities.question\` la pregunta completa y contextualizada, y NO pongas \`isGreeting\`.
+  → Si ya existe historial previo en la conversación o un caso previo resuelto recientemente:
+    Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true, "hasPriorHistory": true}.
+  → Si es una conversación totalmente nueva sin historial:
+    Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true}. NUNCA inventes ni agregues un campo \`question\` si no hubo una pregunta de negocio.
+- ATENCIÓN COMPUESTA O DUDAS POST-CIERRE: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenas tardes en qué horario atienden", "Hola quiero información de los planes", "Hola qué tal, cuánto cuesta el plan de 500?", "Hola una pregunta, ¿y si se vuelve a apagar la luz roja qué hago?"):
+  → NUNCA clasifiques como \`isGreeting: true\`. Asigna el intent correspondiente a la consulta considerando el contexto del caso previo y del historial reciente, e incluye en \`entities.question\` la pregunta completa y contextualizada.
+- ANÁLISIS DE SEGUIMIENTO Y CONFIRMACIÓN DE SERVICIO (POST-CIERRE):
+  Cuando no hay un caso activo pero hay un "caso previo resuelto" o mensajes previos en el historial:
+  1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona o despidiéndose (incluso si escribe minutos u horas después, o con errores ortográficos, pausas o modismos coloquiales ecuatorianos como "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias"):
+     → Clasifícalo SIEMPRE como:
+       {"type": "CANCEL", "intent": "general.inquiry", "entities": {"isClosing": true, "isThankYou": true, "serviceConfirmed": true}, "confidence": 0.95}
+     → NUNCA abras un nuevo caso técnico ni envíes menús de bienvenida si el cliente confirma satisfacción y cierre.
+  2. Si el cliente plantea dudas o consultas de seguimiento sobre la atención previa (soporte técnico, facturación, traslados):
+     → Resuelve la intención con base en el caso previo resuelto y formula la consulta en \`entities.question\`.
 
 ## "entities"
 - Extrae claves que el cliente mencionó explícitamente (ej: \`question\`, \`location\`, \`sector\`, \`nationalId\`, \`plan\`, \`speed\`, \`isGreeting\`).
@@ -215,6 +227,15 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
     "historial reciente": recentMessages && recentMessages.length > 0 ? recentMessages : null,
     "caso activo": active
       ? { workflowType: active.workflowType, pendingQuestion: active.pendingQuestion ?? null }
+      : null,
+    "caso previo resuelto recientemente": previousCompleted
+      ? {
+          workflowType: previousCompleted.workflowType,
+          motivoCierre: previousCompleted.closeReason ?? null,
+          resueltoHaceMinutos: previousCompleted.closedMinutesAgo ?? null,
+          notaResolucion: previousCompleted.resolutionNote ?? null,
+          resumen: previousCompleted.summary ?? null,
+        }
       : null,
     "pregunta pendiente": active?.pendingQuestion ?? null,
     "datos requeridos (todos)": active?.requireAll ?? null,

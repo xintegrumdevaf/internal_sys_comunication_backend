@@ -19,6 +19,14 @@ export type Interpretation = {
   confidence: number;
 };
 
+export type PreviousCompletedCaseContext = {
+  workflowType: string;
+  closeReason?: string;
+  resolutionNote?: string | null;
+  closedMinutesAgo?: number;
+  summary?: string;
+};
+
 export type InterpretMessageInput = {
   correlationId: string;
   conversationId: string;
@@ -31,6 +39,7 @@ export type InterpretMessageInput = {
     requireAny?: string[];
   } | null;
   recentMessages?: Array<{ author: string; body: string }>;
+  previousCompletedCase?: PreviousCompletedCaseContext | null;
 };
 
 export interface InterpretationPort {
