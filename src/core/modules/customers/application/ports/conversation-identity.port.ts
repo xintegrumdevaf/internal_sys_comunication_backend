@@ -24,6 +24,7 @@ export type ContractIdentityInput = {
   serial?: string | null;
   routerModel?: string | null;
   address?: string | null;
+  status?: string | null;
 };
 
 export type RememberValidatedIdentityInput = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow, normalizeDiagnosticResult } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
 import type { CaseContext } from "../../../src/core/modules/cases/domain/contexts/case-context";
+import type { SupportInternetContext } from "../../../src/core/modules/cases/domain/contexts/support-internet.context";
 import { N8nGatewayFake } from "../fakes";
 
 const emptyContext: CaseContext = { workflowType: "SUPPORT_INTERNET", data: {} };
@@ -909,6 +910,145 @@ describe("supportInternetWorkflow (docs/spec/02_STATE_MACHINE.md §3 + §13)", (
     expect(outcome).toMatchObject({
       type: "CONTINUE",
       nextState: "CHECK_CLIENT_STATUS",
+    });
+  });
+
+  describe("Filtrado y priorización por estado de contrato (activo vs anulado/retirado)", () => {
+    it("si el cliente tiene 1 contrato ACTIVO y 1 ANULADO, omite desambiguación y selecciona el activo", async () => {
+      const engine = new WorkflowEngine([supportInternetWorkflow]);
+      const gateway = new N8nGatewayFake({
+        VALIDATE_CLIENT: () => ({
+          success: true,
+          result: {
+            found: true,
+            contractNumbers: 2,
+            contracts: [
+              {
+                id: "101",
+                name: "Cliente Prueba",
+                status: "ANULADO",
+                address: "Dirección Antigua",
+                router: { sector: "antiguo", olt_name: "olt-old", pon: "1", serial: "S-OLD" },
+              },
+              {
+                id: "102",
+                name: "Cliente Prueba",
+                status: "ACTIVO",
+                address: "Dirección Actual",
+                router: { sector: "pomasqui", olt_name: "olt-new", pon: "2", serial: "S-ACTIVO" },
+              },
+            ],
+          },
+        }),
+      });
+
+      const outcome = await engine.step(
+        "SUPPORT_INTERNET",
+        baseInput("VALIDATE_CLIENT", contextWithNationalId("1724482722"), gateway),
+      );
+
+      // No debe entrar a desambiguar porque solo hay 1 contrato activo
+      expect(outcome).toMatchObject({
+        type: "CONTINUE",
+        nextState: "CHECK_CLIENT_STATUS",
+      });
+      const data1 = outcome.context.data as SupportInternetContext;
+      expect(data1.contract).toMatchObject({
+        id: "102",
+        sector: "pomasqui",
+        serial: "S-ACTIVO",
+      });
+      expect(data1.pendingContracts).toBeUndefined();
+    });
+
+    it("si el cliente tiene 2 contratos ACTIVOS y 1 RETIRADO, desambigua ÚNICAMENTE entre los 2 activos", async () => {
+      const engine = new WorkflowEngine([supportInternetWorkflow]);
+      const gateway = new N8nGatewayFake({
+        VALIDATE_CLIENT: () => ({
+          success: true,
+          result: {
+            found: true,
+            contractNumbers: 3,
+            contracts: [
+              {
+                id: "201",
+                name: "Cliente Multi",
+                status: "ACTIVO",
+                address: "Casa",
+                router: { sector: "pomasqui", olt_name: "olt1", pon: "1", serial: "S1" },
+              },
+              {
+                id: "202",
+                name: "Cliente Multi",
+                status: "RETIRADO",
+                address: "Local Viejo",
+                router: { sector: "calacali", olt_name: "olt2", pon: "2", serial: "S2" },
+              },
+              {
+                id: "203",
+                name: "Cliente Multi",
+                status: "ACTIVO",
+                address: "Oficina",
+                router: { sector: "carcelen", olt_name: "olt3", pon: "3", serial: "S3" },
+              },
+            ],
+          },
+        }),
+      });
+
+      const outcome = await engine.step(
+        "SUPPORT_INTERNET",
+        baseInput("VALIDATE_CLIENT", contextWithNationalId("1724482722"), gateway),
+      );
+
+      expect(outcome).toMatchObject({
+        type: "WAITING_USER",
+        nextState: "WAITING_USER_DISAMBIGUATE",
+      });
+      const data2 = outcome.context.data as SupportInternetContext;
+      const pending = data2.pendingContracts!;
+      expect(pending).toHaveLength(2);
+      expect(pending.map((c: { id: string }) => c.id)).toEqual(["201", "203"]);
+      expect(pending.some((c: { id: string }) => c.id === "202")).toBe(false);
+    });
+
+    it("si TODOS los contratos figuran como ANULADO o RETIRADO, escala con aviso de servicio inactivo", async () => {
+      const engine = new WorkflowEngine([supportInternetWorkflow]);
+      const gateway = new N8nGatewayFake({
+        VALIDATE_CLIENT: () => ({
+          success: true,
+          result: {
+            found: true,
+            contractNumbers: 2,
+            contracts: [
+              {
+                id: "301",
+                name: "Cliente Inactivo",
+                status: "ANULADO",
+                router: { sector: "pomasqui", olt_name: "olt1", pon: "1", serial: "S1" },
+              },
+              {
+                id: "302",
+                name: "Cliente Inactivo",
+                status: "RETIRADO",
+                router: { sector: "calacali", olt_name: "olt2", pon: "2", serial: "S2" },
+              },
+            ],
+          },
+        }),
+      });
+
+      const outcome = await engine.step(
+        "SUPPORT_INTERNET",
+        baseInput("VALIDATE_CLIENT", contextWithNationalId("1724482722"), gateway),
+      );
+
+      expect(outcome).toMatchObject({
+        type: "ESCALATED",
+      });
+      expect((outcome as { reason?: string }).reason).toContain("anulados o retirados");
+      const data3 = outcome.context.data as SupportInternetContext;
+      expect(data3.allContractsInactive).toBe(true);
     });
   });
 });

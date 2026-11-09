@@ -3,14 +3,11 @@ import type { BillingBalanceContext } from "../../../domain/contexts/billing-bal
 import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
+import { filterAndPrioritizeContracts } from "../../helpers/contract-status-filter.helper";
 
 /**
  * BILLING_BALANCE (docs/spec/02_STATE_MACHINE.md §15 + §13 WaitingSteps).
- *
- * VALIDATE_CLIENT → CHECK_BALANCE →
- *   hasDebt=false → RESPOND_NO_DEBT → COMPLETED
- *   hasDebt=true  → RESPOND_DEBT_WITH_OPTIONS → COMPLETED
- *   purpose=record_payment → RECORD_PAYMENT | WAITING_USER_RECEIPT
+ * VALIDATE_CLIENT → CHECK_BALANCE → RESPOND_NO_DEBT | RESPOND_DEBT_WITH_OPTIONS.
  */
 
 type ValidateClientContractResult = {
@@ -212,7 +209,8 @@ const validateClient: WorkflowStateHandler = async ({
     lastSearchedNationalId: undefined,
   };
 
-  const found = output.contracts[0]!;
+  const filtered = filterAndPrioritizeContracts(output.contracts);
+  const found = filtered.contracts[0] || output.contracts[0]!;
   const nextData: BillingBalanceContext = {
     ...data,
     client: { nationalId: client.nationalId, fullName: found.name },
@@ -229,6 +227,7 @@ const validateClient: WorkflowStateHandler = async ({
         oltName: router?.olt_name,
         pon: router?.pon,
         serial: router?.serial,
+        status: found.status,
       },
     });
   }

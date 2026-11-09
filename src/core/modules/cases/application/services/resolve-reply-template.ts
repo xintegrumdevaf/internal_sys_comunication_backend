@@ -112,7 +112,7 @@ export function resolveReplyTemplate(input: {
         contracts.length === 2
           ? "Por favor presiona el botón del contrato que presenta el inconveniente a continuación (o responde con el número 1, 2... o selecciónalo indicando el sector o dirección):"
           : "Por favor presiona 'Ver opciones' y selecciona el contrato de la lista a continuación (o responde con el número 1, 2... o selecciónalo indicando el sector o dirección):";
-      templateHint = `Encontré ${contracts.length} servicios asociados a tu cédula:\n\n${listFormatted}\n\n${actionInstruction}`;
+      templateHint = `Encontré ${contracts.length} contratos activos asociados a tu cédula:\n\n${listFormatted}\n\n${actionInstruction}`;
     } else if (contextData.clientNotFound && contextData.lastSearchedNationalId) {
       templateHint = `No encontré información ni ningún contrato registrado con la cédula ${contextData.lastSearchedNationalId}. Por favor verifica el número e indícanos nuevamente el número de cédula del titular del servicio.`;
     } else if (
@@ -148,8 +148,12 @@ export function resolveReplyTemplate(input: {
   }
 
   if (outcome.type === "ESCALATED") {
+    let hint = templates.ESCALATED ?? REQUEST_HUMAN_TEMPLATE;
+    if (contextData.allContractsInactive) {
+      hint = `Identificamos tu número de cédula, pero tus contratos anteriores figuran como retirados o anulados y actualmente no registras un servicio de internet activo. Te comunicamos con un asesor para asistirte.`;
+    }
     return {
-      templateHint: templates.ESCALATED ?? REQUEST_HUMAN_TEMPLATE,
+      templateHint: hint,
       resultVars: flattenContext(contextData),
       action: "ESCALATED",
       status: "ESCALATED",

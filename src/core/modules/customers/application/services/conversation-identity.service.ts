@@ -86,7 +86,7 @@ export class ConversationIdentityService implements ConversationIdentityPort {
       serial: input.contract.serial,
       routerModel: input.contract.routerModel,
       address: input.contract.address,
-      status: "active",
+      status: input.contract.status ?? "active",
     });
     await this.conversationRepo.setCustomerId(input.conversationId, customer.id);
   }
@@ -106,7 +106,7 @@ export class ConversationIdentityService implements ConversationIdentityPort {
         serial: c.serial,
         routerModel: c.routerModel,
         address: c.address,
-        status: "active",
+        status: c.status ?? "active",
       });
     }
     await this.conversationRepo.setCustomerId(input.conversationId, customer.id);

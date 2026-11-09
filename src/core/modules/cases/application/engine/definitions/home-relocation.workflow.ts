@@ -3,6 +3,7 @@ import type { HomeRelocationContext } from "../../../domain/contexts/home-reloca
 import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/contexts/engine-meta";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 import type { RagService } from "../../../../ai/application/services/rag.service";
+import { filterAndPrioritizeContracts } from "../../helpers/contract-status-filter.helper";
 
 type ValidateClientContractResult = {
   id: string;
@@ -147,7 +148,8 @@ export function createHomeRelocationWorkflow(ragService: RagService): WorkflowDe
       return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
     }
 
-    const selectedContract = output.contracts[0];
+    const filtered = filterAndPrioritizeContracts(output.contracts);
+    const selectedContract = filtered.contracts[0] || output.contracts[0];
     const clientFullName = selectedContract?.name || data.client?.fullName || "Cliente Validado";
 
     const nextData: HomeRelocationContext = {
@@ -180,6 +182,7 @@ export function createHomeRelocationWorkflow(ragService: RagService): WorkflowDe
           oltName: selectedContract.router?.olt_name,
           pon: selectedContract.router?.pon,
           serial: selectedContract.router?.serial,
+          status: selectedContract.status,
         },
       });
     }

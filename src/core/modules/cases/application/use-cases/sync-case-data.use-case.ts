@@ -8,6 +8,7 @@ import type { ConversationRepositoryPort } from "../../../conversations/applicat
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import type { CaseContext } from "../../domain/contexts/case-context";
 import { normalizeMikrotikSector, normalizeMikrotikOlt } from "../../infrastructure/diagnostic/mikrotik-diagnostic.adapter";
+import { filterAndPrioritizeContracts } from "../helpers/contract-status-filter.helper";
 
 export type SyncCaseDataInput = {
   caseId: string;
@@ -44,6 +45,7 @@ type ContractFromN8n = {
   id?: string | number;
   name?: string;
   address?: string;
+  status?: string;
   sectorNom?: string;
   sector_nom?: string;
   barrioNom?: string;
@@ -153,7 +155,8 @@ export class SyncCaseDataUseCase {
         const matching = currentContractId
           ? output.contracts.find((c) => String(c.id) === currentContractId)
           : undefined;
-        const selected = matching || output.contracts[0]!;
+        const filtered = filterAndPrioritizeContracts(output.contracts);
+        const selected = matching || filtered.contracts[0] || output.contracts[0]!;
 
         const rawSector = selected.router?.sector ?? selected.sector ?? updatedContract?.sector;
         const normalizedSector = normalizeMikrotikSector(rawSector) || rawSector;

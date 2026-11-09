@@ -8,6 +8,7 @@ import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/conte
 import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 import { resolveContractDisambiguation } from "../contract-disambiguation.helper";
+import { filterAndPrioritizeContracts } from "../../helpers/contract-status-filter.helper";
 
 /**
  * docs/spec/02_STATE_MACHINE.md §3 + §13 — SUPPORT_INTERNET con WaitingSteps.
@@ -240,21 +241,45 @@ const validateClient: WorkflowStateHandler = async ({
     return { type: "WAITING_USER", nextState: "WAITING_USER_CLIENT", context: waiting };
   }
 
+  const filtered = filterAndPrioritizeContracts(output.contracts);
+
+  if (filtered.allContractsInactive) {
+    const nextData: SupportInternetContext = {
+      ...data,
+      client: {
+        nationalId: client.nationalId,
+        fullName: output.contracts[0]?.name || data.client?.fullName || "",
+      },
+      lastSearchedNationalId: client.nationalId,
+      clientNotFound: false,
+      allContractsInactive: true,
+    };
+    return {
+      type: "ESCALATED",
+      reason: "Contratos del cliente figuran como anulados o retirados (sin servicio activo)",
+      context: withContext(nextData, context),
+    };
+  }
+
+  const effectiveContracts = filtered.contracts.length > 0 ? filtered.contracts : output.contracts;
+
   // Si encontró, limpiamos flags de no encontrado
   data = {
     ...data,
     clientNotFound: false,
+    allContractsInactive: false,
     lastSearchedNationalId: undefined,
   };
 
-  if (output.contracts.length > 1) {
-    const pendingContracts = output.contracts.map((c) => {
+  if (effectiveContracts.length > 1) {
+    const pendingContracts = effectiveContracts.map((c) => {
       const extra = c as unknown as { contractCode?: string; label?: string };
       return {
         id: c.id,
         contractCode: extra.contractCode,
         name: c.name,
         address: c.address,
+        status: c.status,
         label: extra.label || c.address || `Contrato #${c.id}`,
         sector: c.router.sector,
         oltName: c.router.olt_name,
@@ -263,7 +288,7 @@ const validateClient: WorkflowStateHandler = async ({
         ip: c.ip,
       };
     });
-    const clientFullName = output.contracts[0]?.name || data.client?.fullName || "";
+    const clientFullName = effectiveContracts[0]?.name || data.client?.fullName || "";
     if (identity) {
       await identity.rememberCustomerContracts({
         conversationId,
@@ -276,6 +301,7 @@ const validateClient: WorkflowStateHandler = async ({
           pon: c.pon,
           serial: c.serial,
           address: c.address,
+          status: c.status,
         })),
       });
     }
@@ -295,7 +321,7 @@ const validateClient: WorkflowStateHandler = async ({
     return { type: "WAITING_USER", nextState: "WAITING_USER_DISAMBIGUATE", context: waiting };
   }
 
-  const found = output.contracts[0]!;
+  const found = effectiveContracts[0]!;
   const nationalId = client.nationalId;
   const nextData: SupportInternetContext = {
     ...data,
@@ -322,6 +348,7 @@ const validateClient: WorkflowStateHandler = async ({
         pon: found.router.pon,
         serial: found.router.serial,
         address: found.address,
+        status: found.status,
       },
     });
   }

@@ -10,6 +10,7 @@ export type SupportInternetPendingContract = {
   name: string;
   address?: string;
   label?: string;
+  status?: string;
   sector: string;
   oltName: string;
   pon: string;
@@ -72,6 +73,8 @@ export type SupportInternetContext = {
     canBeReactivated?: boolean;
     reason?: string;
   };
+  /** Indica si todos los contratos del cliente figuran como ANULADOS/RETIRADOS sin servicio activo */
+  allContractsInactive?: boolean;
   /** Contratos candidatos cuando VALIDATE_CLIENT devuelve mas de uno (§13 desambiguar). */
   pendingContracts?: SupportInternetPendingContract[];
   /** Todos los contratos descubiertos para el cliente (preservados tras desambiguar para el panel del agente). */

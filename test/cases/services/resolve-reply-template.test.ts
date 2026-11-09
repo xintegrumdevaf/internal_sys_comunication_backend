@@ -48,9 +48,35 @@ describe("resolveReplyTemplate — WAITING_USER_DISAMBIGUATE", () => {
 
     expect(resolved.action).toBe("WAITING_USER_DISAMBIGUATE");
     expect(resolved.status).toBe("WAITING_USER");
-    expect(resolved.templateHint).toContain("Encontré 2 servicios asociados a tu cédula");
+    expect(resolved.templateHint).toContain("Encontré 2 contratos activos asociados a tu cédula");
     expect(resolved.templateHint).toContain("1️⃣ Piso 1 - Av. Amazonas");
     expect(resolved.templateHint).toContain("2️⃣ Piso 2 - Local");
     expect(resolved.templateHint).toContain("responde con el número 1, 2... o selecciónalo");
+  });
+
+  it("emite mensaje pedagógico claro si todos los contratos figuran como inactivos/anulados", () => {
+    const context: CaseContext = {
+      workflowType: "SUPPORT_INTERNET",
+      data: {
+        client: { nationalId: "1723456789", fullName: "Juan Perez" },
+        lastSearchedNationalId: "1723456789",
+        allContractsInactive: true,
+      },
+    };
+
+    const resolved = resolveReplyTemplate({
+      definition: supportInternetWorkflow,
+      outcome: {
+        type: "ESCALATED",
+        reason: "Contratos del cliente figuran como anulados o retirados (sin servicio activo)",
+        context,
+      },
+      context,
+    });
+
+    expect(resolved.action).toBe("ESCALATED");
+    expect(resolved.status).toBe("ESCALATED");
+    expect(resolved.templateHint).toContain("retirados o anulados");
+    expect(resolved.templateHint).toContain("no registras un servicio de internet activo");
   });
 });

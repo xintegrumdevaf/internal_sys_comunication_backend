@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Jerarquía de Confianza Activa y Filtrado de Contratos Inactivos (`contract-status-filter.helper.ts`, `support-internet.workflow.ts`, `billing-balance.workflow.ts`, `home-relocation.workflow.ts`, `resolve-reply-template.ts`, `find-cliend-contract.json`)**:
+  - *Contexto y Problema*: Al consultar contratos históricos por cédula en el ISP/Google Sheets (`VALIDATE_CLIENT`), el sistema recibía contratos en estados `ANULADO`, `RETIRADO`, `RECHAZADO` o `INACTIVO`. Al detectar más de un contrato, el motor obligaba a desambiguar (`WAITING_USER_DISAMBIGUATE`) presentando contratos dados de baja en los botones interactivos de WhatsApp. Esto generaba confusión y alarma en clientes que creían que se les seguía cobrando por servicios cancelados años atrás, además de forzar pasos de desambiguación innecesarios a clientes que en realidad solo contaban con un único servicio activo.
+  - *Resolución*:
+    1. **Módulo Especializado de Filtrado y Clasificación (`contract-status-filter.helper.ts`)**:
+       - Discriminación de estados estrictamente activos (`ACTIVO`, `ACTIVE`), suspendidos por mora (`CORTADO`, `SUSPENDIDO`) e inactivos (`ANULADO`, `RETIRADO`, `RECHAZADO`, `INACTIVO`, `CANCELADO`, `BAJA`).
+       - *Nivel 1 de Confianza*: Si el cliente tiene contratos estrictamente activos, se descartan automáticamente todos los anulados/retirados. Si solo queda un contrato activo, se selecciona de inmediato omitiendo la desambiguación. Si quedan varios activos, se desambigua únicamente entre los activos.
+       - *Nivel 2 de Confianza*: Si no hay activos pero sí servicios cortados/suspendidos, se priorizan para permitir la consulta de deudas y reconexión.
+       - *Nivel 3 (Inactividad Total)*: Si todos los contratos figuran como anulados o retirados, se marca `allContractsInactive: true` y se escala con mensaje pedagógico: *"Identificamos tu número de cédula, pero tus contratos anteriores figuran como retirados o anulados y actualmente no registras un servicio de internet activo..."*.
+    2. **Propagación en Workflows (`support-internet.workflow.ts`, `billing-balance.workflow.ts`, `home-relocation.workflow.ts`, `sync-case-data.use-case.ts`, `sync-customer-isp.use-case.ts`)**:
+       - Integración del helper para seleccionar siempre el contrato activo prioritario y registrar su estado real en Postgres sin forzar valores `"active"` ficticios.
+    3. **Ajuste en Integración de n8n (`find-cliend-contract.json`)**:
+       - Filtrado y priorización activa en el nodo de formato antes de emitir los contratos hacia la API.
+
 - **Desambiguación Interactiva Robusta de Multi-Contratos con Coincidencia de Caracteres y Call-to-Action Explícito (`contract-disambiguation.helper.ts`, `resolve-reply-template.ts`, `support-internet.workflow.ts`, `advance-case.use-case.ts`, `interpret-message.prompt.ts`)**:
   - *Contexto y Problema*:
     1. Cuando un cliente cuenta con más de un contrato asociado a su cédula, el sistema presentaba la lista interactiva (`WAITING_USER_DISAMBIGUATE`), pero la desambiguación solo aceptaba números ordinales ("1", "2") o códigos de contrato exactos.

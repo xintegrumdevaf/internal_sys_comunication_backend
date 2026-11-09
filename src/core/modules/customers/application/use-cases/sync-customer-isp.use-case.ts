@@ -7,6 +7,7 @@ import type {
 } from "../ports/customer.repository.port";
 import type { TagRepositoryPort } from "../../../tags/application/ports/tag.repository.port";
 import type { N8nGatewayPort } from "../../../cases/application/ports/n8n-gateway.port";
+import { filterAndPrioritizeContracts } from "../../../cases/application/helpers/contract-status-filter.helper";
 
 export type SyncCustomerIspInput = {
   customerId: string;
@@ -98,8 +99,9 @@ export class SyncCustomerIspUseCase {
       throw notFound(`No se encontraron contratos registrados en el ISP para la cédula ${nationalId}`);
     }
 
-    // 1. Extraer nombre, dirección y correo oficial del primer contrato si aplica
-    const firstContract = contracts[0]!;
+    // 1. Extraer nombre, dirección y correo oficial del contrato prioritario (activo) si aplica
+    const filteredContracts = filterAndPrioritizeContracts(contracts);
+    const firstContract = filteredContracts.contracts[0] || contracts[0]!;
     const titularName = firstContract.name?.trim() || customer.fullName;
     const titularAddress = firstContract.address?.trim() || customer.address;
     const titularEmail =
