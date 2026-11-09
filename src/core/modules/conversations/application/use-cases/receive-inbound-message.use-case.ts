@@ -8,6 +8,8 @@ import type { MessageRepositoryPort } from "../ports/message.repository.port";
 import type { MediaStoragePort } from "../ports/media-storage.port";
 import type { InboundBufferService } from "../../../ingestion/application/services/inbound-buffer.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
+import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
+import type { Case } from "../../../cases/domain/case.entity";
 
 export type ReceiveInboundMessageInput = {
   waPhone: string;
@@ -44,6 +46,7 @@ export type ReceiveInboundMessageDeps = {
   broadcaster?: RealtimeBroadcaster;
   /** Almacenamiento local permanente para descargar imágenes, audios, videos y documentos al recibir el webhook. */
   mediaStorage?: MediaStoragePort;
+  caseRepo?: CaseRepositoryPort;
 };
 
 /**
@@ -151,6 +154,21 @@ export class ReceiveInboundMessageUseCase {
         await conversationRepo.incrementUnreadCount(conversation.id);
         await conversationRepo.touchLastActivity(conversation.id);
         await inboundBuffer?.push(conversation.id, message.id);
+
+        let activeCase: Case | null = null;
+        if (conversation.activeCaseId && this.deps.caseRepo) {
+          try {
+            const aggregate = await this.deps.caseRepo.findById(conversation.activeCaseId);
+            activeCase = aggregate?.case ?? null;
+          } catch {
+            // No bloquear la ingesta si la lectura del caso falla
+          }
+        }
+
+        const isHumanActive = activeCase
+          ? activeCase.status === "HUMAN_ACTIVE" || activeCase.status === "ESCALATED"
+          : false;
+
         this.deps.broadcaster?.publish({
           type: "MESSAGE_RECEIVED",
           conversationId: conversation.id,
@@ -167,6 +185,9 @@ export class ReceiveInboundMessageUseCase {
                     ? "🎤 Audio"
                     : "Mensaje nuevo"),
           authorName: input.waProfileName || conversation.waProfileName || conversation.waPhone,
+          departmentId: activeCase?.departmentId ?? null,
+          assignedAgentId: activeCase?.assignedAgentId ?? null,
+          isHumanActive,
         });
       } else {
         await conversationRepo.touchLastActivity(conversation.id);

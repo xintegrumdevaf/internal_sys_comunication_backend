@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.13] - 2026-11-09
 
+- **Aislamiento Departamental y Mitigación de Alertas Sonoras Indiscriminadas en Tiempo Real (`realtime-broadcaster.ts`, `receive-inbound-message.use-case.ts`, frontend `use-realtime.tsx`, `notifications.state.ts`, `realtime-event.ts`, `AppShell.tsx`)**:
+  - *Contexto y Problema*:
+    1. Asesores con rol `agent` escuchaban notificaciones sonoras (`playNotificationSound`) y recibían alertas de escritorio en el navegador para mensajes entrantes de toda la empresa de forma indiscriminada, como si tuvieran rol de supervisión global (`admin` o `manager`).
+    2. Mensajes rutinarios intercambiados entre clientes y el bot de IA producían un sonido constante en las terminales de todos los asesores, generando fatiga acústica (*alarm fatigue*).
+    3. Los recordatorios de casos agendados (`CASE_SCHEDULED_REMINDER`) también se transmitían a todos los agentes sin filtrar por asesor asignado ni por departamento.
+  - *Causa Raíz*:
+    1. En `realtime-broadcaster.ts`, `shouldDeliver` utilizaba visibilidad compartida sin filtros para `MESSAGE_RECEIVED` y `CASE_SCHEDULED_REMINDER`, enviando cada evento a todos los suscriptores conectados.
+    2. El evento `MESSAGE_RECEIVED` carecía de metadatos de caso (`departmentId`, `assignedAgentId`, `isHumanActive`).
+    3. En el frontend, `use-realtime.tsx` ejecutaba `playNotificationSound()` incondicionalmente ante cualquier `MESSAGE_RECEIVED` si el chat no estaba activo en pantalla, sin verificar si el mensaje pertenecía a un flujo de bot o a otro asesor.
+  - *Resolución*:
+    1. **Enriquecimiento del Evento en Backend**: Se incluyeron `departmentId`, `assignedAgentId` e `isHumanActive` en el payload de `MESSAGE_RECEIVED` generado en `receive-inbound-message.use-case.ts` (inyectando `caseRepo` en `container.ts`).
+    2. **Filtrado Estricto en Broadcaster**: En `realtime-broadcaster.ts`, para roles `agent`:
+       - `MESSAGE_RECEIVED` solo se entrega si el caso está asignado al agente (`assignedAgentId === sub.userId`) o pertenece a su departamento (`sub.departmentIds.has(departmentId)`).
+       - `CASE_SCHEDULED_REMINDER` solo se entrega al agente asignado o a miembros del departamento correspondiente.
+       - Roles `admin` y `manager` retienen visibilidad completa de supervisión.
+    3. **Filtrado Inteligente de Alertas en Frontend**: En `use-realtime.tsx`, `playNotificationSound()` y `sendDesktopNotification()` se reservan estrictamente para eventos humanos accionables:
+       - Silencio absoluto para mensajes rutinarios de bot (`!isHumanActive`).
+       - Silencio si el caso está asignado a otro asesor específico.
+       - Sonido y alerta únicamente si el caso está asignado al usuario actual, o si es un caso humano en espera en la cola de su área, o para supervisores (`manager`/`admin`).
+       - En `notifications.state.ts`, se ajustó `isMine` para asociar recordatorios únicamente al agente responsable.
+
+
 - **Análisis Contextual Continuo y Manejo Humano de Mensajes Post-Cierre sin Plantillas Genéricas (`process-buffered-messages.use-case.ts`, `general-inquiry.workflow.ts`, `interpret-message.prompt.ts`, `ai-provider.port.ts`, `interpretation.port.ts`, `ai-interpretation.adapter.ts`, `general-inquiry.context.ts`)**:
   - *Contexto y Problema*:
     1. Si un cliente escribía minutos u horas después de haberse cerrado un caso para agradecer o confirmar que su servicio se restableció (ej: *"muchas gracias, ya me sirvió el internet"*, *"ya quedó bien amigo"*, *"ya valió el internet gracias"*, *"Dios le pague"*), el sistema abría un caso nuevo huérfano en `GENERAL_INQUIRY` o enviaba la plantilla genérica de aclaración (`CLARIFY`), confundiendo al cliente y reabriendo casos cerrados.

@@ -804,6 +804,7 @@ export function createContainer(): Container {
     logger: conversationsLogger,
     broadcaster,
     mediaStorage,
+    caseRepo,
   });
   const receiveInboundEdit = new ReceiveInboundEditUseCase({
     conversationRepo,

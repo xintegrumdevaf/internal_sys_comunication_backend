@@ -9,6 +9,9 @@ export type RealtimeEvent =
       messageId: string;
       bodyPreview?: string;
       authorName?: string;
+      departmentId?: string | null;
+      assignedAgentId?: string | null;
+      isHumanActive?: boolean;
     }
   | {
       type: "MESSAGE_SENT";
@@ -181,7 +184,31 @@ export class RealtimeBroadcaster {
       return sub.departmentIds.has(event.departmentId) || sub.role === "manager";
     }
 
-    // Mensajes y claim: visibilidad shared por defecto — todos los agentes autenticados.
+    if (event.type === "CASE_SCHEDULED_REMINDER") {
+      if (sub.role === "manager") return true;
+      if (event.assignedAgentId) {
+        return event.assignedAgentId === sub.userId;
+      }
+      if (event.departmentId) {
+        return sub.departmentIds.has(event.departmentId);
+      }
+      return false;
+    }
+
+    if (event.type === "MESSAGE_RECEIVED") {
+      if (sub.role === "manager") return true;
+      // Para agentes humanos: solo si está asignado a él o pertenece a su departamento
+      if (event.assignedAgentId) {
+        return event.assignedAgentId === sub.userId;
+      }
+      if (event.departmentId) {
+        return sub.departmentIds.has(event.departmentId);
+      }
+      // Casos en triage inicial o sin departamento: solo visibles para supervisión
+      return false;
+    }
+
+    // Eventos salientes, ediciones y claim: visibilidad shared por defecto.
     return true;
   }
 }
