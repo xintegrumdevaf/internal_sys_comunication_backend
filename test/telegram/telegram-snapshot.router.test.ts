@@ -90,3 +90,4 @@ describe("TelegramSnapshotRouter (GET /analitica)", () => {
     expect(res.headers.location).toBe("http://localhost:5173/bandeja");
   });
 });
+

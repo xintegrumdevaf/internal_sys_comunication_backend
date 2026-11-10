@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Logger } from "../../../../shared/logging/logger";
+import type { AnalyticsOverviewDto } from "../../analytics/domain/analytics.types";
 import type { AnalyticsRepositoryPort } from "../../analytics/application/ports/analytics.repository.port";
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { AgentRepositoryPort } from "../../departments/application/ports/agent.repository.port";
@@ -32,14 +33,15 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
       const now = new Date();
       const startOfDay = getStartOfDayInTimeZone(timeZone);
 
-      let overview = {
+      let overview: AnalyticsOverviewDto = {
         totalCases: 0,
         activeCases: 0,
         completedCases: 0,
         botContainmentRate: 0,
-        avgResolutionTimeMinutes: null as number | null,
-        avgQueueWaitTimeSeconds: null as number | null,
+        avgResolutionTimeMinutes: null,
+        avgQueueWaitTimeSeconds: null,
         escalationRate: 0,
+        escalatedCases: 0,
       };
 
       try {
@@ -72,6 +74,40 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
         logger.warn({ err }, "error al consultar getDashboardMetrics para snapshot web");
       }
 
+      let casesDist;
+      try {
+        casesDist = await analyticsRepo.getCasesDistribution({
+          from: startOfDay,
+          to: now,
+        });
+      } catch (err) {
+        logger.warn({ err }, "error al consultar getCasesDistribution para snapshot web");
+      }
+
+      let infraAlerts: Array<{ sector: string; oltName: string | null; activeCasesCount: number }> = [];
+      try {
+        const rawAlerts = await analyticsRepo.getInfrastructureAlerts({
+          from: startOfDay,
+          to: now,
+        });
+        infraAlerts = rawAlerts.map((a) => ({
+          sector: a.sector,
+          oltName: a.oltName,
+          activeCasesCount: a.activeCasesCount,
+        }));
+      } catch (err) {
+        logger.warn({ err }, "error al consultar getInfrastructureAlerts para snapshot web");
+      }
+
+      let unattendedCases: Array<{ caseId: string; waitMinutes: number; customerName: string; departmentName: string | null }> = [];
+      if (typeof caseRepo.findUnattendedHumanCases === "function") {
+        try {
+          unattendedCases = await caseRepo.findUnattendedHumanCases(settings.slaThresholdMinutes || 15, 10);
+        } catch (err) {
+          logger.warn({ err }, "error al consultar findUnattendedHumanCases para snapshot web");
+        }
+      }
+
       // Si solicitan JSON expresamente
       if (req.query.format === "json" || req.headers.accept === "application/json") {
         return res.json({
@@ -82,6 +118,9 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
             overview,
             activeAgentsCount,
             dashboard,
+            casesDist,
+            infraAlerts,
+            unattendedCases,
           },
         });
       }
@@ -89,6 +128,9 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
       const html = renderExecutiveSnapshotHtml({
         overview,
         dashboard,
+        casesDist,
+        infraAlerts,
+        unattendedCases,
         activeAgentsCount,
         timeZone,
         now,
@@ -141,15 +183,7 @@ function getStartOfDayInTimeZone(timeZone: string): Date {
 }
 
 interface RenderSnapshotProps {
-  overview: {
-    totalCases: number;
-    activeCases: number;
-    completedCases: number;
-    botContainmentRate: number;
-    avgResolutionTimeMinutes: number | null;
-    avgQueueWaitTimeSeconds: number | null;
-    escalationRate: number;
-  };
+  overview: AnalyticsOverviewDto;
   dashboard?: {
     myAssignedCases?: number;
     escalatedPending?: number;
@@ -161,14 +195,45 @@ interface RenderSnapshotProps {
       queueCases?: number;
     }>;
   };
+  casesDist?: {
+    byWorkflow?: Array<{
+      workflowType: string;
+      count: number;
+      percentage: number;
+    }>;
+  };
+  infraAlerts?: Array<{
+    sector: string;
+    oltName: string | null;
+    activeCasesCount: number;
+  }>;
+  unattendedCases?: Array<{
+    caseId: string;
+    waitMinutes: number;
+    customerName: string;
+    departmentName: string | null;
+  }>;
   activeAgentsCount: number;
   timeZone: string;
   now: Date;
   frontendUrl: string;
 }
 
+function formatWorkflowName(wf: string): string {
+  const map: Record<string, string> = {
+    SUPPORT_INTERNET: "Soporte Técnico (Internet / Fibra)",
+    BILLING: "Facturación y Cobranzas",
+    SALES: "Ventas y Planes Nuevos",
+    CHANGE_PLAN: "Cambio de Plan / Upgrade",
+    MOVE_REQUEST: "Traslado de Domicilio",
+    CANCELLATION: "Bajas y Retenciones",
+    GENERAL_INQUIRY: "Consultas Generales",
+  };
+  return map[wf] || wf.replace(/_/g, " ");
+}
+
 function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
-  const { overview, dashboard, activeAgentsCount, timeZone, now, frontendUrl } = props;
+  const { overview, dashboard, casesDist, infraAlerts = [], unattendedCases = [], activeAgentsCount, timeZone, now, frontendUrl } = props;
 
   const dateStr = now.toLocaleDateString("es-EC", {
     timeZone,
@@ -186,13 +251,21 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
 
   const queuePending = dashboard?.escalatedPending || 0;
   const activeCases = dashboard?.myAssignedCases || overview.activeCases || 0;
-  const isHealthy = queuePending <= 3;
+  const slaBreachCount = unattendedCases.length;
+
+  const isCritical = slaBreachCount > 0 || queuePending > 5;
+  const isWarning = !isCritical && queuePending > 0;
 
   const containmentPct = Math.round(overview.botContainmentRate);
   const escalationPct = Math.round(overview.escalationRate);
   const completionRate = overview.totalCases > 0 ? Math.round((overview.completedCases / overview.totalCases) * 100) : 100;
 
-  const deptList = dashboard?.departmentBreakdown || [];
+  // Filtrado inteligente de departamentos: separar con carga vs sin carga
+  const allDepts = dashboard?.departmentBreakdown || [];
+  const activeDepts = allDepts.filter((d) => d.activeCases > 0 || (d.queueCases || 0) > 0);
+  const idleDepts = allDepts.filter((d) => d.activeCases === 0 && (d.queueCases || 0) === 0);
+
+  const workflows = casesDist?.byWorkflow || [];
 
   return `<!DOCTYPE html>
 <html lang="es" class="dark">
@@ -230,7 +303,7 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
       margin: 0 auto;
     }
     .header {
-      padding: 16px 8px 20px;
+      padding: 16px 8px 18px;
       text-align: left;
     }
     .badge-top {
@@ -251,9 +324,9 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
     .pulse-dot {
       width: 7px;
       height: 7px;
-      background-color: ${isHealthy ? "var(--success)" : "var(--warning)"};
+      background-color: ${isCritical ? "var(--danger)" : isWarning ? "var(--warning)" : "var(--success)"};
       border-radius: 50%;
-      box-shadow: 0 0 8px ${isHealthy ? "var(--success)" : "var(--warning)"};
+      box-shadow: 0 0 8px ${isCritical ? "var(--danger)" : isWarning ? "var(--warning)" : "var(--success)"};
     }
     h1 {
       font-size: 22px;
@@ -281,24 +354,36 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: ${isHealthy ? "rgba(16, 185, 129, 0.1)" : "rgba(245, 158, 11, 0.1)"};
-      border: 1px solid ${isHealthy ? "rgba(16, 185, 129, 0.3)" : "rgba(245, 158, 11, 0.3)"};
+      background: ${
+        isCritical
+          ? "rgba(239, 68, 68, 0.12)"
+          : isWarning
+          ? "rgba(245, 158, 11, 0.12)"
+          : "rgba(16, 185, 129, 0.12)"
+      };
+      border: 1px solid ${
+        isCritical
+          ? "rgba(239, 68, 68, 0.35)"
+          : isWarning
+          ? "rgba(245, 158, 11, 0.35)"
+          : "rgba(16, 185, 129, 0.35)"
+      };
       border-radius: 12px;
       padding: 12px 14px;
       margin-bottom: 16px;
     }
     .status-banner span {
       font-size: 13px;
-      font-weight: 600;
-      color: ${isHealthy ? "#34d399" : "#fbbf24"};
+      font-weight: 700;
+      color: ${isCritical ? "#f87171" : isWarning ? "#fbbf24" : "#34d399"};
     }
     .section-title {
       font-size: 12px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.8px;
-      color: #64748b;
-      margin: 20px 4px 8px;
+      color: #94a3b8;
+      margin: 22px 4px 8px;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -400,6 +485,13 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
       color: #34d399;
       border: 1px solid rgba(16, 185, 129, 0.3);
     }
+    .workflow-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
     .btn-group {
       display: flex;
       flex-direction: column;
@@ -462,13 +554,19 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
   </div>
 
   <div class="status-banner">
-    <span>${isHealthy ? "🟢 Operación Estable y en Control" : "🟡 Atención Requerida (Demoras en Cola)"}</span>
-    <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">${queuePending} en cola</span>
+    <span>${
+      isCritical
+        ? "🔴 Atención Crítica: Brechas de SLA o Demoras en Cola"
+        : isWarning
+        ? "🟡 Atención Requerida: Clientes en Cola de Espera"
+        : "🟢 Operación Estable y en Control"
+    }</span>
+    <span style="font-size: 11px; font-weight: 600; color: var(--text-muted);">${queuePending} en cola | ${slaBreachCount} SLA crítico</span>
   </div>
 
-  <!-- SECCIÓN 1: ACTIVIDAD ACUMULADA HOY -->
+  <!-- SECCIÓN 1: INDICADORES GERENCIALES CLAVE (HOY) -->
   <div class="section-title">
-    📈 Actividad Acumulada de Hoy (00:00 - Actual)
+    📈 Indicadores Gerenciales Clave (Hoy)
   </div>
 
   <div class="grid-2">
@@ -495,11 +593,37 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
         <div class="progress-bar-fill" style="width: ${containmentPct}%; background: #38bdf8;"></div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-label">
+        <span>Derivación a Asesores</span>
+        <span>👤</span>
+      </div>
+      <div class="card-val" style="color: #a78bfa;">${escalationPct}%</div>
+      <div class="card-sub">${overview.escalatedCases || 0} derivados a humanos</div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" style="width: ${escalationPct}%; background: #a78bfa;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">
+        <span>Cumplimiento SLA</span>
+        <span>⏱️</span>
+      </div>
+      <div class="card-val" style="color: ${slaBreachCount > 0 ? "var(--danger)" : "var(--success)"};">
+        ${slaBreachCount > 0 ? `${slaBreachCount} alertas` : "100%"}
+      </div>
+      <div class="card-sub">${slaBreachCount > 0 ? "Casos con espera > 15m" : "0 demoras críticas"}</div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" style="width: ${slaBreachCount > 0 ? "35" : "100"}%; background: ${slaBreachCount > 0 ? "var(--danger)" : "var(--success)"};"></div>
+      </div>
+    </div>
   </div>
 
   <!-- SECCIÓN 2: ESTADO EN VIVO AHORA MISMO -->
   <div class="section-title">
-    ⚡ Estado de la Operación en Este Instante
+    ⚡ Operación en Vivo en Este Instante
   </div>
 
   <div class="grid-4">
@@ -533,7 +657,7 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
     overview.avgQueueWaitTimeSeconds !== null || overview.avgResolutionTimeMinutes !== null
       ? `
   <div class="section-title">
-    ⏱️ Tiempos Medios de Respuesta
+    ⏱️ Velocidad y Tiempos Medios de Atención
   </div>
   <div class="grid-2">
     <div class="card">
@@ -555,21 +679,48 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
       : ""
   }
 
-  <!-- SECCIÓN 4: CARGA POR DEPARTAMENTO -->
+  <!-- SECCIÓN 4: DEMANDA POR TIPO DE RECLAMO (WORKFLOWS) -->
+  ${
+    workflows.length > 0
+      ? `
+  <div class="section-title">
+    📋 Demanda por Motivo de Consulta
+  </div>
+  <div class="card">
+    ${workflows
+      .slice(0, 5)
+      .map(
+        (wf) => `
+      <div class="workflow-row">
+        <span><b>${formatWorkflowName(wf.workflowType)}</b></span>
+        <span style="color: var(--text-muted);">${wf.count} casos (${Math.round(wf.percentage)}%)</span>
+      </div>
+      <div class="progress-bar-bg" style="margin-top: 2px; margin-bottom: 10px;">
+        <div class="progress-bar-fill" style="width: ${Math.round(wf.percentage)}%; background: #0284c7;"></div>
+      </div>
+    `,
+      )
+      .join("")}
+  </div>
+  `
+      : ""
+  }
+
+  <!-- SECCIÓN 5: CARGA POR DEPARTAMENTO -->
   <div class="section-title">
     🏢 Distribución Departamental
   </div>
 
   ${
-    deptList.length > 0
-      ? deptList
+    activeDepts.length > 0
+      ? activeDepts
           .map((dept) => {
             const hasQueue = (dept.queueCases || 0) > 0;
             return `
       <div class="dept-card">
         <div>
           <div class="dept-name">${dept.departmentName}</div>
-          <div class="card-sub">${dept.activeCases} casos activos en gestión</div>
+          <div class="card-sub">${dept.activeCases} casos en gestión activa</div>
         </div>
         <div class="dept-badges">
           <span class="badge badge-active">${dept.activeCases} activos</span>
@@ -585,10 +736,56 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
           .join("")
       : `
     <div class="card" style="text-align: center; color: var(--text-muted); font-size: 13px;">
-      No hay casos activos asignados en este momento.
+      Todos los departamentos se encuentran al día y sin casos pendientes.
     </div>
     `
   }
+
+  ${
+    idleDepts.length > 0
+      ? `
+    <div style="font-size: 11px; color: #64748b; padding: 4px 6px; text-align: right;">
+      +${idleDepts.length} departamentos adicionales sin colas ni casos pendientes.
+    </div>
+  `
+      : ""
+  }
+
+  <!-- SECCIÓN 6: MONITOR DE RED & OLT -->
+  <div class="section-title">
+    ⚡ Monitor de Infraestructura & Fibra
+  </div>
+  <div class="card">
+    ${
+      infraAlerts.length > 0
+        ? infraAlerts
+            .map(
+              (alert) => `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span><b>Sector ${alert.sector}</b> (OLT: ${alert.oltName})</span>
+          <span class="badge badge-queue">${alert.activeCasesCount} reclamos</span>
+        </div>
+      `,
+            )
+            .join("")
+        : `
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #34d399;">
+        <span>✓</span>
+        <span>Red y puertos OLT estables. Sin concentración anómala de reclamos hoy.</span>
+      </div>
+    `
+    }
+  </div>
+
+  <!-- BOTONES DE ACCIÓN RÁPIDA -->
+  <div class="btn-group">
+    <button onclick="window.location.reload();" class="btn btn-primary">
+      🔄 Actualizar Snapshot en Vivo
+    </button>
+    <a href="${frontendUrl || "#"}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+      💻 Abrir Plataforma Web (Gestión Completa)
+    </a>
+  </div>
 
   <!-- BOTONES DE ACCIÓN RÁPIDA -->
   <div class="btn-group">

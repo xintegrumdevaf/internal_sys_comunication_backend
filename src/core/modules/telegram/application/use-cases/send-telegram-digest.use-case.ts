@@ -90,7 +90,44 @@ export class SendTelegramDigestUseCase {
       this.deps.logger.warn({ err }, "error al consultar getDashboardMetrics para digest");
     }
 
-    // 4. Formatear reporte ejecutivo en Telegram HTML
+    // 4. Obtener distribución de demanda por workflows
+    let casesDist;
+    try {
+      casesDist = await this.deps.analyticsRepo.getCasesDistribution({
+        from: startOfDay,
+        to: now,
+      });
+    } catch (err) {
+      this.deps.logger.warn({ err }, "error al consultar getCasesDistribution para digest");
+    }
+
+    // 5. Obtener alertas de concentración de infraestructura / OLT
+    let infraAlerts: Array<{ sector: string; oltName: string | null; activeCasesCount: number }> = [];
+    try {
+      const rawAlerts = await this.deps.analyticsRepo.getInfrastructureAlerts({
+        from: startOfDay,
+        to: now,
+      });
+      infraAlerts = rawAlerts.map((a) => ({
+        sector: a.sector,
+        oltName: a.oltName,
+        activeCasesCount: a.activeCasesCount,
+      }));
+    } catch (err) {
+      this.deps.logger.warn({ err }, "error al consultar getInfrastructureAlerts para digest");
+    }
+
+    // 6. Obtener casos con SLA crítico excedido
+    let unattendedCases: Array<{ caseId: string; waitMinutes: number; customerName: string; departmentName: string | null }> = [];
+    if (typeof this.deps.caseRepo.findUnattendedHumanCases === "function") {
+      try {
+        unattendedCases = await this.deps.caseRepo.findUnattendedHumanCases(settings.slaThresholdMinutes || 15, 5);
+      } catch (err) {
+        this.deps.logger.warn({ err }, "error al consultar findUnattendedHumanCases para digest");
+      }
+    }
+
+    // 7. Formatear reporte ejecutivo en Telegram HTML
     const timeFormatted = now.toLocaleTimeString("es-EC", {
       timeZone,
       hour: "2-digit",
@@ -108,8 +145,15 @@ export class SendTelegramDigestUseCase {
 
     const queuePending = dashboard?.escalatedPending || 0;
     const activeCases = dashboard?.myAssignedCases || overview.activeCases || 0;
+    const criticalSla = unattendedCases.length > 0;
     const isHeavyLoad = queuePending > 3;
-    const healthStatus = isHeavyLoad ? "🟡 <i>Atención Requerida (demoras en cola)</i>" : "🟢 <i>Operación Normal y Fluida</i>";
+
+    let healthStatus = "🟢 <i>Operación Normal y Fluida</i>";
+    if (criticalSla) {
+      healthStatus = `🔴 <b>Atención Crítica (${unattendedCases.length} caso(s) en SLA excedido)</b>`;
+    } else if (isHeavyLoad) {
+      healthStatus = `🟡 <b>Atención Requerida (${queuePending} en cola de espera)</b>`;
+    }
 
     const lines: string[] = [
       `📊 <b>PULSO OPERATIVO EJECUTIVO${labelHeader}</b>`,
@@ -138,6 +182,19 @@ export class SendTelegramDigestUseCase {
       }
     }
 
+    if (unattendedCases.length > 0) {
+      lines.push("");
+      lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+      lines.push(`🚨 <b>ALERTAS CRÍTICAS DE SLA (&gt; ${settings.slaThresholdMinutes || 15} min)</b>`);
+      lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+      lines.push(`• <b>${unattendedCases.length} caso(s) excediendo tiempo máximo de espera:</b>`);
+      for (const c of unattendedCases.slice(0, 3)) {
+        const dept = c.departmentName ? `${escapeHtml(c.departmentName)}: ` : "";
+        const client = c.customerName ? escapeHtml(c.customerName) : "Cliente";
+        lines.push(`  ⚠️ ${dept}${client} (<b>${Math.round(c.waitMinutes)}m</b> en espera)`);
+      }
+    }
+
     if (dashboard) {
       lines.push("");
       lines.push("━━━━━━━━━━━━━━━━━━━━━━");
@@ -151,11 +208,49 @@ export class SendTelegramDigestUseCase {
       if (dashboard.departmentBreakdown && dashboard.departmentBreakdown.length > 0) {
         lines.push("");
         lines.push("🏢 <b>CARGA POR DEPARTAMENTO</b>");
-        for (const dept of dashboard.departmentBreakdown) {
-          const queuePart = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
-          lines.push(`• <b>${escapeHtml(dept.departmentName)}:</b> <b>${dept.activeCases} activos${queuePart}</b>`);
+        const activeDepts = dashboard.departmentBreakdown.filter(
+          (d) => d.activeCases > 0 || (d.queueCases !== undefined && d.queueCases > 0),
+        );
+        const idleDeptsCount = dashboard.departmentBreakdown.length - activeDepts.length;
+
+        if (activeDepts.length > 0) {
+          for (const dept of activeDepts) {
+            const queuePart = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
+            lines.push(`• <b>${escapeHtml(dept.departmentName)}:</b> <b>${dept.activeCases} activos${queuePart}</b>`);
+          }
+          if (idleDeptsCount > 0) {
+            lines.push(`• <i>Otros departamentos sin carga (${idleDeptsCount}):</i> 0 activos | cola libre`);
+          }
+        } else {
+          lines.push(`• <i>Todos los departamentos (${idleDeptsCount}) con cola libre y sin carga activa</i>`);
         }
       }
+    }
+
+    if (casesDist?.byWorkflow && casesDist.byWorkflow.length > 0) {
+      const topWorkflows = casesDist.byWorkflow.filter((w) => w.count > 0).slice(0, 4);
+      if (topWorkflows.length > 0) {
+        lines.push("");
+        lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+        lines.push("🏷️ <b>DEMANDA POR TIPO DE GESTIÓN</b>");
+        lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+        for (const w of topWorkflows) {
+          lines.push(`• <b>${escapeHtml(formatWorkflowDigestName(w.workflowType))}:</b> <b>${w.count}</b> (${w.percentage}%)`);
+        }
+      }
+    }
+
+    lines.push("");
+    lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+    lines.push("🌐 <b>MONITOR DE INFRAESTRUCTURA</b>");
+    lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+    if (infraAlerts.length > 0) {
+      lines.push(`• ⚠️ <b>${infraAlerts.length} alerta(s) de concentración OLT / Sector detectadas:</b>`);
+      for (const a of infraAlerts.slice(0, 3)) {
+        lines.push(`  - <b>${escapeHtml(a.oltName || a.sector)}:</b> ${a.activeCasesCount} casos concurrentes`);
+      }
+    } else {
+      lines.push("• <b>Red OLT / Fibra Óptica:</b> 🟢 Sin incidentes masivos reportados");
     }
 
     lines.push("");
@@ -228,4 +323,18 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+function formatWorkflowDigestName(workflowType: string): string {
+  const map: Record<string, string> = {
+    SUPPORT_INTERNET: "Soporte Internet / Fibra",
+    BILLING_QUERY: "Consultas de Facturación",
+    PAYMENT_REPORT: "Reporte de Pago",
+    SALES_LEAD: "Ventas y Contratación",
+    CHANGE_PLAN: "Cambio de Plan",
+    HUMAN_ESCALATION: "Derivación a Asesor",
+    GENERAL_QUERY: "Consultas Generales",
+  };
+  return map[workflowType] || workflowType.replace(/_/g, " ").toLowerCase();
+}
+
 

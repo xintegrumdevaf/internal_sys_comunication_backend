@@ -34,7 +34,7 @@ export class AnswerTelegramCopilotQuestionUseCase {
     const { question, chatId, messageThreadId } = input;
     const settings = await this.deps.getSettings();
 
-    if (!settings.enabled || !settings.aiCopilotEnabled) {
+    if (!settings.aiCopilotEnabled) {
       this.deps.logger.debug("copilot de IA en Telegram no habilitado");
       return null;
     }

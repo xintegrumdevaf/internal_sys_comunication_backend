@@ -41,9 +41,10 @@ export class HandleTelegramWebhookUseCase {
     const { update, secretTokenHeader } = input;
     const settings = await this.deps.getSettings();
 
-    // 1. Validar que la integración y comandos estén habilitados
-    if (!settings.enabled || !settings.commandsEnabled) {
-      this.deps.logger.debug("comandos interactivos de Telegram deshabilitados");
+    // 1. Validar que la interacción de comandos o copilot esté habilitada
+    const hasInteractive = Boolean(settings.commandsEnabled || settings.aiCopilotEnabled);
+    if (!hasInteractive) {
+      this.deps.logger.debug("comandos interactivos y copilot de Telegram deshabilitados");
       return { handled: false, reason: "disabled" };
     }
 
@@ -66,10 +67,11 @@ export class HandleTelegramWebhookUseCase {
       return { handled: false, reason: "missing_chat_id" };
     }
 
-    // 4. Validar lista blanca de chats autorizados
+    // 4. Validar lista blanca de chats autorizados (tolerante a prefijo de supergrupo -100)
     if (settings.defaultChatId && String(settings.defaultChatId).trim() !== "") {
       const allowedChatId = String(settings.defaultChatId).trim();
-      if (chatId !== allowedChatId) {
+      const normalize = (id: string) => id.replace(/^-100/, "-");
+      if (chatId !== allowedChatId && normalize(chatId) !== normalize(allowedChatId)) {
         this.deps.logger.warn({ chatId, allowedChatId }, "mensaje de Telegram ignorado: chat no autorizado");
         return { handled: false, reason: "unauthorized_chat" };
       }
@@ -84,6 +86,9 @@ export class HandleTelegramWebhookUseCase {
 
       const data = callbackQuery.data ?? "";
       if (data.startsWith("cmd:")) {
+        if (!settings.commandsEnabled) {
+          return { handled: false, reason: "disabled" };
+        }
         const cmdName = data.slice(4);
         await this.dispatchCommand(cmdName, chatId, messageThreadId, settings);
         return { handled: true, command: cmdName };
@@ -94,10 +99,17 @@ export class HandleTelegramWebhookUseCase {
 
     // 6. Procesar Mensaje de Texto (comandos /resumen, /sla, /agentes, o Copilot con IA)
     if (message?.text) {
-      const text = message.text.trim();
-      if (text.startsWith("/")) {
+      const rawText = message.text.trim();
+      // Limpiar mención al bot al inicio si fue arrobado en un grupo (ej: "@CentinelaIsp_bot cómo venimos hoy?" -> "cómo venimos hoy?")
+      const cleanText = rawText.replace(/^@\w+[\s:,]*/i, "").trim();
+
+      if (cleanText.startsWith("/")) {
+        if (!settings.commandsEnabled) {
+          return { handled: false, reason: "disabled" };
+        }
+
         // Extraer comando ignorando mención de bot (ej. /sla@MiIspBot -> sla)
-        const parts = text.slice(1).split(" ");
+        const parts = cleanText.slice(1).split(" ");
         const firstToken = parts[0] || "";
         const commandName = firstToken.split("@")[0]?.toLowerCase() || "";
 
@@ -108,7 +120,7 @@ export class HandleTelegramWebhookUseCase {
       // Si no es un comando con '/', pero el Copilot con IA está habilitado
       if (settings.aiCopilotEnabled && this.deps.answerCopilotQuestion) {
         await this.deps.answerCopilotQuestion.execute({
-          question: text,
+          question: cleanText,
           chatId,
           messageThreadId,
         });
