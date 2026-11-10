@@ -473,7 +473,9 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.messageId).toBe(999);
-      expect(fakeDigestUseCase.execute).toHaveBeenCalledWith({ forced: true, timeLabel: "Manual" });
+      expect(fakeDigestUseCase.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ forced: true, timeLabel: "Manual" }),
+      );
     });
 
     it("permite a un admin registrar el webhook en api.telegram.org", async () => {

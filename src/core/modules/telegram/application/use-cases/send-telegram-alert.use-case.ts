@@ -91,6 +91,24 @@ export class SendTelegramAlertUseCase {
           }
         : undefined;
 
+    const isMaskedToken =
+      typeof alert.botToken === "string" &&
+      (alert.botToken.includes("•") || alert.botToken.includes("*"));
+    const effectiveBotToken =
+      !isMaskedToken && alert.botToken && alert.botToken.trim() !== ""
+        ? alert.botToken.trim()
+        : (settings.botToken || "").trim();
+
+    if (!effectiveBotToken) {
+      if (alert.forced) {
+        throw businessError(
+          "No se puede enviar el mensaje a Telegram: Bot Token no configurado. Por favor ingresá el Token del bot primero.",
+        );
+      }
+      this.deps.logger.debug("sin botToken configurado ni provisto; omitiendo alerta");
+      return null;
+    }
+
     const result = await this.deps.gateway.sendMessage(
       {
         chatId: effectiveChatId,
@@ -100,7 +118,7 @@ export class SendTelegramAlertUseCase {
         replyMarkup,
         disableNotification: alert.severity === "INFO",
       },
-      alert.botToken,
+      effectiveBotToken,
     );
 
     this.deps.logger.info(

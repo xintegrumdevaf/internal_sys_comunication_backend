@@ -31,6 +31,16 @@ export interface SettingsRouterDeps {
   appPublicUrl?: string;
 }
 
+function resolveEffectiveBotToken(incomingToken: unknown, storedToken?: string): string | undefined {
+  if (typeof incomingToken === "string") {
+    const trimmed = incomingToken.trim();
+    if (trimmed !== "" && !trimmed.includes("•") && !trimmed.includes("*")) {
+      return trimmed;
+    }
+  }
+  return storedToken && storedToken.trim() !== "" ? storedToken.trim() : undefined;
+}
+
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   const router = Router();
   const {
@@ -157,7 +167,12 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       if (!testTelegramConnection) {
         throw validationError("Servicio de prueba de Telegram no disponible");
       }
-      const result = await testTelegramConnection.execute(req.body);
+      const settings = await settingsService.getTelegramSettings();
+      const botToken = resolveEffectiveBotToken(req.body?.botToken, settings.botToken);
+      const result = await testTelegramConnection.execute({
+        ...req.body,
+        botToken,
+      });
       res.json({
         success: result.ok,
         data: result,
@@ -199,8 +214,12 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       if (!sendTelegramDigest) {
         throw businessError("Servicio de pulso operativo (digest) de Telegram no disponible");
       }
-      const chatId = typeof req.body?.chatId === "string" && req.body.chatId.trim() !== "" ? req.body.chatId.trim() : undefined;
-      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== "" ? req.body.botToken.trim() : undefined;
+      const settings = await settingsService.getTelegramSettings();
+      const chatId =
+        typeof req.body?.chatId === "string" && req.body.chatId.trim() !== ""
+          ? req.body.chatId.trim()
+          : (settings.defaultChatId || undefined);
+      const botToken = resolveEffectiveBotToken(req.body?.botToken, settings.botToken);
 
       const result = await sendTelegramDigest.execute({
         forced: true,
@@ -229,9 +248,13 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         throw businessError("Servicio de alertas de Telegram no disponible");
       }
 
+      const settings = await settingsService.getTelegramSettings();
       const category = (req.body?.category || "SLA") as "SLA" | "INFRASTRUCTURE" | "QUEUE";
-      const chatId = typeof req.body?.chatId === "string" && req.body.chatId.trim() !== "" ? req.body.chatId.trim() : undefined;
-      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== "" ? req.body.botToken.trim() : undefined;
+      const chatId =
+        typeof req.body?.chatId === "string" && req.body.chatId.trim() !== ""
+          ? req.body.chatId.trim()
+          : (settings.defaultChatId || undefined);
+      const botToken = resolveEffectiveBotToken(req.body?.botToken, settings.botToken);
       const messageThreadId = typeof req.body?.messageThreadId === "number" ? req.body.messageThreadId : undefined;
 
       let title = "🚨 ALERTA DE PRUEBA: SLA en Riesgo";
@@ -298,9 +321,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         throw businessError("Chat ID no configurado ni provisto. Por favor detectá o guardá el Chat ID primero.");
       }
 
-      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== ""
-        ? req.body.botToken.trim()
-        : settings.botToken;
+      const botToken = resolveEffectiveBotToken(req.body?.botToken, settings.botToken);
 
       const threadId = typeof req.body?.threadId === "number" ? req.body.threadId : undefined;
       const topicName = typeof req.body?.topicName === "string" ? req.body.topicName : "Tema";
@@ -401,10 +422,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       }
 
       const settings = await settingsService.getTelegramSettings();
-      const token =
-        typeof req.body?.botToken === "string" && req.body.botToken.trim() !== ""
-          ? req.body.botToken.trim()
-          : settings.botToken;
+      const token = resolveEffectiveBotToken(req.body?.botToken, settings.botToken);
 
       const chats = await telegramGateway.getRecentChats(token);
 

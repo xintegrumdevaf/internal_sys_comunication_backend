@@ -147,10 +147,18 @@ export class SendTelegramDigestUseCase {
 
     const actionUrl = `${this.deps.appPublicUrl}/analitica`;
 
+    const isMaskedToken =
+      typeof input.botToken === "string" &&
+      (input.botToken.includes("•") || input.botToken.includes("*"));
+    const effectiveBotToken =
+      !isMaskedToken && input.botToken && input.botToken.trim() !== ""
+        ? input.botToken.trim()
+        : (settings.botToken || "").trim();
+
     const result = await this.deps.sendTelegramAlert.execute({
       forced: input.forced,
       chatId: targetChatId,
-      botToken: input.botToken,
+      botToken: effectiveBotToken,
       category: "DIGEST",
       severity: "INFO",
       title: "Pulso Operativo Ejecutivo",

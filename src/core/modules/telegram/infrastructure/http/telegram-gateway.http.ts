@@ -28,7 +28,10 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   private resolveToken(explicitToken?: string): string {
-    const token = (explicitToken ?? this.deps.defaultBotToken ?? "").trim();
+    const isMasked =
+      typeof explicitToken === "string" &&
+      (explicitToken.includes("•") || explicitToken.includes("*"));
+    const token = (!isMasked && explicitToken ? explicitToken : this.deps.defaultBotToken ?? "").trim();
     if (!token) {
       throw businessError("Telegram botToken no está configurado ni provisto");
     }
