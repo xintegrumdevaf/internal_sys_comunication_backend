@@ -29,3 +29,4 @@ export interface TelegramAiCopilotPort {
    */
   synthesizeReply(input: SynthesizeExecutiveReplyInput): Promise<string>;
 }
+

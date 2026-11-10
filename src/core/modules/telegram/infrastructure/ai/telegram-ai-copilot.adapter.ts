@@ -238,3 +238,4 @@ export class TelegramAiCopilotAdapter implements TelegramAiCopilotPort {
     return data.message?.content || "";
   }
 }
+
