@@ -57,6 +57,10 @@ export interface TelegramApiResponse<T> {
   result?: T;
   description?: string;
   error_code?: number;
+  parameters?: {
+    migrate_to_chat_id?: number;
+    retry_after?: number;
+  };
 }
 
 /**
@@ -80,6 +84,7 @@ export interface TelegramMessageResult {
   messageId: number;
   chatId: string | number;
   date: number;
+  migratedToChatId?: string;
 }
 
 /**

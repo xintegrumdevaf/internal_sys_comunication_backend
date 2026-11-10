@@ -180,5 +180,78 @@ describe("TelegramGatewayHttp", () => {
       drop_pending_updates: true,
     });
   });
+
+  it("sendMessage reintenta automáticamente con migrate_to_chat_id si el grupo migró a supergrupo", async () => {
+    let callCount = 0;
+    const calls: Array<{ url: string; body: any }> = [];
+
+    global.fetch = vi.fn().mockImplementation(async (url, init) => {
+      callCount++;
+      calls.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: group chat was upgraded to a supergroup chat",
+            parameters: {
+              migrate_to_chat_id: -1005171900500,
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          result: {
+            message_id: 1001,
+            chat: { id: -1005171900500 },
+            date: 1700000000,
+          },
+        }),
+      };
+    });
+
+    const gateway = new TelegramGatewayHttp({
+      logger: silentLogger,
+      defaultBotToken: "bot-token-123",
+      defaultChatId: "-5171900500",
+    });
+
+    const result = await gateway.sendMessage({
+      text: "Mensaje al grupo antiguo",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.migratedToChatId).toBe("-1005171900500");
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.body?.chat_id).toBe("-5171900500");
+    expect(calls[1]?.body?.chat_id).toBe("-1005171900500");
+  });
+
+  it("sendMessage arroja un mensaje amigable en español si el grupo fue convertido a supergrupo sin parámetro de migración", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        ok: false,
+        error_code: 400,
+        description: "Bad Request: group chat was upgraded to a supergroup chat",
+      }),
+    });
+
+    const gateway = new TelegramGatewayHttp({
+      logger: silentLogger,
+      defaultBotToken: "bot-token-123",
+      defaultChatId: "-5171900500",
+    });
+
+    await expect(gateway.sendMessage({ text: "Hola" })).rejects.toThrow(
+      /Telegram convirtió tu grupo en un Supergrupo/,
+    );
+  });
 });
 

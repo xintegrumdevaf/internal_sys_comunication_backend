@@ -112,9 +112,35 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
         date: number;
       }>;
 
+      if (body.parameters?.migrate_to_chat_id) {
+        const newChatId = String(body.parameters.migrate_to_chat_id);
+        this.deps.logger.info(
+          { oldChatId: chatId, newChatId },
+          "Telegram group chat was upgraded to supergroup; reintentando automáticamente con migrate_to_chat_id",
+        );
+        const retryResult = await this.sendMessage(
+          {
+            ...input,
+            chatId: newChatId,
+          },
+          effectiveToken,
+        );
+        return {
+          ...retryResult,
+          migratedToChatId: newChatId,
+        };
+      }
+
       if (!response.ok || !body.ok || !body.result) {
         const desc = body.description || `HTTP ${response.status}`;
         this.deps.logger.warn({ status: response.status, description: desc, chatId }, "Telegram sendMessage rechazado");
+
+        if (desc.toLowerCase().includes("group chat was upgraded to a supergroup")) {
+          throw businessError(
+            "Telegram convirtió tu grupo en un Supergrupo (al activar temas o historial) y cambió su ID. Hacé clic en 'Detectar Grupo' o anteponé -100 al Chat ID actual para actualizarlo.",
+          );
+        }
+
         throw businessError(`Telegram rechazó el envío del mensaje: ${desc}`);
       }
 
@@ -218,7 +244,10 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
       const body = (await response.json()) as {
         ok: boolean;
         result?: Array<{
-          message?: { chat?: { id: number; title?: string; type: string; first_name?: string } };
+          message?: {
+            chat?: { id: number; title?: string; type: string; first_name?: string };
+            migrate_to_chat_id?: number;
+          };
           my_chat_member?: { chat?: { id: number; title?: string; type: string } };
           channel_post?: { chat?: { id: number; title?: string; type: string } };
         }>;
@@ -230,6 +259,15 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
 
       const chatsMap = new Map<string, { id: string; title: string; type: string }>();
       for (const update of body.result) {
+        if (update.message?.migrate_to_chat_id) {
+          const targetId = String(update.message.migrate_to_chat_id);
+          chatsMap.set(targetId, {
+            id: targetId,
+            title: update.message.chat?.title || "Supergrupo Directivo",
+            type: "supergroup",
+          });
+        }
+
         const chat = update.message?.chat || update.my_chat_member?.chat || update.channel_post?.chat;
         if (chat && (chat.type === "group" || chat.type === "supergroup" || chat.type === "channel")) {
           chatsMap.set(String(chat.id), {
@@ -240,7 +278,13 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
         }
       }
 
-      return Array.from(chatsMap.values());
+      const list = Array.from(chatsMap.values());
+      list.sort((a, b) => {
+        if (a.type === "supergroup" && b.type !== "supergroup") return -1;
+        if (b.type === "supergroup" && a.type !== "supergroup") return 1;
+        return 0;
+      });
+      return list;
     } catch (err) {
       this.deps.logger.warn({ err }, "error al consultar getUpdates para detección de chats");
       return [];

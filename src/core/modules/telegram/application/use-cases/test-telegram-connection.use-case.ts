@@ -15,6 +15,7 @@ export interface TestTelegramConnectionResult {
   bot: TelegramBotInfo;
   messageSent: boolean;
   message: string;
+  migratedToChatId?: string;
 }
 
 export class TestTelegramConnectionUseCase {
@@ -31,6 +32,7 @@ export class TestTelegramConnectionUseCase {
     const latencyMs = Date.now() - started;
 
     let messageSent = false;
+    let migratedToChatId: string | undefined;
     const shouldSend = input.sendSampleMessage ?? Boolean(input.chatId);
 
     if (shouldSend && input.chatId) {
@@ -45,7 +47,7 @@ export class TestTelegramConnectionUseCase {
         "<i>Este es un mensaje de prueba emitido desde el panel de control para verificar credenciales y permisos en este grupo.</i>",
       ].join("\n");
 
-      await this.deps.gateway.sendMessage(
+      const sendResult = await this.deps.gateway.sendMessage(
         {
           chatId: input.chatId,
           messageThreadId: input.messageThreadId,
@@ -56,21 +58,29 @@ export class TestTelegramConnectionUseCase {
       );
 
       messageSent = true;
+      migratedToChatId = sendResult.migratedToChatId;
     }
 
     this.deps.logger.info(
-      { botUsername: bot.username, latencyMs, messageSent },
+      { botUsername: bot.username, latencyMs, messageSent, migratedToChatId },
       "prueba de conexión con Telegram completada satisfactoriamente",
     );
+
+    let message = messageSent
+      ? `Bot @${bot.username || bot.first_name} verificado y mensaje de prueba enviado correctamente (${latencyMs}ms).`
+      : `Bot @${bot.username || bot.first_name} verificado exitosamente (${latencyMs}ms).`;
+
+    if (migratedToChatId) {
+      message += ` (El grupo fue convertido a Supergrupo en Telegram. Chat ID actualizado automáticamente a ${migratedToChatId})`;
+    }
 
     return {
       ok: true,
       latencyMs,
       bot,
       messageSent,
-      message: messageSent
-        ? `Bot @${bot.username || bot.first_name} verificado y mensaje de prueba enviado correctamente (${latencyMs}ms).`
-        : `Bot @${bot.username || bot.first_name} verificado exitosamente (${latencyMs}ms).`,
+      message,
+      migratedToChatId,
     };
   }
 }

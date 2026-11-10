@@ -173,6 +173,15 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         ...req.body,
         botToken,
       });
+      if (result.migratedToChatId) {
+        try {
+          await settingsService.updateTelegramSettings({
+            defaultChatId: result.migratedToChatId,
+          });
+        } catch (err) {
+          deps.logger.warn({ err }, "no se pudo auto-persistir migratedToChatId en test");
+        }
+      }
       res.json({
         success: result.ok,
         data: result,
@@ -227,6 +236,17 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         chatId,
         botToken,
       });
+
+      if (result?.migratedToChatId) {
+        try {
+          await settingsService.updateTelegramSettings({
+            defaultChatId: result.migratedToChatId,
+          });
+        } catch (err) {
+          deps.logger.warn({ err }, "no se pudo auto-persistir migratedToChatId en send-digest");
+        }
+      }
+
       res.json({
         success: Boolean(result?.ok),
         data: result,
@@ -291,6 +311,16 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         forced: true,
       });
 
+      if (result?.migratedToChatId) {
+        try {
+          await settingsService.updateTelegramSettings({
+            defaultChatId: result.migratedToChatId,
+          });
+        } catch (err) {
+          deps.logger.warn({ err }, "no se pudo auto-persistir migratedToChatId en test-alert");
+        }
+      }
+
       res.json({
         success: Boolean(result?.ok),
         data: result,
@@ -343,6 +373,16 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         },
         botToken,
       );
+
+      if (result?.migratedToChatId) {
+        try {
+          await settingsService.updateTelegramSettings({
+            defaultChatId: result.migratedToChatId,
+          });
+        } catch (err) {
+          deps.logger.warn({ err }, "no se pudo auto-persistir migratedToChatId en test-topic");
+        }
+      }
 
       res.json({
         success: Boolean(result?.ok),
