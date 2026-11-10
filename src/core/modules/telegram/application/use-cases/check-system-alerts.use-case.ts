@@ -46,11 +46,26 @@ export class CheckSystemAlertsUseCase {
     let queueDelaysCount = 0;
     let infraAlertsCount = 0;
 
+    // Resolver umbrales de reglas dinámicas o fallback a configuraciones legacy
+    const resolveRule = (category: "SLA" | "INFRASTRUCTURE" | "QUEUE", defaultThreshold: number) => {
+      if (settings.alertRules && settings.alertRules.length > 0) {
+        const found = settings.alertRules.find((r) => r.category === category);
+        if (found) {
+          return { enabled: found.enabled, threshold: found.threshold };
+        }
+      }
+      return { enabled: true, threshold: defaultThreshold };
+    };
+
+    const slaRule = resolveRule("SLA", settings.slaThresholdMinutes);
+    const queueRule = resolveRule("QUEUE", settings.queueSaturationThreshold);
+    const infraRule = resolveRule("INFRASTRUCTURE", settings.infraAlertMinCases);
+
     // 1. Detección de brechas de SLA en casos activos asignados a humanos (HUMAN_ACTIVE)
-    if (this.deps.caseRepo.findUnattendedHumanCases) {
+    if (slaRule.enabled && this.deps.caseRepo.findUnattendedHumanCases) {
       try {
         const unattendedCases = await this.deps.caseRepo.findUnattendedHumanCases(
-          settings.slaThresholdMinutes,
+          slaRule.threshold,
           5,
         );
 
@@ -88,10 +103,10 @@ export class CheckSystemAlertsUseCase {
     }
 
     // 2. Detección de clientes esperando en cola departamental (escalation PENDING)
-    if (this.deps.escalationRepo.findPendingDelayedEscalations) {
+    if (queueRule.enabled && this.deps.escalationRepo.findPendingDelayedEscalations) {
       try {
         const pendingQueue = await this.deps.escalationRepo.findPendingDelayedEscalations(
-          settings.slaThresholdMinutes,
+          queueRule.threshold,
           5,
         );
 
@@ -127,19 +142,20 @@ export class CheckSystemAlertsUseCase {
     }
 
     // 3. Detección de caídas masivas / anomalías de infraestructura OLT
-    try {
-      const now = new Date();
-      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+    if (infraRule.enabled) {
+      try {
+        const now = new Date();
+        const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
 
-      const infraAlerts = await this.deps.analyticsRepo.getInfrastructureAlerts({
-        from: thirtyMinutesAgo,
-        to: now,
-      });
+        const infraAlerts = await this.deps.analyticsRepo.getInfrastructureAlerts({
+          from: thirtyMinutesAgo,
+          to: now,
+        });
 
-      for (const item of infraAlerts) {
-        if (item.activeCasesCount < settings.infraAlertMinCases) {
-          continue;
-        }
+        for (const item of infraAlerts) {
+          if (item.activeCasesCount < infraRule.threshold) {
+            continue;
+          }
 
         const cooldownKey = `infra:${item.sector}:${item.oltName || "none"}`;
         // Cooldown de 45 minutos por sector
@@ -174,6 +190,7 @@ export class CheckSystemAlertsUseCase {
     } catch (err) {
       this.deps.logger.warn({ err }, "error al evaluar anomalías de infraestructura de red");
     }
+  }
 
     const dispatchedCount = slaBreachesCount + queueDelaysCount + infraAlertsCount;
     if (dispatchedCount > 0) {

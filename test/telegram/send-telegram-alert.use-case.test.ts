@@ -9,12 +9,14 @@ describe("SendTelegramAlertUseCase", () => {
     enabled: true,
     botToken: "123:ABC",
     defaultChatId: "-100111",
+    topics: [],
     slaTopicId: 10,
     infraTopicId: 20,
     digestsTopicId: 30,
     digestsEnabled: true,
     digestHours: ["09:00", "14:00", "19:00"],
     timeZone: "America/Guayaquil",
+    alertRules: [],
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
@@ -115,6 +117,39 @@ describe("SendTelegramAlertUseCase", () => {
 
     expect(capturedInput.messageThreadId).toBe(20); // infraTopicId
     expect(capturedInput.text).toContain("⚠️ <b>[ALERTA]</b> <b>Posible corte de fibra</b>");
+  });
+
+  it("prioriza los temas dinámicos (topics) configurados por el administrador", async () => {
+    let capturedInput: any = null;
+    const fakeGateway = {
+      getMe: vi.fn(),
+      sendMessage: vi.fn().mockImplementation(async (input) => {
+        capturedInput = input;
+        return { ok: true, messageId: 57, chatId: input.chatId, date: Date.now() };
+      }),
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
+
+    const useCase = new SendTelegramAlertUseCase({
+      gateway: fakeGateway,
+      getSettings: async () => ({
+        ...baseSettings,
+        topics: [
+          { id: "custom-sla", name: "Canal Urgente SLA", category: "SLA", threadId: 999, enabled: true },
+        ],
+      }),
+      logger: silentLogger,
+    });
+
+    await useCase.execute({
+      category: "SLA",
+      severity: "CRITICAL",
+      title: "Alerta en tema dinámico",
+      body: "Enrutamiento exitoso",
+    });
+
+    expect(capturedInput.messageThreadId).toBe(999);
   });
 });
 

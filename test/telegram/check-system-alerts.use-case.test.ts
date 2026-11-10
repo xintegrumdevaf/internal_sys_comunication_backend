@@ -13,12 +13,14 @@ describe("CheckSystemAlertsUseCase", () => {
     enabled: true,
     botToken: "123:ABC",
     defaultChatId: "-100111",
+    topics: [],
     slaTopicId: 10,
     infraTopicId: 20,
     digestsTopicId: 30,
     digestsEnabled: true,
     digestHours: ["09:00", "14:00", "19:00"],
     timeZone: "America/Guayaquil",
+    alertRules: [],
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
@@ -205,5 +207,48 @@ describe("CheckSystemAlertsUseCase", () => {
     expect(sentAlerts[0]?.category).toBe("QUEUE");
     expect(sentAlerts[0]?.title).toContain("Cliente en cola de espera");
     expect(sentAlerts[0]?.body).toContain("Carlos Gómez");
+  });
+
+  it("respeta las reglas dinámicas del Centinela (omitiendo alertas si la regla está deshabilitada)", async () => {
+    const fakeCaseRepo = {
+      findUnattendedHumanCases: vi.fn(),
+    } as unknown as CaseRepositoryPort;
+    const fakeEscalationRepo = {
+      findPendingDelayedEscalations: vi.fn(),
+    } as unknown as EscalationRepositoryPort;
+    const fakeAnalyticsRepo = {
+      getInfrastructureAlerts: vi.fn(),
+    } as unknown as AnalyticsRepositoryPort;
+    const fakeSender = { execute: vi.fn() } as any;
+
+    const useCase = new CheckSystemAlertsUseCase({
+      caseRepo: fakeCaseRepo,
+      escalationRepo: fakeEscalationRepo,
+      analyticsRepo: fakeAnalyticsRepo,
+      sendTelegramAlert: fakeSender,
+      getSettings: async () => ({
+        ...baseSettings,
+        alertRules: [
+          {
+            id: "rule-sla-delay",
+            name: "SLA Silenciado",
+            category: "SLA",
+            threshold: 15,
+            unit: "min",
+            severity: "CRITICAL",
+            enabled: false, // Deshabilitada por el admin
+            description: "",
+          },
+        ],
+      }),
+      cooldownCache: new AlertCooldownCacheService(),
+      appPublicUrl: "http://localhost:3000",
+      logger: silentLogger,
+    });
+
+    const result = await useCase.execute();
+    expect(result.dispatchedCount).toBe(0);
+    // Como la regla SLA estaba en enabled: false, ni siquiera consulta casos desatendidos
+    expect(fakeCaseRepo.findUnattendedHumanCases).not.toHaveBeenCalled();
   });
 });

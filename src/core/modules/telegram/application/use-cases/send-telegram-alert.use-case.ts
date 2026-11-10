@@ -24,14 +24,23 @@ export class SendTelegramAlertUseCase {
       return null;
     }
 
-    // Resolver tema (topic) según categoría
+    // Resolver tema (topic) según categoría (temas dinámicos primero, luego legacy)
     let messageThreadId: number | null = null;
-    if (alert.category === "SLA" && settings.slaTopicId) {
-      messageThreadId = settings.slaTopicId;
-    } else if (alert.category === "INFRASTRUCTURE" && settings.infraTopicId) {
-      messageThreadId = settings.infraTopicId;
-    } else if (alert.category === "DIGEST" && settings.digestsTopicId) {
-      messageThreadId = settings.digestsTopicId;
+    if (settings.topics && settings.topics.length > 0) {
+      const dynamicTopic = settings.topics.find((t) => t.category === alert.category && t.enabled);
+      if (dynamicTopic) {
+        messageThreadId = dynamicTopic.threadId;
+      }
+    }
+
+    if (messageThreadId === null) {
+      if (alert.category === "SLA" && settings.slaTopicId) {
+        messageThreadId = settings.slaTopicId;
+      } else if (alert.category === "INFRASTRUCTURE" && settings.infraTopicId) {
+        messageThreadId = settings.infraTopicId;
+      } else if (alert.category === "DIGEST" && settings.digestsTopicId) {
+        messageThreadId = settings.digestsTopicId;
+      }
     }
 
     // Emoji de severidad
