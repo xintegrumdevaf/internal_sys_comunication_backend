@@ -23,6 +23,7 @@ describe("SendTelegramDigestUseCase", () => {
     queueSaturationThreshold: 10,
     webhookSecret: "",
     commandsEnabled: true,
+    aiCopilotEnabled: false,
   };
 
   it("omite el envío si digestsEnabled está en false y no es forzado", async () => {

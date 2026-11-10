@@ -4,6 +4,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { TelegramGatewayPort } from "../ports/telegram-gateway.port";
 import type { SendTelegramDigestUseCase } from "./send-telegram-digest.use-case";
+import type { AnswerTelegramCopilotQuestionUseCase } from "./answer-telegram-copilot-question.use-case";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
 import type {
   TelegramInlineKeyboard,
@@ -17,6 +18,7 @@ export interface HandleTelegramWebhookDeps {
   agentRepo: AgentRepositoryPort;
   analyticsRepo: AnalyticsRepositoryPort;
   sendTelegramDigest: SendTelegramDigestUseCase;
+  answerCopilotQuestion?: AnswerTelegramCopilotQuestionUseCase;
   appPublicUrl: string;
   logger: Logger;
 }
@@ -90,7 +92,7 @@ export class HandleTelegramWebhookUseCase {
       return { handled: true, command: "callback" };
     }
 
-    // 6. Procesar Mensaje de Texto (comandos /resumen, /sla, /agentes, etc.)
+    // 6. Procesar Mensaje de Texto (comandos /resumen, /sla, /agentes, o Copilot con IA)
     if (message?.text) {
       const text = message.text.trim();
       if (text.startsWith("/")) {
@@ -101,6 +103,16 @@ export class HandleTelegramWebhookUseCase {
 
         await this.dispatchCommand(commandName, chatId, messageThreadId, settings);
         return { handled: true, command: commandName };
+      }
+
+      // Si no es un comando con '/', pero el Copilot con IA está habilitado
+      if (settings.aiCopilotEnabled && this.deps.answerCopilotQuestion) {
+        await this.deps.answerCopilotQuestion.execute({
+          question: text,
+          chatId,
+          messageThreadId,
+        });
+        return { handled: true, command: "ai_copilot" };
       }
     }
 

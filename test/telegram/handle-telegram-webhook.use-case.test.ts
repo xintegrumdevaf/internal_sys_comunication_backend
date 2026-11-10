@@ -24,6 +24,7 @@ describe("HandleTelegramWebhookUseCase", () => {
     queueSaturationThreshold: 10,
     webhookSecret: "super-secret-token",
     commandsEnabled: true,
+    aiCopilotEnabled: true,
   };
 
   const createHarness = (overrides?: Partial<TelegramSettings>) => {
@@ -62,6 +63,10 @@ describe("HandleTelegramWebhookUseCase", () => {
       execute: vi.fn().mockResolvedValue({ ok: true, messageId: 202 }),
     } as any;
 
+    const fakeCopilotUseCase = {
+      execute: vi.fn().mockResolvedValue({ ok: true, messageId: 303 }),
+    } as any;
+
     const useCase = new HandleTelegramWebhookUseCase({
       gateway: fakeGateway,
       getSettings: async () => ({ ...baseSettings, ...(overrides || {}) }),
@@ -69,6 +74,7 @@ describe("HandleTelegramWebhookUseCase", () => {
       agentRepo: fakeAgentRepo,
       analyticsRepo: fakeAnalyticsRepo,
       sendTelegramDigest: fakeSendDigest,
+      answerCopilotQuestion: fakeCopilotUseCase,
       appPublicUrl: "https://isp.example.com",
       logger: silentLogger,
     });
@@ -82,6 +88,7 @@ describe("HandleTelegramWebhookUseCase", () => {
       fakeAgentRepo,
       fakeAnalyticsRepo,
       fakeSendDigest,
+      fakeCopilotUseCase,
     };
   };
 
@@ -313,5 +320,32 @@ describe("HandleTelegramWebhookUseCase", () => {
     const query = answeredQueries[0]!;
     expect(query.callbackQueryId).toBe("cq-999");
     expect(fakeSendDigest.execute).toHaveBeenCalled();
+  });
+
+  it("delega preguntas en lenguaje natural al Copilot de IA si no es un comando con '/'", async () => {
+    const { useCase, fakeCopilotUseCase } = createHarness();
+
+    const update: TelegramUpdate = {
+      update_id: 9,
+      message: {
+        message_id: 25,
+        chat: { id: -100111, type: "supergroup" },
+        date: Date.now(),
+        text: "¿Cómo vienen los tiempos de atención hoy?",
+      },
+    };
+
+    const res = await useCase.execute({
+      update,
+      secretTokenHeader: "super-secret-token",
+    });
+
+    expect(res.handled).toBe(true);
+    expect(res.command).toBe("ai_copilot");
+    expect(fakeCopilotUseCase.execute).toHaveBeenCalledWith({
+      question: "¿Cómo vienen los tiempos de atención hoy?",
+      chatId: "-100111",
+      messageThreadId: undefined,
+    });
   });
 });

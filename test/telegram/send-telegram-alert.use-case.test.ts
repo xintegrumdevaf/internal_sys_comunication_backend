@@ -20,6 +20,7 @@ describe("SendTelegramAlertUseCase", () => {
     queueSaturationThreshold: 10,
     webhookSecret: "",
     commandsEnabled: true,
+    aiCopilotEnabled: false,
   };
 
   it("omite el envío silenciosamente si el módulo de Telegram está deshabilitado", async () => {

@@ -260,6 +260,8 @@ import { TelegramAlertWatcherService } from "../modules/telegram/application/ser
 import { SendTelegramDigestUseCase } from "../modules/telegram/application/use-cases/send-telegram-digest.use-case";
 import { TelegramDigestSchedulerService } from "../modules/telegram/application/services/telegram-digest-scheduler.service";
 import { HandleTelegramWebhookUseCase } from "../modules/telegram/application/use-cases/handle-telegram-webhook.use-case";
+import { AnswerTelegramCopilotQuestionUseCase } from "../modules/telegram/application/use-cases/answer-telegram-copilot-question.use-case";
+import { TelegramAiCopilotAdapter } from "../modules/telegram/infrastructure/ai/telegram-ai-copilot.adapter";
 import { createTelegramRouter } from "../modules/telegram/presentation/telegram.router";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
 
@@ -289,6 +291,7 @@ export type Container = {
   sendTelegramDigest?: SendTelegramDigestUseCase;
   telegramDigestScheduler?: TelegramDigestSchedulerService;
   handleTelegramWebhook?: HandleTelegramWebhookUseCase;
+  answerTelegramCopilotQuestion?: AnswerTelegramCopilotQuestionUseCase;
   shutdown: () => Promise<void>;
 };
 
@@ -1143,6 +1146,21 @@ export function createContainer(): Container {
   });
   telegramDigestScheduler.start();
 
+  const telegramAiCopilotAdapter = new TelegramAiCopilotAdapter({
+    settingsService: systemSettingsService,
+    logger: telegramLogger,
+  });
+  const answerTelegramCopilotQuestion = new AnswerTelegramCopilotQuestionUseCase({
+    copilotPort: telegramAiCopilotAdapter,
+    gateway: telegramGateway,
+    caseRepo,
+    agentRepo,
+    analyticsRepo,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    appPublicUrl: env.APP_PUBLIC_URL,
+    logger: telegramLogger,
+  });
+
   const handleTelegramWebhook = new HandleTelegramWebhookUseCase({
     gateway: telegramGateway,
     getSettings: () => systemSettingsService.getTelegramSettings(),
@@ -1150,6 +1168,7 @@ export function createContainer(): Container {
     agentRepo,
     analyticsRepo,
     sendTelegramDigest,
+    answerCopilotQuestion: answerTelegramCopilotQuestion,
     appPublicUrl: env.APP_PUBLIC_URL,
     logger: telegramLogger,
   });
@@ -1334,6 +1353,7 @@ export function createContainer(): Container {
     sendTelegramDigest,
     telegramDigestScheduler,
     handleTelegramWebhook,
+    answerTelegramCopilotQuestion,
     shutdown,
   };
 }

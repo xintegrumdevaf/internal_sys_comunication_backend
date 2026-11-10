@@ -23,6 +23,8 @@ export const TelegramSettingsSchema = z.object({
   // Webhook y comandos interactivos (/resumen, /sla, /agentes)
   webhookSecret: z.string().default(""),
   commandsEnabled: z.boolean().default(true),
+  // Copilot con IA en grupo (consultas en lenguaje natural)
+  aiCopilotEnabled: z.boolean().default(false),
 });
 
 export type TelegramSettings = z.infer<typeof TelegramSettingsSchema>;

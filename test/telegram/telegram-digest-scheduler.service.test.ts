@@ -19,6 +19,7 @@ describe("TelegramDigestSchedulerService", () => {
     queueSaturationThreshold: 10,
     webhookSecret: "",
     commandsEnabled: true,
+    aiCopilotEnabled: false,
   };
 
   beforeEach(() => {

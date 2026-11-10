@@ -261,6 +261,7 @@ export class SystemSettingsService {
         queueSaturationThreshold: 10,
         webhookSecret: "",
         commandsEnabled: true,
+        aiCopilotEnabled: false,
       };
 
       const resolved = TelegramSettingsSchema.parse({
@@ -287,6 +288,7 @@ export class SystemSettingsService {
         queueSaturationThreshold: 10,
         webhookSecret: "",
         commandsEnabled: true,
+        aiCopilotEnabled: false,
       };
     }
   }
@@ -324,6 +326,7 @@ export class SystemSettingsService {
           ? input.webhookSecret.trim()
           : current.webhookSecret,
       commandsEnabled: input.commandsEnabled !== undefined ? input.commandsEnabled : current.commandsEnabled,
+      aiCopilotEnabled: input.aiCopilotEnabled !== undefined ? input.aiCopilotEnabled : current.aiCopilotEnabled,
     };
 
     const validated = TelegramSettingsSchema.parse(merged);
