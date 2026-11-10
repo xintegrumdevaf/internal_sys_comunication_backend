@@ -576,6 +576,92 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
         type: "supergroup",
       });
     });
+
+    it("permite a un admin simular y enviar una alerta reactiva de prueba (test-alert)", async () => {
+      currentRole = "admin";
+      let capturedPayload: any = null;
+      const fakeAlertUseCase = {
+        execute: vi.fn().mockImplementation(async (payload) => {
+          capturedPayload = payload;
+          return { ok: true, messageId: 888, chatId: payload.chatId || "-100111", date: Date.now() };
+        }),
+      } as any;
+
+      const customApp = express();
+      customApp.use(express.json());
+      customApp.use((req, _res, next) => {
+        (req as unknown as { agent: { id: string; role: string; name: string; active: boolean } }).agent = {
+          id: "agent-123",
+          role: "admin",
+          name: "Admin User",
+          active: true,
+        };
+        next();
+      });
+      customApp.use(
+        createSettingsRouter({
+          settingsService: service,
+          logger: silentLogger,
+          sendTelegramAlert: fakeAlertUseCase,
+        }),
+      );
+      customApp.use(createErrorHandler(silentLogger));
+
+      const res = await request(customApp)
+        .post("/api/admin/settings/telegram/test-alert")
+        .send({ category: "INFRASTRUCTURE", chatId: "-100999" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.messageId).toBe(888);
+      expect(capturedPayload.category).toBe("INFRASTRUCTURE");
+      expect(capturedPayload.chatId).toBe("-100999");
+      expect(capturedPayload.forced).toBe(true);
+      expect(capturedPayload.title).toContain("Caída de OLT");
+    });
+
+    it("permite a un admin enviar un mensaje de prueba a un hilo específico (test-topic)", async () => {
+      currentRole = "admin";
+      let capturedMsg: any = null;
+      const fakeGateway = {
+        getMe: vi.fn(),
+        sendMessage: vi.fn().mockImplementation(async (input) => {
+          capturedMsg = input;
+          return { ok: true, messageId: 777, chatId: input.chatId, date: Date.now() };
+        }),
+      } as any;
+
+      const customApp = express();
+      customApp.use(express.json());
+      customApp.use((req, _res, next) => {
+        (req as unknown as { agent: { id: string; role: string; name: string; active: boolean } }).agent = {
+          id: "agent-123",
+          role: "admin",
+          name: "Admin User",
+          active: true,
+        };
+        next();
+      });
+      customApp.use(
+        createSettingsRouter({
+          settingsService: service,
+          logger: silentLogger,
+          telegramGateway: fakeGateway,
+        }),
+      );
+      customApp.use(createErrorHandler(silentLogger));
+
+      const res = await request(customApp)
+        .post("/api/admin/settings/telegram/test-topic")
+        .send({ chatId: "-100555", threadId: 42, topicName: "Alertas SLA" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.messageId).toBe(777);
+      expect(capturedMsg.chatId).toBe("-100555");
+      expect(capturedMsg.messageThreadId).toBe(42);
+      expect(capturedMsg.text).toContain("Prueba de Hilo / Tema: Alertas SLA");
+    });
   });
 });
 

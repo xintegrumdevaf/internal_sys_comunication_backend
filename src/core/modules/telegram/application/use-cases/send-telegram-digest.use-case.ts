@@ -1,3 +1,4 @@
+import { businessError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { AnalyticsRepositoryPort } from "../../../analytics/application/ports/analytics.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
@@ -19,6 +20,8 @@ export interface SendTelegramDigestDeps {
 export interface SendTelegramDigestInput {
   forced?: boolean;
   timeLabel?: string;
+  chatId?: string;
+  botToken?: string;
 }
 
 export class SendTelegramDigestUseCase {
@@ -26,9 +29,17 @@ export class SendTelegramDigestUseCase {
 
   async execute(input: SendTelegramDigestInput = {}): Promise<TelegramMessageResult | null> {
     const settings = await this.deps.getSettings();
+    const targetChatId = (input.chatId || settings.defaultChatId || "").trim();
 
-    if (!input.forced && (!settings.enabled || !settings.digestsEnabled || !settings.defaultChatId)) {
-      this.deps.logger.debug("digests de Telegram deshabilitados; omitiendo envío");
+    if (!targetChatId) {
+      if (input.forced) {
+        throw businessError("No se puede emitir el pulso ejecutivo: Chat ID de Telegram no configurado. Por favor detectá tu grupo o ingresá el Chat ID antes de enviar una prueba.");
+      }
+      return null;
+    }
+
+    if (!input.forced && (!settings.enabled || !settings.digestsEnabled)) {
+      this.deps.logger.debug("digests de Telegram deshabilitados; omitiendo envío automático");
       return null;
     }
 
@@ -137,12 +148,19 @@ export class SendTelegramDigestUseCase {
     const actionUrl = `${this.deps.appPublicUrl}/analitica`;
 
     const result = await this.deps.sendTelegramAlert.execute({
+      forced: input.forced,
+      chatId: targetChatId,
+      botToken: input.botToken,
       category: "DIGEST",
       severity: "INFO",
       title: "Pulso Operativo Ejecutivo",
       body: lines.join("\n"),
       actions: [{ label: "Abrir Analítica Completa", url: actionUrl }],
     });
+
+    if (!result && input.forced) {
+      throw businessError("No se pudo emitir el pulso a Telegram. Verificá que el bot esté agregado como miembro del grupo y que el Chat ID sea válido.");
+    }
 
     this.deps.logger.info(
       { date: dateFormatted, time: timeFormatted, messageId: result?.messageId },

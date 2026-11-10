@@ -11,6 +11,7 @@ import type { Logger } from "../../../../shared/logging/logger";
 import type { TestTelegramConnectionUseCase } from "../../telegram/application/use-cases/test-telegram-connection.use-case";
 import type { CheckSystemAlertsUseCase } from "../../telegram/application/use-cases/check-system-alerts.use-case";
 import type { SendTelegramDigestUseCase } from "../../telegram/application/use-cases/send-telegram-digest.use-case";
+import type { SendTelegramAlertUseCase } from "../../telegram/application/use-cases/send-telegram-alert.use-case";
 import type { TelegramGatewayPort } from "../../telegram/application/ports/telegram-gateway.port";
 
 const uploadTopology = multer({
@@ -25,6 +26,7 @@ export interface SettingsRouterDeps {
   testTelegramConnection?: TestTelegramConnectionUseCase;
   checkSystemAlerts?: CheckSystemAlertsUseCase;
   sendTelegramDigest?: SendTelegramDigestUseCase;
+  sendTelegramAlert?: SendTelegramAlertUseCase;
   telegramGateway?: TelegramGatewayPort;
   appPublicUrl?: string;
 }
@@ -38,6 +40,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
     testTelegramConnection,
     checkSystemAlerts,
     sendTelegramDigest,
+    sendTelegramAlert,
     telegramGateway,
     appPublicUrl,
   } = deps;
@@ -194,9 +197,132 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
     try {
       requireRole(req, ["admin"]);
       if (!sendTelegramDigest) {
-        throw validationError("Servicio de pulso operativo (digest) de Telegram no disponible");
+        throw businessError("Servicio de pulso operativo (digest) de Telegram no disponible");
       }
-      const result = await sendTelegramDigest.execute({ forced: true, timeLabel: "Manual" });
+      const chatId = typeof req.body?.chatId === "string" && req.body.chatId.trim() !== "" ? req.body.chatId.trim() : undefined;
+      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== "" ? req.body.botToken.trim() : undefined;
+
+      const result = await sendTelegramDigest.execute({
+        forced: true,
+        timeLabel: "Manual",
+        chatId,
+        botToken,
+      });
+      res.json({
+        success: Boolean(result?.ok),
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/test-alert
+   * Envía una alerta reactiva de prueba (SLA, Infraestructura o Saturación de Cola) a Telegram.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/test-alert", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      if (!sendTelegramAlert) {
+        throw businessError("Servicio de alertas de Telegram no disponible");
+      }
+
+      const category = (req.body?.category || "SLA") as "SLA" | "INFRASTRUCTURE" | "QUEUE";
+      const chatId = typeof req.body?.chatId === "string" && req.body.chatId.trim() !== "" ? req.body.chatId.trim() : undefined;
+      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== "" ? req.body.botToken.trim() : undefined;
+      const messageThreadId = typeof req.body?.messageThreadId === "number" ? req.body.messageThreadId : undefined;
+
+      let title = "🚨 ALERTA DE PRUEBA: SLA en Riesgo";
+      let body = "Esta es una simulación de alerta reactiva enviada desde la configuración del Centinela.";
+      const metadata: Record<string, string | number | boolean | null | undefined> = {
+        "Entorno": "Prueba en Vivo",
+        "Disparado por": "Administrador",
+      };
+
+      if (category === "INFRASTRUCTURE") {
+        title = "⚡ ALERTA DE PRUEBA: Caída de OLT / Fibra";
+        body = "Simulación de corte masivo detectado por concentración anómala de reclamos.";
+        metadata["Zona / Sector"] = "Sector Norte - OLT-04";
+        metadata["Reclamos simultáneos"] = "6 casos";
+      } else if (category === "QUEUE") {
+        title = "⚠️ ALERTA DE PRUEBA: Saturación de Cola";
+        body = "Simulación de advertencia: clientes esperando superan el umbral con agentes libres insuficientes.";
+        metadata["Departamento"] = "Soporte Técnico";
+        metadata["En espera"] = "12 clientes";
+      } else {
+        metadata["Caso"] = "CASO-9999 (Juan Pérez)";
+        metadata["Tiempo de espera"] = "18 min (Umbral: 15m)";
+      }
+
+      const result = await sendTelegramAlert.execute({
+        category,
+        severity: category === "QUEUE" ? "WARNING" : "CRITICAL",
+        title,
+        body,
+        metadata,
+        chatId,
+        botToken,
+        messageThreadId,
+        forced: true,
+      });
+
+      res.json({
+        success: Boolean(result?.ok),
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/test-topic
+   * Envía un mensaje de prueba a un hilo/tema específico (message_thread_id) de un supergrupo.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/test-topic", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      if (!telegramGateway) {
+        throw businessError("Gateway de Telegram no disponible");
+      }
+
+      const settings = await settingsService.getTelegramSettings();
+      const chatId = typeof req.body?.chatId === "string" && req.body.chatId.trim() !== ""
+        ? req.body.chatId.trim()
+        : settings.defaultChatId;
+
+      if (!chatId) {
+        throw businessError("Chat ID no configurado ni provisto. Por favor detectá o guardá el Chat ID primero.");
+      }
+
+      const botToken = typeof req.body?.botToken === "string" && req.body.botToken.trim() !== ""
+        ? req.body.botToken.trim()
+        : settings.botToken;
+
+      const threadId = typeof req.body?.threadId === "number" ? req.body.threadId : undefined;
+      const topicName = typeof req.body?.topicName === "string" ? req.body.topicName : "Tema";
+
+      const text = [
+        `💬 <b>Prueba de Hilo / Tema: ${topicName}</b>`,
+        "",
+        `Este es un mensaje de prueba para verificar que el <code>message_thread_id: ${threadId ?? "General"}</code> funciona correctamente en este supergrupo.`,
+        "",
+        `<i>Enviado con éxito desde el Centinela de Operaciones.</i>`,
+      ].join("\n");
+
+      const result = await telegramGateway.sendMessage(
+        {
+          chatId,
+          messageThreadId: threadId ?? null,
+          text,
+          parseMode: "HTML",
+        },
+        botToken,
+      );
+
       res.json({
         success: Boolean(result?.ok),
         data: result,

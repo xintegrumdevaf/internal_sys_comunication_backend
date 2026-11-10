@@ -1183,6 +1183,7 @@ export function createContainer(): Container {
       testTelegramConnection,
       checkSystemAlerts,
       sendTelegramDigest,
+      sendTelegramAlert,
       telegramGateway,
       appPublicUrl: env.APP_PUBLIC_URL,
     }),

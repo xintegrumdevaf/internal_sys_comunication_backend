@@ -94,6 +94,8 @@ export const TelegramSettingsSchema = z.object({
   botToken: z.string().default(""),
   defaultChatId: z.string().default(""), // ID del supergrupo o canal directivo
 
+  // Switch maestro para habilitar enrutamiento por hilos (Forum Topics de Supergrupo)
+  topicsEnabled: z.boolean().default(false),
   // Temas dinámicos (Forum Topics)
   topics: z.array(TelegramTopicSchema).default(DEFAULT_TELEGRAM_TOPICS),
 

@@ -1,3 +1,4 @@
+import { businessError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { TelegramGatewayPort } from "../ports/telegram-gateway.port";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
@@ -19,27 +20,42 @@ export class SendTelegramAlertUseCase {
   async execute(alert: TelegramAlertPayload): Promise<TelegramMessageResult | null> {
     const settings = await this.deps.getSettings();
 
-    if (!settings.enabled || !settings.defaultChatId) {
-      this.deps.logger.debug("módulo Telegram deshabilitado o sin defaultChatId configurado; omitiendo alerta");
+    const effectiveChatId = (alert.chatId || settings.defaultChatId || "").trim();
+    if (!effectiveChatId) {
+      if (alert.forced) {
+        throw businessError(
+          "No se puede enviar la alerta de prueba: Chat ID no configurado ni detectado. Por favor ingresá el Chat ID o detectá tu grupo primero.",
+        );
+      }
+      this.deps.logger.debug("sin defaultChatId configurado ni provisto; omitiendo alerta");
       return null;
     }
 
-    // Resolver tema (topic) según categoría (temas dinámicos primero, luego legacy)
-    let messageThreadId: number | null = null;
-    if (settings.topics && settings.topics.length > 0) {
-      const dynamicTopic = settings.topics.find((t) => t.category === alert.category && t.enabled);
-      if (dynamicTopic) {
-        messageThreadId = dynamicTopic.threadId;
-      }
+    if (!alert.forced && !settings.enabled) {
+      this.deps.logger.debug("módulo Telegram deshabilitado; omitiendo alerta");
+      return null;
     }
 
-    if (messageThreadId === null) {
-      if (alert.category === "SLA" && settings.slaTopicId) {
-        messageThreadId = settings.slaTopicId;
-      } else if (alert.category === "INFRASTRUCTURE" && settings.infraTopicId) {
-        messageThreadId = settings.infraTopicId;
-      } else if (alert.category === "DIGEST" && settings.digestsTopicId) {
-        messageThreadId = settings.digestsTopicId;
+    // Resolver tema (topic) según categoría SOLO si el enrutamiento de temas está activado
+    let messageThreadId: number | null = null;
+    if (alert.messageThreadId !== undefined) {
+      messageThreadId = alert.messageThreadId;
+    } else if (settings.topicsEnabled) {
+      if (settings.topics && settings.topics.length > 0) {
+        const dynamicTopic = settings.topics.find((t) => t.category === alert.category && t.enabled);
+        if (dynamicTopic) {
+          messageThreadId = dynamicTopic.threadId;
+        }
+      }
+
+      if (messageThreadId === null) {
+        if (alert.category === "SLA" && settings.slaTopicId) {
+          messageThreadId = settings.slaTopicId;
+        } else if (alert.category === "INFRASTRUCTURE" && settings.infraTopicId) {
+          messageThreadId = settings.infraTopicId;
+        } else if (alert.category === "DIGEST" && settings.digestsTopicId) {
+          messageThreadId = settings.digestsTopicId;
+        }
       }
     }
 
@@ -75,14 +91,17 @@ export class SendTelegramAlertUseCase {
           }
         : undefined;
 
-    const result = await this.deps.gateway.sendMessage({
-      chatId: settings.defaultChatId,
-      messageThreadId,
-      text: lines.join("\n"),
-      parseMode: "HTML",
-      replyMarkup,
-      disableNotification: alert.severity === "INFO",
-    });
+    const result = await this.deps.gateway.sendMessage(
+      {
+        chatId: effectiveChatId,
+        messageThreadId,
+        text: lines.join("\n"),
+        parseMode: "HTML",
+        replyMarkup,
+        disableNotification: alert.severity === "INFO",
+      },
+      alert.botToken,
+    );
 
     this.deps.logger.info(
       { category: alert.category, severity: alert.severity, messageId: result.messageId },

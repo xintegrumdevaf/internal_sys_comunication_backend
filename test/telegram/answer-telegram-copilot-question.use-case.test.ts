@@ -14,6 +14,7 @@ describe("AnswerTelegramCopilotQuestionUseCase", () => {
     enabled: true,
     botToken: "123:ABC",
     defaultChatId: "-100111",
+    topicsEnabled: false,
     topics: [],
     slaTopicId: 10,
     infraTopicId: 20,

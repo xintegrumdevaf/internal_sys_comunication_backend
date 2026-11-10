@@ -43,6 +43,10 @@ export interface TelegramAlertPayload {
   body: string;
   metadata?: Record<string, string | number | boolean | null | undefined>;
   actions?: Array<{ label: string; url?: string; callbackData?: string }>;
+  forced?: boolean;
+  chatId?: string;
+  botToken?: string;
+  messageThreadId?: number | null;
 }
 
 /**
