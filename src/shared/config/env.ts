@@ -89,6 +89,10 @@ const envSchema = z.object({
   MIKROTIK_SERVICE_URL: z.string().default("http://localhost:3001/api"),
   MIKROTIK_DIAGNOSTIC_TIMEOUT_MS: z.coerce.number().int().positive().default(35000),
 
+  // Integración y Alertas Telegram Bot API
+  TELEGRAM_BOT_TOKEN: z.string().default("").optional(),
+  TELEGRAM_DEFAULT_CHAT_ID: z.string().default("").optional(),
+
   // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
   // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,
   // el timeout/retries por accion especifica se puede sobreescribir en la fila.

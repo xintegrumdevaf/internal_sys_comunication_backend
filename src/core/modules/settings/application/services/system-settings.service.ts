@@ -17,11 +17,17 @@ import {
   maskSecret,
   mergeSecret,
 } from "../../domain/system-settings.entity";
-
+import {
+  TelegramSettingsSchema,
+  type TelegramSettings,
+  maskTelegramToken,
+  mergeTelegramToken,
+} from "../../../telegram/domain/telegram-config.entity";
 
 const CHANNEL_SETTINGS_KEY = "channels.whatsapp";
 const AI_SETTINGS_KEY = "ai.provider";
 const NETWORK_TOPOLOGY_KEY = "network.topology";
+const TELEGRAM_SETTINGS_KEY = "telegram.alerts";
 
 export class SystemSettingsService {
   private cache = new Map<string, { value: unknown; cachedAt: number }>();
@@ -229,6 +235,92 @@ export class SystemSettingsService {
     this.logger.info({ provider: validated.provider, geminiModel: validated.geminiModel, ollamaModel: validated.ollamaModel }, "Configuración de IA actualizada exitosamente");
 
     return this.getMaskedAiSettings();
+  }
+
+  async getTelegramSettings(): Promise<TelegramSettings> {
+    const cached = this.cache.get(TELEGRAM_SETTINGS_KEY);
+    if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL_MS) {
+      return cached.value as TelegramSettings;
+    }
+
+    try {
+      const dbValue = await this.repo.get<Partial<TelegramSettings>>(TELEGRAM_SETTINGS_KEY);
+      const fallback: TelegramSettings = {
+        enabled: Boolean(this.env.TELEGRAM_BOT_TOKEN && this.env.TELEGRAM_DEFAULT_CHAT_ID),
+        botToken: this.env.TELEGRAM_BOT_TOKEN || "",
+        defaultChatId: this.env.TELEGRAM_DEFAULT_CHAT_ID || "",
+        slaTopicId: null,
+        infraTopicId: null,
+        digestsTopicId: null,
+        digestsEnabled: true,
+        digestHours: ["09:00", "14:00", "19:00"],
+        timeZone: "America/Guayaquil",
+        slaThresholdMinutes: 15,
+        infraAlertMinCases: 3,
+        queueSaturationThreshold: 10,
+      };
+
+      const resolved = TelegramSettingsSchema.parse({
+        ...fallback,
+        ...(dbValue || {}),
+      });
+
+      this.cache.set(TELEGRAM_SETTINGS_KEY, { value: resolved, cachedAt: Date.now() });
+      return resolved;
+    } catch (err) {
+      this.logger.error({ err }, "Error al resolver configuración de Telegram; usando fallback");
+      return {
+        enabled: false,
+        botToken: this.env.TELEGRAM_BOT_TOKEN || "",
+        defaultChatId: this.env.TELEGRAM_DEFAULT_CHAT_ID || "",
+        slaTopicId: null,
+        infraTopicId: null,
+        digestsTopicId: null,
+        digestsEnabled: true,
+        digestHours: ["09:00", "14:00", "19:00"],
+        timeZone: "America/Guayaquil",
+        slaThresholdMinutes: 15,
+        infraAlertMinCases: 3,
+        queueSaturationThreshold: 10,
+      };
+    }
+  }
+
+  async getMaskedTelegramSettings(): Promise<TelegramSettings> {
+    const raw = await this.getTelegramSettings();
+    return {
+      ...raw,
+      botToken: maskTelegramToken(raw.botToken),
+    };
+  }
+
+  async updateTelegramSettings(
+    input: Partial<TelegramSettings>,
+    updatedBy?: string,
+  ): Promise<TelegramSettings> {
+    const current = await this.getTelegramSettings();
+
+    const merged = {
+      enabled: input.enabled !== undefined ? input.enabled : current.enabled,
+      botToken: mergeTelegramToken(input.botToken, current.botToken),
+      defaultChatId: input.defaultChatId !== undefined ? input.defaultChatId.trim() : current.defaultChatId,
+      slaTopicId: input.slaTopicId !== undefined ? input.slaTopicId : current.slaTopicId,
+      infraTopicId: input.infraTopicId !== undefined ? input.infraTopicId : current.infraTopicId,
+      digestsTopicId: input.digestsTopicId !== undefined ? input.digestsTopicId : current.digestsTopicId,
+      digestsEnabled: input.digestsEnabled !== undefined ? input.digestsEnabled : current.digestsEnabled,
+      digestHours: input.digestHours !== undefined ? input.digestHours : current.digestHours,
+      timeZone: input.timeZone !== undefined ? input.timeZone.trim() : current.timeZone,
+      slaThresholdMinutes: input.slaThresholdMinutes ?? current.slaThresholdMinutes,
+      infraAlertMinCases: input.infraAlertMinCases ?? current.infraAlertMinCases,
+      queueSaturationThreshold: input.queueSaturationThreshold ?? current.queueSaturationThreshold,
+    };
+
+    const validated = TelegramSettingsSchema.parse(merged);
+    await this.repo.set(TELEGRAM_SETTINGS_KEY, validated, "Configuración de integración con Telegram", updatedBy);
+    this.invalidateCache(TELEGRAM_SETTINGS_KEY);
+    this.logger.info({ enabled: validated.enabled, defaultChatId: validated.defaultChatId }, "Configuración de Telegram actualizada exitosamente");
+
+    return this.getMaskedTelegramSettings();
   }
 
   async getSetupStatus(): Promise<SystemSetupStatus> {

@@ -8,6 +8,7 @@ import type { SystemSettingsService } from "../application/services/system-setti
 import type { DepartmentRepositoryPort } from "../../departments/application/ports/department.repository.port";
 import type { Agent } from "../../departments/domain/agent.entity";
 import type { Logger } from "../../../../shared/logging/logger";
+import type { TestTelegramConnectionUseCase } from "../../telegram/application/use-cases/test-telegram-connection.use-case";
 
 const uploadTopology = multer({
   storage: multer.memoryStorage(),
@@ -18,11 +19,12 @@ export interface SettingsRouterDeps {
   settingsService: SystemSettingsService;
   logger: Logger;
   departmentRepo?: DepartmentRepositoryPort;
+  testTelegramConnection?: TestTelegramConnectionUseCase;
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   const router = Router();
-  const { settingsService, logger, departmentRepo } = deps;
+  const { settingsService, logger, departmentRepo, testTelegramConnection } = deps;
 
   /**
    * GET /api/admin/settings
@@ -32,15 +34,17 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   router.get("/api/admin/settings", async (req, res, next) => {
     try {
       requireRole(req, ["admin"]);
-      const [channels, ai] = await Promise.all([
+      const [channels, ai, telegram] = await Promise.all([
         settingsService.getMaskedChannelSettings(),
         settingsService.getMaskedAiSettings(),
+        settingsService.getMaskedTelegramSettings(),
       ]);
       res.json({
         success: true,
         data: {
           channels,
           ai,
+          telegram,
         },
       });
     } catch (err) {
@@ -80,6 +84,64 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       res.json({
         success: true,
         data: updated,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /api/admin/settings/telegram
+   * Consulta la configuración de Telegram (token enmascarado).
+   * Exclusivo para administradores.
+   */
+  router.get("/api/admin/settings/telegram", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      const telegram = await settingsService.getMaskedTelegramSettings();
+      res.json({
+        success: true,
+        data: telegram,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * PUT /api/admin/settings/telegram
+   * Actualiza la configuración de integración y alertas con Telegram.
+   * Exclusivo para administradores.
+   */
+  router.put("/api/admin/settings/telegram", async (req, res, next) => {
+    try {
+      const agent = requireRole(req, ["admin"]);
+      const updated = await settingsService.updateTelegramSettings(req.body, agent.id);
+      logger.info({ agentId: agent.id }, "Configuración de Telegram actualizada por admin");
+      res.json({
+        success: true,
+        data: updated,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/test
+   * Valida las credenciales del bot con getMe y opcionalmente envía un mensaje de prueba al chat/topic.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/test", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      if (!testTelegramConnection) {
+        throw validationError("Servicio de prueba de Telegram no disponible");
+      }
+      const result = await testTelegramConnection.execute(req.body);
+      res.json({
+        success: result.ok,
+        data: result,
       });
     } catch (err) {
       next(err);

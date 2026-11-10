@@ -408,5 +408,41 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       }
     });
   });
+
+  describe("Telegram Settings Endpoints", () => {
+    it("permite a un admin consultar la configuración de Telegram", async () => {
+      currentRole = "admin";
+      const res = await request(app).get("/api/admin/settings/telegram");
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.enabled).toBe(false);
+      expect(res.body.data.slaThresholdMinutes).toBe(15);
+    });
+
+    it("permite a un admin actualizar la configuración de Telegram y enmascara el token", async () => {
+      currentRole = "admin";
+      const res = await request(app)
+        .put("/api/admin/settings/telegram")
+        .send({
+          enabled: true,
+          botToken: "123456:AAECDEF-1234567890abcdef",
+          defaultChatId: "-1001234567890",
+          slaTopicId: 10,
+          slaThresholdMinutes: 20,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.enabled).toBe(true);
+      expect(res.body.data.defaultChatId).toBe("-1001234567890");
+      expect(res.body.data.slaTopicId).toBe(10);
+      expect(res.body.data.slaThresholdMinutes).toBe(20);
+      expect(res.body.data.botToken).toBe("123456:••••••••••••cdef");
+
+      // Consultar de nuevo confirma que se conservó el valor enmascarado
+      const getRes = await request(app).get("/api/admin/settings/telegram");
+      expect(getRes.body.data.defaultChatId).toBe("-1001234567890");
+    });
+  });
 });
 

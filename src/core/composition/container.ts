@@ -251,6 +251,11 @@ import { SystemSettingsRepositoryPg } from "../modules/settings/infrastructure/p
 import { SystemSettingsService } from "../modules/settings/application/services/system-settings.service";
 import { createSettingsRouter } from "../modules/settings/presentation/settings.router";
 
+import { TelegramGatewayHttp } from "../modules/telegram/infrastructure/http/telegram-gateway.http";
+import { TestTelegramConnectionUseCase } from "../modules/telegram/application/use-cases/test-telegram-connection.use-case";
+import { SendTelegramAlertUseCase } from "../modules/telegram/application/use-cases/send-telegram-alert.use-case";
+import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
+
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
  * Aqui, y solo aqui, se instancian adapters de infraestructura y se
@@ -269,6 +274,9 @@ export type Container = {
   quickReplyCatalogService?: QuickReplyCatalogService;
   systemSettingsService: SystemSettingsService;
   coverageService: CoverageService;
+  telegramGateway?: TelegramGatewayPort;
+  testTelegramConnection?: TestTelegramConnectionUseCase;
+  sendTelegramAlert?: SendTelegramAlertUseCase;
   shutdown: () => Promise<void>;
 };
 
@@ -1075,8 +1083,31 @@ export function createContainer(): Container {
       listCases: listDepartmentCases,
     }),
   );
+  const telegramLogger = logger.child({ module: "telegram" });
+  const telegramGateway = new TelegramGatewayHttp({
+    logger: telegramLogger,
+    defaultBotToken: env.TELEGRAM_BOT_TOKEN,
+    defaultChatId: env.TELEGRAM_DEFAULT_CHAT_ID,
+  });
+  const testTelegramConnection = new TestTelegramConnectionUseCase({
+    gateway: telegramGateway,
+    logger: telegramLogger,
+  });
+  const sendTelegramAlert = new SendTelegramAlertUseCase({
+    gateway: telegramGateway,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    logger: telegramLogger,
+  });
+
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
-  app.use(createSettingsRouter({ settingsService: systemSettingsService, logger: logger.child({ module: "settings" }), departmentRepo }));
+  app.use(
+    createSettingsRouter({
+      settingsService: systemSettingsService,
+      logger: logger.child({ module: "settings" }),
+      departmentRepo,
+      testTelegramConnection,
+    }),
+  );
   app.use(createRagRouter({ ragService, logger: aiLogger }));
   app.use(
     "/api/prompts",
@@ -1221,5 +1252,21 @@ export function createContainer(): Container {
     await Promise.all([pgPool.end(), redisClient.quit().catch(() => undefined)]);
   };
 
-  return { env, app, pgPool, redisClient, logger, inboundBuffer, cancelCase, expirationService, quickReplyCatalogService, systemSettingsService, coverageService, shutdown };
+  return {
+    env,
+    app,
+    pgPool,
+    redisClient,
+    logger,
+    inboundBuffer,
+    cancelCase,
+    expirationService,
+    quickReplyCatalogService,
+    systemSettingsService,
+    coverageService,
+    telegramGateway,
+    testTelegramConnection,
+    sendTelegramAlert,
+    shutdown,
+  };
 }
