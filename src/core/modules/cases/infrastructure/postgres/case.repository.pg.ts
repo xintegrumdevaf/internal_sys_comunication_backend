@@ -13,6 +13,7 @@ import type {
   CreateCaseInput,
   DashboardMetricsInput,
   DashboardMetricsResult,
+  UnattendedHumanCaseItem,
 } from "../../application/ports/case.repository.port";
 
 import { sanitizeForPostgresJson } from "../../../../../shared/db/sanitize-json";
@@ -584,5 +585,57 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       unattendedCases: Number(r.unattended_cases ?? 0),
       departmentBreakdown: (r.department_breakdown as Array<{ departmentId: string | null; departmentName: string; activeCases: number; queueCases?: number; handledCases?: number }>) ?? [],
     };
+  }
+
+  async findUnattendedHumanCases(minWaitMinutes: number, limit = 10): Promise<UnattendedHumanCaseItem[]> {
+    const { rows } = await this.pool.query<{
+      case_id: string;
+      conversation_id: string;
+      department_id: string | null;
+      department_name: string | null;
+      assigned_agent_id: string;
+      assigned_agent_name: string;
+      customer_name: string;
+      customer_phone: string;
+      wait_minutes: number;
+    }>(
+      `SELECT
+         c.id AS case_id,
+         c.conversation_id,
+         c.department_id,
+         d.name AS department_name,
+         c.assigned_agent_id,
+         a.name AS assigned_agent_name,
+         COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
+         conv.wa_phone AS customer_phone,
+         ROUND(EXTRACT(EPOCH FROM (now() - conv.last_activity_at)) / 60)::int AS wait_minutes
+       FROM "case" c
+       JOIN conversation conv ON conv.id = c.conversation_id
+       JOIN agent a ON a.id = c.assigned_agent_id
+       LEFT JOIN department d ON d.id = c.department_id
+       LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
+       WHERE c.status = 'HUMAN_ACTIVE'
+         AND c.assigned_agent_id IS NOT NULL
+         AND (
+           conv.unread_count > 0
+           OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent')
+         )
+         AND (now() - conv.last_activity_at) >= ($1 * INTERVAL '1 minute')
+       ORDER BY wait_minutes DESC
+       LIMIT $2`,
+      [minWaitMinutes, limit],
+    );
+
+    return rows.map((r) => ({
+      caseId: r.case_id,
+      conversationId: r.conversation_id,
+      departmentId: r.department_id,
+      departmentName: r.department_name,
+      assignedAgentId: r.assigned_agent_id,
+      assignedAgentName: r.assigned_agent_name,
+      customerName: r.customer_name,
+      customerPhone: r.customer_phone,
+      waitMinutes: Number(r.wait_minutes),
+    }));
   }
 }

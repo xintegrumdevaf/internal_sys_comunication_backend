@@ -65,3 +65,4 @@ describe("TestTelegramConnectionUseCase", () => {
     expect(fakeGateway.sendMessage).not.toHaveBeenCalled();
   });
 });
+

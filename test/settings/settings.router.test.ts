@@ -31,10 +31,10 @@ class SystemSettingsRepositoryFake implements SystemSettingsRepositoryPort {
 }
 
 const silentLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
+  debug: () => { },
+  info: () => { },
+  warn: () => { },
+  error: () => { },
   child: () => silentLogger,
 };
 

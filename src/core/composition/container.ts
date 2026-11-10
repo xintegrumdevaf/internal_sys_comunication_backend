@@ -254,6 +254,9 @@ import { createSettingsRouter } from "../modules/settings/presentation/settings.
 import { TelegramGatewayHttp } from "../modules/telegram/infrastructure/http/telegram-gateway.http";
 import { TestTelegramConnectionUseCase } from "../modules/telegram/application/use-cases/test-telegram-connection.use-case";
 import { SendTelegramAlertUseCase } from "../modules/telegram/application/use-cases/send-telegram-alert.use-case";
+import { AlertCooldownCacheService } from "../modules/telegram/application/services/alert-cooldown-cache.service";
+import { CheckSystemAlertsUseCase } from "../modules/telegram/application/use-cases/check-system-alerts.use-case";
+import { TelegramAlertWatcherService } from "../modules/telegram/application/services/telegram-alert-watcher.service";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
 
 /**
@@ -277,6 +280,8 @@ export type Container = {
   telegramGateway?: TelegramGatewayPort;
   testTelegramConnection?: TestTelegramConnectionUseCase;
   sendTelegramAlert?: SendTelegramAlertUseCase;
+  checkSystemAlerts?: CheckSystemAlertsUseCase;
+  telegramAlertWatcher?: TelegramAlertWatcherService;
   shutdown: () => Promise<void>;
 };
 
@@ -1098,6 +1103,22 @@ export function createContainer(): Container {
     getSettings: () => systemSettingsService.getTelegramSettings(),
     logger: telegramLogger,
   });
+  const alertCooldownCache = new AlertCooldownCacheService();
+  const checkSystemAlerts = new CheckSystemAlertsUseCase({
+    caseRepo,
+    escalationRepo,
+    analyticsRepo,
+    sendTelegramAlert,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    cooldownCache: alertCooldownCache,
+    appPublicUrl: env.APP_PUBLIC_URL,
+    logger: telegramLogger,
+  });
+  const telegramAlertWatcher = new TelegramAlertWatcherService({
+    checkAlertsUseCase: checkSystemAlerts,
+    logger: telegramLogger,
+  });
+  telegramAlertWatcher.start();
 
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(
@@ -1106,6 +1127,7 @@ export function createContainer(): Container {
       logger: logger.child({ module: "settings" }),
       departmentRepo,
       testTelegramConnection,
+      checkSystemAlerts,
     }),
   );
   app.use(createRagRouter({ ragService, logger: aiLogger }));
@@ -1245,6 +1267,7 @@ export function createContainer(): Container {
   });
 
   const shutdown = async (): Promise<void> => {
+    telegramAlertWatcher.stop();
     campaignWorker.stopWorker();
     zernioHistorySyncWorker.stopWorker();
     enqueueQualityReview.stop();
@@ -1267,6 +1290,8 @@ export function createContainer(): Container {
     telegramGateway,
     testTelegramConnection,
     sendTelegramAlert,
+    checkSystemAlerts,
+    telegramAlertWatcher,
     shutdown,
   };
 }

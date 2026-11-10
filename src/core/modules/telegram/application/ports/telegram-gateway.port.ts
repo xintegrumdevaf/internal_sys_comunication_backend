@@ -18,3 +18,4 @@ export interface TelegramGatewayPort {
    */
   sendMessage(input: SendTelegramMessageInput, token?: string): Promise<TelegramMessageResult>;
 }
+

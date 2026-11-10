@@ -81,7 +81,25 @@ export interface CaseRepositoryPort {
    * ejecutadas en una sola pasada en base de datos.
    */
   getDashboardMetrics(input: DashboardMetricsInput): Promise<DashboardMetricsResult>;
+
+  /**
+   * Consulta casos en HUMAN_ACTIVE donde el cliente espera respuesta del asesor asignado
+   * y el tiempo de espera supera minWaitMinutes (para centinela de SLA). Opcional en fakes.
+   */
+  findUnattendedHumanCases?(minWaitMinutes: number, limit?: number): Promise<UnattendedHumanCaseItem[]>;
 }
+
+export type UnattendedHumanCaseItem = {
+  caseId: string;
+  conversationId: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  assignedAgentId: string;
+  assignedAgentName: string;
+  customerName: string;
+  customerPhone: string;
+  waitMinutes: number;
+};
 
 export type DashboardMetricsInput = {
   actorId: string;

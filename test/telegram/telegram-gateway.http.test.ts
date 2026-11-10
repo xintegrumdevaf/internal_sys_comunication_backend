@@ -116,3 +116,4 @@ describe("TelegramGatewayHttp", () => {
     ).rejects.toThrow(/chatId de Telegram no especificado/);
   });
 });
+

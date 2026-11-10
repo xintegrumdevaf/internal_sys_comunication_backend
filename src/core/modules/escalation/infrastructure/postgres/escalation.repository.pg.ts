@@ -10,6 +10,7 @@ import type {
   CreateEscalationInput,
   EscalationRepositoryPort,
   ListEscalationsFilter,
+  PendingDelayedEscalationItem,
 } from "../../application/ports/escalation.repository.port";
 
 type EscalationRow = {
@@ -177,6 +178,50 @@ export class EscalationRepositoryPg implements EscalationRepositoryPort {
     );
     return mapRow(rows[0]!);
   }
+
+  async findPendingDelayedEscalations(minWaitMinutes: number, limit = 10): Promise<PendingDelayedEscalationItem[]> {
+    const { rows } = await this.pool.query<{
+      escalation_id: string;
+      case_id: string;
+      department_id: string | null;
+      department_name: string | null;
+      customer_name: string;
+      customer_phone: string;
+      priority: string;
+      wait_minutes: number;
+    }>(
+      `SELECT
+         e.id AS escalation_id,
+         e.case_id,
+         e.department_id,
+         d.name AS department_name,
+         COALESCE(cust.full_name, conv.wa_profile_name, conv.wa_phone) AS customer_name,
+         conv.wa_phone AS customer_phone,
+         e.priority,
+         ROUND(EXTRACT(EPOCH FROM (now() - e.created_at)) / 60)::int AS wait_minutes
+       FROM escalation e
+       JOIN "case" c ON c.id = e.case_id
+       JOIN conversation conv ON conv.id = c.conversation_id
+       LEFT JOIN department d ON d.id = e.department_id
+       LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
+       WHERE e.status = 'PENDING'
+         AND (now() - e.created_at) >= ($1 * INTERVAL '1 minute')
+       ORDER BY wait_minutes DESC
+       LIMIT $2`,
+      [minWaitMinutes, limit],
+    );
+
+    return rows.map((r) => ({
+      escalationId: r.escalation_id,
+      caseId: r.case_id,
+      departmentId: r.department_id,
+      departmentName: r.department_name,
+      customerName: r.customer_name,
+      customerPhone: r.customer_phone,
+      priority: r.priority,
+      waitMinutes: Number(r.wait_minutes),
+    }));
+  }
 }
 
 /** Fake en memoria para tests. */
@@ -254,5 +299,11 @@ export class EscalationRepositoryFake implements EscalationRepositoryPort {
         return a.createdAt.getTime() - b.createdAt.getTime();
       })
       .slice(0, limit);
+  }
+
+  pendingDelayedEscalationsResult: PendingDelayedEscalationItem[] = [];
+
+  async findPendingDelayedEscalations(_minWaitMinutes: number, _limit = 10): Promise<PendingDelayedEscalationItem[]> {
+    return this.pendingDelayedEscalationsResult;
   }
 }

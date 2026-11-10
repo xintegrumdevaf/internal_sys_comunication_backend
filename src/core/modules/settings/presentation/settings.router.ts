@@ -9,6 +9,7 @@ import type { DepartmentRepositoryPort } from "../../departments/application/por
 import type { Agent } from "../../departments/domain/agent.entity";
 import type { Logger } from "../../../../shared/logging/logger";
 import type { TestTelegramConnectionUseCase } from "../../telegram/application/use-cases/test-telegram-connection.use-case";
+import type { CheckSystemAlertsUseCase } from "../../telegram/application/use-cases/check-system-alerts.use-case";
 
 const uploadTopology = multer({
   storage: multer.memoryStorage(),
@@ -20,11 +21,12 @@ export interface SettingsRouterDeps {
   logger: Logger;
   departmentRepo?: DepartmentRepositoryPort;
   testTelegramConnection?: TestTelegramConnectionUseCase;
+  checkSystemAlerts?: CheckSystemAlertsUseCase;
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   const router = Router();
-  const { settingsService, logger, departmentRepo, testTelegramConnection } = deps;
+  const { settingsService, logger, departmentRepo, testTelegramConnection, checkSystemAlerts } = deps;
 
   /**
    * GET /api/admin/settings
@@ -141,6 +143,27 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       const result = await testTelegramConnection.execute(req.body);
       res.json({
         success: result.ok,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/check-alerts
+   * Dispara una evaluación manual inmediata de brechas de SLA y alertas de infraestructura.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/check-alerts", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      if (!checkSystemAlerts) {
+        throw validationError("Servicio centinela de alertas de Telegram no disponible");
+      }
+      const result = await checkSystemAlerts.execute();
+      res.json({
+        success: true,
         data: result,
       });
     } catch (err) {

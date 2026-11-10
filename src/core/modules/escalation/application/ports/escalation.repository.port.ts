@@ -35,4 +35,16 @@ export interface EscalationRepositoryPort {
     },
   ): Promise<Escalation>;
   findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]>;
+  findPendingDelayedEscalations?(minWaitMinutes: number, limit?: number): Promise<PendingDelayedEscalationItem[]>;
 }
+
+export type PendingDelayedEscalationItem = {
+  escalationId: string;
+  caseId: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  customerName: string;
+  customerPhone: string;
+  priority: string;
+  waitMinutes: number;
+};

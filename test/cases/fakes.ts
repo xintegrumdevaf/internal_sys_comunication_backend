@@ -10,6 +10,7 @@ import type {
   CreateCaseInput,
   DashboardMetricsInput,
   DashboardMetricsResult,
+  UnattendedHumanCaseItem,
 } from "../../src/core/modules/cases/application/ports/case.repository.port";
 import type {
   ExecuteActionParams,
@@ -230,6 +231,12 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
       teamLoad: [],
       departmentBreakdown: [],
     };
+  }
+
+  unattendedHumanCasesResult: UnattendedHumanCaseItem[] = [];
+
+  async findUnattendedHumanCases(_minWaitMinutes: number, _limit = 10): Promise<UnattendedHumanCaseItem[]> {
+    return this.unattendedHumanCasesResult;
   }
 }
 

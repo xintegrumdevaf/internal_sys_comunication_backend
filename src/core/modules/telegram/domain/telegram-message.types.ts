@@ -77,3 +77,4 @@ export interface TelegramMessageResult {
   chatId: string | number;
   date: number;
 }
+

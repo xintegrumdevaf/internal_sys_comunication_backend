@@ -108,3 +108,4 @@ describe("SendTelegramAlertUseCase", () => {
     expect(capturedInput.text).toContain("⚠️ <b>[ALERTA]</b> <b>Posible corte de fibra</b>");
   });
 });
+
