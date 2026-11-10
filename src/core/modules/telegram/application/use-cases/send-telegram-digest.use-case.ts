@@ -90,7 +90,7 @@ export class SendTelegramDigestUseCase {
       this.deps.logger.warn({ err }, "error al consultar getDashboardMetrics para digest");
     }
 
-    // 4. Formatear reporte ejecutivo en HTML
+    // 4. Formatear reporte ejecutivo en Telegram HTML
     const timeFormatted = now.toLocaleTimeString("es-EC", {
       timeZone,
       hour: "2-digit",
@@ -105,45 +105,62 @@ export class SendTelegramDigestUseCase {
     });
 
     const labelHeader = input.timeLabel ? ` - ${input.timeLabel}` : "";
+
+    const queuePending = dashboard?.escalatedPending || 0;
+    const activeCases = dashboard?.myAssignedCases || overview.activeCases || 0;
+    const isHeavyLoad = queuePending > 3;
+    const healthStatus = isHeavyLoad ? "🟡 <i>Atención Requerida (demoras en cola)</i>" : "🟢 <i>Operación Normal y Fluida</i>";
+
     const lines: string[] = [
       `📊 <b>PULSO OPERATIVO EJECUTIVO${labelHeader}</b>`,
-      `🕒 <i>Corte: ${dateFormatted} a las ${timeFormatted} (${timeZone})</i>`,
+      `📅 <code>${dateFormatted}</code> • 🕒 <code>${timeFormatted}</code>`,
+      `Estado: ${healthStatus}`,
       "",
-      "📈 <b>Actividad del Día:</b>",
-      `• <b>Casos Registrados:</b> <code>${overview.totalCases}</code>`,
-      `• <b>Casos Resueltos:</b> <code>${overview.completedCases}</code>`,
-      `• <b>Contención de IA:</b> <code>${Math.round(overview.botContainmentRate)}%</code> 🤖`,
-      `• <b>Derivación Humana:</b> <code>${Math.round(overview.escalationRate)}%</code> 👤`,
+      "━━━━━━━━━━━━━━━━━━━━━━",
+      "📈 <b>MÉTRICAS DE HOY</b>",
+      "━━━━━━━━━━━━━━━━━━━━━━",
+      `• <b>Casos Registrados:</b> <b>${overview.totalCases}</b>`,
+      `• <b>Casos Resueltos:</b> <b>${overview.completedCases}</b>`,
+      `• <b>Contención de IA:</b> <b>${Math.round(overview.botContainmentRate)}%</b> 🤖`,
+      `• <b>Derivación Humana:</b> <b>${Math.round(overview.escalationRate)}%</b> 👤`,
     ];
 
     if (overview.avgQueueWaitTimeSeconds !== null || overview.avgResolutionTimeMinutes !== null) {
       lines.push("");
-      lines.push("⏱️ <b>Velocidad de Respuesta:</b>");
+      lines.push("⏱️ <b>TIEMPOS DE ATENCIÓN</b>");
       if (overview.avgQueueWaitTimeSeconds !== null) {
-        lines.push(`• <b>Espera media en cola:</b> <code>${Math.round(overview.avgQueueWaitTimeSeconds)} seg</code>`);
+        const waitSec = Math.round(overview.avgQueueWaitTimeSeconds);
+        lines.push(`• <b>Espera media en cola:</b> <b>${waitSec} seg</b>`);
       }
       if (overview.avgResolutionTimeMinutes !== null) {
-        lines.push(`• <b>Tiempo medio de resolución:</b> <code>${Math.round(overview.avgResolutionTimeMinutes * 10) / 10} min</code>`);
+        const resMin = Math.round(overview.avgResolutionTimeMinutes * 10) / 10;
+        lines.push(`• <b>Tiempo medio de resolución:</b> <b>${resMin} min</b>`);
       }
     }
 
     if (dashboard) {
       lines.push("");
-      lines.push("👥 <b>Estado en Vivo en Este Instante:</b>");
-      lines.push(`• <b>En atención humana activa:</b> <code>${dashboard.myAssignedCases || overview.activeCases}</code>`);
-      lines.push(`• <b>En cola de espera:</b> <code>${dashboard.escalatedPending || 0}</code>`);
-      lines.push(`• <b>Casos en seguimiento (En Espera):</b> <code>${dashboard.waitingUser || 0}</code>`);
-      lines.push(`• <b>Asesores en turno disponibles:</b> <code>${activeAgentsCount}</code>`);
+      lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+      lines.push("👥 <b>OPERACIÓN EN TIEMPO REAL</b>");
+      lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+      lines.push(`• <b>En atención humana activa:</b> <b>${activeCases}</b>`);
+      lines.push(`• <b>En cola de espera:</b> <b>${queuePending}</b> ${queuePending > 0 ? "⚠️" : "✓"}`);
+      lines.push(`• <b>Casos en seguimiento (En Espera):</b> <b>${dashboard.waitingUser || 0}</b>`);
+      lines.push(`• <b>Asesores en turno disponibles:</b> <b>${activeAgentsCount}</b>`);
 
       if (dashboard.departmentBreakdown && dashboard.departmentBreakdown.length > 0) {
         lines.push("");
-        lines.push("🏢 <b>Carga por Departamento:</b>");
+        lines.push("🏢 <b>CARGA POR DEPARTAMENTO</b>");
         for (const dept of dashboard.departmentBreakdown) {
           const queuePart = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
-          lines.push(`• <b>${escapeHtml(dept.departmentName)}:</b> <code>${dept.activeCases} activos${queuePart}</code>`);
+          lines.push(`• <b>${escapeHtml(dept.departmentName)}:</b> <b>${dept.activeCases} activos${queuePart}</b>`);
         }
       }
     }
+
+    lines.push("");
+    lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+    lines.push("<i>Tocá el botón abajo para abrir el Snapshot Ejecutivo en vivo:</i>");
 
     const actionUrl = `${this.deps.appPublicUrl}/analitica`;
 
@@ -163,7 +180,8 @@ export class SendTelegramDigestUseCase {
       severity: "INFO",
       title: "Pulso Operativo Ejecutivo",
       body: lines.join("\n"),
-      actions: [{ label: "Abrir Analítica Completa", url: actionUrl }],
+      isHtmlBody: true,
+      actions: [{ label: "📊 Ver Snapshot Ejecutivo", url: actionUrl }],
     });
 
     if (!result && input.forced) {

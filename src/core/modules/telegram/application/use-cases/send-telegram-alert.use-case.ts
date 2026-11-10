@@ -59,15 +59,17 @@ export class SendTelegramAlertUseCase {
       }
     }
 
-    // Emoji de severidad
-    const icon = alert.severity === "CRITICAL" ? "🚨" : alert.severity === "WARNING" ? "⚠️" : "ℹ️";
-    const headerPrefix = alert.severity === "CRITICAL" ? "<b>[CRÍTICO]</b> " : alert.severity === "WARNING" ? "<b>[ALERTA]</b> " : "";
+    const lines: string[] = [];
 
-    const lines: string[] = [
-      `${icon} ${headerPrefix}<b>${escapeHtml(alert.title)}</b>`,
-      "",
-      escapeHtml(alert.body),
-    ];
+    // En reportes de pulso ejecutivo (DIGEST), el cuerpo ya contiene su propio encabezado estructurado y estilizado
+    if (alert.category !== "DIGEST" && alert.title) {
+      const icon = alert.severity === "CRITICAL" ? "🚨" : alert.severity === "WARNING" ? "⚠️" : "ℹ️";
+      const headerPrefix = alert.severity === "CRITICAL" ? "<b>[CRÍTICO]</b> " : alert.severity === "WARNING" ? "<b>[ALERTA]</b> " : "";
+      lines.push(`${icon} ${headerPrefix}<b>${escapeHtml(alert.title)}</b>`, "");
+    }
+
+    const formattedBody = alert.isHtmlBody ? alert.body : escapeHtml(alert.body);
+    lines.push(formattedBody);
 
     if (alert.metadata && Object.keys(alert.metadata).length > 0) {
       lines.push("");

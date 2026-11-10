@@ -47,6 +47,7 @@ export interface TelegramAlertPayload {
   chatId?: string;
   botToken?: string;
   messageThreadId?: number | null;
+  isHtmlBody?: boolean;
 }
 
 /**

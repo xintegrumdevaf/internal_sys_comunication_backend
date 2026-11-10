@@ -124,15 +124,16 @@ describe("SendTelegramDigestUseCase", () => {
     expect(payload.category).toBe("DIGEST");
     expect(payload.severity).toBe("INFO");
     expect(payload.body).toContain("PULSO OPERATIVO EJECUTIVO - 14:00");
-    expect(payload.body).toContain("Casos Registrados:</b> <code>42</code>");
-    expect(payload.body).toContain("Casos Resueltos:</b> <code>34</code>");
-    expect(payload.body).toContain("Contención de IA:</b> <code>76%</code>");
-    expect(payload.body).toContain("Derivación Humana:</b> <code>25%</code>");
-    expect(payload.body).toContain("Espera media en cola:</b> <code>45 seg</code>");
-    expect(payload.body).toContain("Tiempo medio de resolución:</b> <code>12.4 min</code>");
-    expect(payload.body).toContain("Asesores en turno disponibles:</b> <code>1</code>");
-    expect(payload.body).toContain("Soporte Técnico:</b> <code>5 activos | 2 en cola</code>");
-    expect(payload.body).toContain("Ventas:</b> <code>3 activos | 0 en cola</code>");
+    expect(payload.body).toContain("Casos Registrados:</b> <b>42</b>");
+    expect(payload.body).toContain("Casos Resueltos:</b> <b>34</b>");
+    expect(payload.body).toContain("Contención de IA:</b> <b>76%</b>");
+    expect(payload.body).toContain("Derivación Humana:</b> <b>25%</b>");
+    expect(payload.body).toContain("Espera media en cola:</b> <b>45 seg</b>");
+    expect(payload.body).toContain("Tiempo medio de resolución:</b> <b>12.4 min</b>");
+    expect(payload.body).toContain("Asesores en turno disponibles:</b> <b>1</b>");
+    expect(payload.body).toContain("Soporte Técnico:</b> <b>5 activos | 2 en cola</b>");
+    expect(payload.body).toContain("Ventas:</b> <b>3 activos | 0 en cola</b>");
+    expect(payload.isHtmlBody).toBe(true);
     expect(payload.actions?.[0]?.url).toBe("https://isp.example.com/analitica");
   });
 
@@ -171,8 +172,9 @@ describe("SendTelegramDigestUseCase", () => {
 
     expect(result?.ok).toBe(true);
     const payload = sentPayload as TelegramAlertPayload;
-    expect(payload.body).toContain("Casos Registrados:</b> <code>0</code>");
-    expect(payload.body).toContain("Contención de IA:</b> <code>0%</code>");
+    expect(payload.body).toContain("Casos Registrados:</b> <b>0</b>");
+    expect(payload.body).toContain("Contención de IA:</b> <b>0%</b>");
+    expect(payload.isHtmlBody).toBe(true);
   });
 
   it("fuerza el envío si forced: true aunque digestsEnabled esté deshabilitado", async () => {

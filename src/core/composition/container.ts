@@ -263,6 +263,7 @@ import { HandleTelegramWebhookUseCase } from "../modules/telegram/application/us
 import { AnswerTelegramCopilotQuestionUseCase } from "../modules/telegram/application/use-cases/answer-telegram-copilot-question.use-case";
 import { TelegramAiCopilotAdapter } from "../modules/telegram/infrastructure/ai/telegram-ai-copilot.adapter";
 import { createTelegramRouter } from "../modules/telegram/presentation/telegram.router";
+import { createTelegramSnapshotRouter } from "../modules/telegram/presentation/telegram-snapshot.router";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
 
 /**
@@ -1173,6 +1174,17 @@ export function createContainer(): Container {
     logger: telegramLogger,
   });
   app.use(createTelegramRouter({ handleWebhookUseCase: handleTelegramWebhook, logger: telegramLogger }));
+  app.use(
+    createTelegramSnapshotRouter({
+      analyticsRepo,
+      caseRepo,
+      agentRepo,
+      settingsService: systemSettingsService,
+      logger: telegramLogger,
+      appPublicUrl: env.APP_PUBLIC_URL,
+      frontendUrl: env.CORS_ALLOWED_ORIGINS?.[0] || "http://localhost:5173",
+    }),
+  );
 
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(
