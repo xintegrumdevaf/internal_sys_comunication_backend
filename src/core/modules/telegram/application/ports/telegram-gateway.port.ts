@@ -29,5 +29,10 @@ export interface TelegramGatewayPort {
    * Registra o actualiza la URL del webhook en api.telegram.org.
    */
   setWebhook(input: SetWebhookInput, token?: string): Promise<boolean>;
+
+  /**
+   * Consulta las actualizaciones recientes del bot (getUpdates) para detectar en qué grupos o canales fue agregado.
+   */
+  getRecentChats?(token?: string): Promise<Array<{ id: string; title: string; type: string }>>;
 }
 

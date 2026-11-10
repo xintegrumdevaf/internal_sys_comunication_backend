@@ -530,6 +530,52 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       });
       expect(setWebhookCalledWith.secretToken).toBeDefined();
     });
+
+    it("permite a un admin detectar chats y grupos recientes del bot", async () => {
+      currentRole = "admin";
+      const fakeGateway = {
+        getMe: vi.fn(),
+        sendMessage: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+        setWebhook: vi.fn(),
+        getRecentChats: vi.fn().mockResolvedValue([
+          { id: "-1002345678901", title: "Test Centinela", type: "supergroup" },
+        ]),
+      } as any;
+
+      const customApp = express();
+      customApp.use(express.json());
+      customApp.use((req, _res, next) => {
+        (req as unknown as { agent: { id: string; role: string; name: string; active: boolean } }).agent = {
+          id: "agent-123",
+          role: "admin",
+          name: "Admin User",
+          active: true,
+        };
+        next();
+      });
+      customApp.use(
+        createSettingsRouter({
+          settingsService: service,
+          logger: silentLogger,
+          telegramGateway: fakeGateway,
+        }),
+      );
+      customApp.use(createErrorHandler(silentLogger));
+
+      const res = await request(customApp)
+        .post("/api/admin/settings/telegram/detect-chat")
+        .send({ botToken: "123456:ABC" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.chats).toHaveLength(1);
+      expect(res.body.data.chats[0]).toEqual({
+        id: "-1002345678901",
+        title: "Test Centinela",
+        type: "supergroup",
+      });
+    });
   });
 });
 

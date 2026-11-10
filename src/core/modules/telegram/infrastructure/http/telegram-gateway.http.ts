@@ -201,5 +201,47 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
       throw businessError(`Fallo al registrar webhook en Telegram: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  async getRecentChats(token?: string): Promise<Array<{ id: string; title: string; type: string }>> {
+    const effectiveToken = this.resolveToken(token);
+    const url = `${this.baseUrl}/bot${effectiveToken}/getUpdates?limit=50`;
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      const body = (await response.json()) as {
+        ok: boolean;
+        result?: Array<{
+          message?: { chat?: { id: number; title?: string; type: string; first_name?: string } };
+          my_chat_member?: { chat?: { id: number; title?: string; type: string } };
+          channel_post?: { chat?: { id: number; title?: string; type: string } };
+        }>;
+      };
+
+      if (!response.ok || !body.ok || !Array.isArray(body.result)) {
+        return [];
+      }
+
+      const chatsMap = new Map<string, { id: string; title: string; type: string }>();
+      for (const update of body.result) {
+        const chat = update.message?.chat || update.my_chat_member?.chat || update.channel_post?.chat;
+        if (chat && (chat.type === "group" || chat.type === "supergroup" || chat.type === "channel")) {
+          chatsMap.set(String(chat.id), {
+            id: String(chat.id),
+            title: chat.title || "Grupo de Telegram",
+            type: chat.type,
+          });
+        }
+      }
+
+      return Array.from(chatsMap.values());
+    } catch (err) {
+      this.deps.logger.warn({ err }, "error al consultar getUpdates para detección de chats");
+      return [];
+    }
+  }
 }
 

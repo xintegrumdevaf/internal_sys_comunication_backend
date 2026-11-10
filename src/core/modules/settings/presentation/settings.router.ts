@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 import multer from "multer";
 import { requireRole, requireAuth } from "../../../../shared/http/require-auth";
-import { authorizationError, notFound, validationError } from "../../../../shared/errors/domain-errors";
+import { authorizationError, notFound, validationError, businessError } from "../../../../shared/errors/domain-errors";
 import type { SystemSettingsService } from "../application/services/system-settings.service";
 import type { DepartmentRepositoryPort } from "../../departments/application/ports/department.repository.port";
 import type { Agent } from "../../departments/domain/agent.entity";
@@ -256,6 +256,35 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
           webhookUrl,
           registered: true,
         },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/detect-chat
+   * Consulta las actualizaciones recientes del bot para detectar automáticamente grupos o supergrupos donde fue añadido.
+   */
+  router.post("/api/admin/settings/telegram/detect-chat", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+
+      if (!telegramGateway || !telegramGateway.getRecentChats) {
+        throw businessError("El gateway de Telegram no soporta detección automática de chats");
+      }
+
+      const settings = await settingsService.getTelegramSettings();
+      const token =
+        typeof req.body?.botToken === "string" && req.body.botToken.trim() !== ""
+          ? req.body.botToken.trim()
+          : settings.botToken;
+
+      const chats = await telegramGateway.getRecentChats(token);
+
+      res.json({
+        success: true,
+        data: { chats },
       });
     } catch (err) {
       next(err);
