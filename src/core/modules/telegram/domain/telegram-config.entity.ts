@@ -123,6 +123,9 @@ export const TelegramSettingsSchema = z.object({
 
   // Copilot con IA en grupo (consultas en lenguaje natural)
   aiCopilotEnabled: z.boolean().default(false),
+
+  // URL del frontend para botones de acción en alertas
+  frontendUrl: z.string().default("").optional(),
 });
 
 export type TelegramSettings = z.infer<typeof TelegramSettingsSchema>;

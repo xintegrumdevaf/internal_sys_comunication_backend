@@ -20,6 +20,7 @@ export interface HandleTelegramWebhookDeps {
   sendTelegramDigest: SendTelegramDigestUseCase;
   answerCopilotQuestion?: AnswerTelegramCopilotQuestionUseCase;
   appPublicUrl: string;
+  frontendUrl?: string;
   logger: Logger;
 }
 
@@ -225,9 +226,15 @@ export class HandleTelegramWebhookUseCase {
       );
     }
 
+    const effectiveFrontendUrl = (
+      (settings.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : (this.deps.frontendUrl || "http://localhost:8080")
+    ).replace(/\/$/, "");
+
     const replyMarkup: TelegramInlineKeyboard = {
       inline_keyboard: [
-        [{ text: "📂 Abrir Bandeja de Casos", url: `${this.deps.appPublicUrl}/casos` }],
+        [{ text: "📂 Abrir Bandeja de Casos", url: `${effectiveFrontendUrl}/bandeja` }],
         ...this.buildQuickButtons().inline_keyboard,
       ],
     };

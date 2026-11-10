@@ -14,6 +14,7 @@ export interface CheckSystemAlertsDeps {
   getSettings: () => Promise<TelegramSettings>;
   cooldownCache: AlertCooldownCacheService;
   appPublicUrl: string;
+  frontendUrl?: string;
   logger: Logger;
 }
 
@@ -45,6 +46,12 @@ export class CheckSystemAlertsUseCase {
     let slaBreachesCount = 0;
     let queueDelaysCount = 0;
     let infraAlertsCount = 0;
+
+    const effectiveFrontendUrl = (
+      (settings.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : (this.deps.frontendUrl || "http://localhost:8080")
+    ).replace(/\/$/, "");
 
     // Resolver umbrales de reglas dinámicas o fallback a configuraciones legacy
     const resolveRule = (category: "SLA" | "INFRASTRUCTURE" | "QUEUE", defaultThreshold: number) => {
@@ -78,7 +85,9 @@ export class CheckSystemAlertsUseCase {
 
           const title = `Demora excesiva en atención humana (${item.waitMinutes}m)`;
           const body = `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando respuesta del asesor.`;
-          const actionUrl = `${this.deps.appPublicUrl}/cases/${item.caseId}`;
+          const actionUrl = item.conversationId
+            ? `${effectiveFrontendUrl}/bandeja?conversationId=${item.conversationId}&tab=unattended`
+            : `${effectiveFrontendUrl}/bandeja?tab=unattended`;
 
           await this.deps.sendTelegramAlert.execute({
             category: "SLA",
@@ -118,7 +127,7 @@ export class CheckSystemAlertsUseCase {
 
           const title = `Cliente en cola de espera sin asignar (${item.waitMinutes}m)`;
           const body = `El cliente ${item.customerName} (${item.customerPhone}) aguarda en la cola de ${item.departmentName || "Triage"} sin ser tomado por un asesor.`;
-          const actionUrl = `${this.deps.appPublicUrl}/cases/${item.caseId}`;
+          const actionUrl = `${effectiveFrontendUrl}/bandeja?tab=unassigned${item.departmentId ? `&departmentId=${item.departmentId}` : ""}`;
 
           await this.deps.sendTelegramAlert.execute({
             category: "QUEUE",
@@ -165,7 +174,7 @@ export class CheckSystemAlertsUseCase {
 
         const title = `Alerta de Red: Concentración de fallas en ${item.sector}`;
         const body = `Se registraron ${item.activeCasesCount} reportes de fallas de servicio en los últimos 30 minutos asociados al sector ${item.sector}.`;
-        const actionUrl = `${this.deps.appPublicUrl}/settings`;
+        const actionUrl = `${effectiveFrontendUrl}/configuracion`;
 
         await this.deps.sendTelegramAlert.execute({
           category: "INFRASTRUCTURE",

@@ -12,6 +12,7 @@ if (process.env.NODE_ENV === "test") {
   dotenv.config({ path: path.resolve(process.cwd(), ".env.test") });
 
   process.env.APP_PUBLIC_URL = process.env.APP_PUBLIC_URL || "http://localhost:3000";
+  process.env.FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:8080";
   process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://isp:isp@localhost:5432/isp_platform";
   process.env.REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
   process.env.API_INTERNAL_KEY = process.env.API_INTERNAL_KEY || "test_internal_key";
@@ -26,6 +27,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   APP_PUBLIC_URL: z.string().min(1, "APP_PUBLIC_URL es requerida"),
+  FRONTEND_URL: z.string().default("http://localhost:8080").optional(),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL es requerida"),
   REDIS_URL: z.string().min(1, "REDIS_URL es requerida"),

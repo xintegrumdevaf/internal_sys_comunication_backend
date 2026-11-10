@@ -18,6 +18,7 @@ export interface AnswerTelegramCopilotQuestionDeps {
   analyticsRepo: AnalyticsRepositoryPort;
   getSettings: () => Promise<TelegramSettings>;
   appPublicUrl: string;
+  frontendUrl?: string;
   logger: Logger;
 }
 
@@ -45,6 +46,12 @@ export class AnswerTelegramCopilotQuestionUseCase {
     const classification = await this.deps.copilotPort.classifyQuestion(question);
 
     // 2. Extraer Ground Truth real de la base de datos según la intención
+    const effectiveFrontendUrl = (
+      (settings.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : (this.deps.frontendUrl || "http://localhost:8080")
+    ).replace(/\/$/, "");
+
     let groundTruth: string;
     let actionUrl = `${this.deps.appPublicUrl}/analitica`;
     let actionLabel = "📊 Ver Analítica";
@@ -58,7 +65,7 @@ export class AnswerTelegramCopilotQuestionUseCase {
       case "SLA_BREACHES": {
         const threshold = classification.minWaitMinutes || settings.slaThresholdMinutes || 15;
         groundTruth = await this.collectSlaGroundTruth(threshold);
-        actionUrl = `${this.deps.appPublicUrl}/casos`;
+        actionUrl = `${effectiveFrontendUrl}/bandeja?tab=unattended`;
         actionLabel = "📂 Bandeja de Casos";
         break;
       }

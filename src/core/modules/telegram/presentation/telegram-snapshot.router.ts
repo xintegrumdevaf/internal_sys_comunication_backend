@@ -134,7 +134,7 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
         activeAgentsCount,
         timeZone,
         now,
-        frontendUrl: deps.frontendUrl || deps.appPublicUrl || "",
+        frontendUrl: settings.frontendUrl || deps.frontendUrl || deps.appPublicUrl || "",
       });
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");

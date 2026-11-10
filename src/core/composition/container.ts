@@ -1114,6 +1114,12 @@ export function createContainer(): Container {
     getSettings: () => systemSettingsService.getTelegramSettings(),
     logger: telegramLogger,
   });
+  const effectiveFrontendUrl = (
+    env.FRONTEND_URL ||
+    (env.CORS_ALLOWED_ORIGINS ? env.CORS_ALLOWED_ORIGINS.split(",")[0]?.trim() || "" : "") ||
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
+
   const alertCooldownCache = new AlertCooldownCacheService();
   const checkSystemAlerts = new CheckSystemAlertsUseCase({
     caseRepo,
@@ -1123,6 +1129,7 @@ export function createContainer(): Container {
     getSettings: () => systemSettingsService.getTelegramSettings(),
     cooldownCache: alertCooldownCache,
     appPublicUrl: env.APP_PUBLIC_URL,
+    frontendUrl: effectiveFrontendUrl,
     logger: telegramLogger,
   });
   const telegramAlertWatcher = new TelegramAlertWatcherService({
@@ -1159,6 +1166,7 @@ export function createContainer(): Container {
     analyticsRepo,
     getSettings: () => systemSettingsService.getTelegramSettings(),
     appPublicUrl: env.APP_PUBLIC_URL,
+    frontendUrl: effectiveFrontendUrl,
     logger: telegramLogger,
   });
 
@@ -1171,6 +1179,7 @@ export function createContainer(): Container {
     sendTelegramDigest,
     answerCopilotQuestion: answerTelegramCopilotQuestion,
     appPublicUrl: env.APP_PUBLIC_URL,
+    frontendUrl: effectiveFrontendUrl,
     logger: telegramLogger,
   });
   app.use(createTelegramRouter({ handleWebhookUseCase: handleTelegramWebhook, logger: telegramLogger }));
@@ -1182,9 +1191,51 @@ export function createContainer(): Container {
       settingsService: systemSettingsService,
       logger: telegramLogger,
       appPublicUrl: env.APP_PUBLIC_URL,
-      frontendUrl: env.CORS_ALLOWED_ORIGINS?.[0] || "http://localhost:5173",
+      frontendUrl: effectiveFrontendUrl,
     }),
   );
+
+  // Redirecciones amigables para enlaces emitidos previamente al backend
+  app.get(["/cases/:caseId", "/case/:caseId"], async (req, res) => {
+    const rawCaseId = req.params.caseId;
+    const caseId = (Array.isArray(rawCaseId) ? rawCaseId[0] : rawCaseId) || "";
+    const settings = await systemSettingsService.getTelegramSettings().catch(() => null);
+    const frontendBase = (
+      (settings?.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : effectiveFrontendUrl
+    ).replace(/\/$/, "");
+
+    try {
+      const c = await caseRepo.findById(caseId);
+      if (c?.case?.conversationId) {
+        return res.redirect(302, `${frontendBase}/bandeja?conversationId=${c.case.conversationId}`);
+      }
+    } catch {
+      // ignorar y redirigir a bandeja
+    }
+    return res.redirect(302, `${frontendBase}/bandeja`);
+  });
+
+  app.get(["/casos", "/bandeja"], async (_req, res) => {
+    const settings = await systemSettingsService.getTelegramSettings().catch(() => null);
+    const frontendBase = (
+      (settings?.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : effectiveFrontendUrl
+    ).replace(/\/$/, "");
+    return res.redirect(302, `${frontendBase}/bandeja`);
+  });
+
+  app.get(["/settings", "/configuracion"], async (_req, res) => {
+    const settings = await systemSettingsService.getTelegramSettings().catch(() => null);
+    const frontendBase = (
+      (settings?.frontendUrl && settings.frontendUrl.trim() !== "")
+        ? settings.frontendUrl.trim()
+        : effectiveFrontendUrl
+    ).replace(/\/$/, "");
+    return res.redirect(302, `${frontendBase}/configuracion`);
+  });
 
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(
