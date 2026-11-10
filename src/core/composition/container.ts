@@ -259,6 +259,8 @@ import { CheckSystemAlertsUseCase } from "../modules/telegram/application/use-ca
 import { TelegramAlertWatcherService } from "../modules/telegram/application/services/telegram-alert-watcher.service";
 import { SendTelegramDigestUseCase } from "../modules/telegram/application/use-cases/send-telegram-digest.use-case";
 import { TelegramDigestSchedulerService } from "../modules/telegram/application/services/telegram-digest-scheduler.service";
+import { HandleTelegramWebhookUseCase } from "../modules/telegram/application/use-cases/handle-telegram-webhook.use-case";
+import { createTelegramRouter } from "../modules/telegram/presentation/telegram.router";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
 
 /**
@@ -286,6 +288,7 @@ export type Container = {
   telegramAlertWatcher?: TelegramAlertWatcherService;
   sendTelegramDigest?: SendTelegramDigestUseCase;
   telegramDigestScheduler?: TelegramDigestSchedulerService;
+  handleTelegramWebhook?: HandleTelegramWebhookUseCase;
   shutdown: () => Promise<void>;
 };
 
@@ -1140,6 +1143,18 @@ export function createContainer(): Container {
   });
   telegramDigestScheduler.start();
 
+  const handleTelegramWebhook = new HandleTelegramWebhookUseCase({
+    gateway: telegramGateway,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    caseRepo,
+    agentRepo,
+    analyticsRepo,
+    sendTelegramDigest,
+    appPublicUrl: env.APP_PUBLIC_URL,
+    logger: telegramLogger,
+  });
+  app.use(createTelegramRouter({ handleWebhookUseCase: handleTelegramWebhook, logger: telegramLogger }));
+
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(
     createSettingsRouter({
@@ -1149,6 +1164,8 @@ export function createContainer(): Container {
       testTelegramConnection,
       checkSystemAlerts,
       sendTelegramDigest,
+      telegramGateway,
+      appPublicUrl: env.APP_PUBLIC_URL,
     }),
   );
   app.use(createRagRouter({ ragService, logger: aiLogger }));
@@ -1316,6 +1333,7 @@ export function createContainer(): Container {
     telegramAlertWatcher,
     sendTelegramDigest,
     telegramDigestScheduler,
+    handleTelegramWebhook,
     shutdown,
   };
 }

@@ -2,7 +2,9 @@ import { businessError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { TelegramGatewayPort } from "../../application/ports/telegram-gateway.port";
 import type {
+  AnswerCallbackQueryInput,
   SendTelegramMessageInput,
+  SetWebhookInput,
   TelegramApiResponse,
   TelegramBotInfo,
   TelegramMessageResult,
@@ -128,6 +130,75 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
       }
       this.deps.logger.error({ err, chatId }, "error al invocar sendMessage en Telegram API");
       throw businessError(`Fallo al enviar mensaje a Telegram: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async answerCallbackQuery(input: AnswerCallbackQueryInput, token?: string): Promise<boolean> {
+    const effectiveToken = this.resolveToken(token);
+    const url = `${this.baseUrl}/bot${effectiveToken}/answerCallbackQuery`;
+
+    const payload: Record<string, unknown> = {
+      callback_query_id: input.callbackQueryId,
+    };
+    if (input.text) payload.text = input.text;
+    if (input.showAlert) payload.show_alert = true;
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      const body = (await response.json()) as TelegramApiResponse<boolean>;
+      if (!response.ok || !body.ok) {
+        this.deps.logger.warn({ status: response.status, description: body.description }, "error en answerCallbackQuery");
+        return false;
+      }
+      return true;
+    } catch (err) {
+      this.deps.logger.warn({ err, callbackQueryId: input.callbackQueryId }, "fallo de red en answerCallbackQuery");
+      return false;
+    }
+  }
+
+  async setWebhook(input: SetWebhookInput, token?: string): Promise<boolean> {
+    const effectiveToken = this.resolveToken(token);
+    const url = `${this.baseUrl}/bot${effectiveToken}/setWebhook`;
+
+    const payload: Record<string, unknown> = {
+      url: input.url,
+      drop_pending_updates: Boolean(input.dropPendingUpdates),
+    };
+    if (input.secretToken) {
+      payload.secret_token = input.secretToken;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      const body = (await response.json()) as TelegramApiResponse<boolean>;
+      if (!response.ok || !body.ok) {
+        const desc = body.description || `HTTP ${response.status}`;
+        this.deps.logger.warn({ status: response.status, description: desc }, "error en setWebhook de Telegram");
+        throw businessError(`Error al configurar webhook de Telegram: ${desc}`);
+      }
+      return true;
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw businessError("Timeout al registrar webhook en Telegram");
+      }
+      if (err instanceof Error && err.message.includes("Telegram")) {
+        throw err;
+      }
+      this.deps.logger.error({ err }, "error al invocar setWebhook en Telegram API");
+      throw businessError(`Fallo al registrar webhook en Telegram: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

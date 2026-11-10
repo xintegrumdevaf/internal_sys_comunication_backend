@@ -20,6 +20,9 @@ export const TelegramSettingsSchema = z.object({
   slaThresholdMinutes: z.number().int().min(5).max(120).default(15),
   infraAlertMinCases: z.number().int().min(2).max(10).default(3),
   queueSaturationThreshold: z.number().int().min(3).max(50).default(10),
+  // Webhook y comandos interactivos (/resumen, /sla, /agentes)
+  webhookSecret: z.string().default(""),
+  commandsEnabled: z.boolean().default(true),
 });
 
 export type TelegramSettings = z.infer<typeof TelegramSettingsSchema>;

@@ -6,7 +6,7 @@ import { silentLogger } from "../support/silent-logger";
 describe("TestTelegramConnectionUseCase", () => {
   it("valida el bot con getMe y envía mensaje de prueba si se proporciona chatId", async () => {
     const sentMessages: any[] = [];
-    const fakeGateway: TelegramGatewayPort = {
+    const fakeGateway = {
       getMe: vi.fn().mockResolvedValue({
         id: 777,
         is_bot: true,
@@ -17,7 +17,9 @@ describe("TestTelegramConnectionUseCase", () => {
         sentMessages.push(input);
         return { ok: true, messageId: 101, chatId: input.chatId, date: Date.now() };
       }),
-    };
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
 
     const useCase = new TestTelegramConnectionUseCase({
       gateway: fakeGateway,
@@ -39,7 +41,7 @@ describe("TestTelegramConnectionUseCase", () => {
   });
 
   it("valida el bot sin enviar mensaje si sendSampleMessage es false", async () => {
-    const fakeGateway: TelegramGatewayPort = {
+    const fakeGateway = {
       getMe: vi.fn().mockResolvedValue({
         id: 777,
         is_bot: true,
@@ -47,7 +49,9 @@ describe("TestTelegramConnectionUseCase", () => {
         username: "isp_ops_bot",
       }),
       sendMessage: vi.fn(),
-    };
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
 
     const useCase = new TestTelegramConnectionUseCase({
       gateway: fakeGateway,

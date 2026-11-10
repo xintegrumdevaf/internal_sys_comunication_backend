@@ -16,6 +16,7 @@ import {
   AiProviderSettingsSchema,
   maskSecret,
   mergeSecret,
+  isMaskedValue,
 } from "../../domain/system-settings.entity";
 import {
   TelegramSettingsSchema,
@@ -258,6 +259,8 @@ export class SystemSettingsService {
         slaThresholdMinutes: 15,
         infraAlertMinCases: 3,
         queueSaturationThreshold: 10,
+        webhookSecret: "",
+        commandsEnabled: true,
       };
 
       const resolved = TelegramSettingsSchema.parse({
@@ -282,6 +285,8 @@ export class SystemSettingsService {
         slaThresholdMinutes: 15,
         infraAlertMinCases: 3,
         queueSaturationThreshold: 10,
+        webhookSecret: "",
+        commandsEnabled: true,
       };
     }
   }
@@ -291,6 +296,7 @@ export class SystemSettingsService {
     return {
       ...raw,
       botToken: maskTelegramToken(raw.botToken),
+      webhookSecret: raw.webhookSecret ? "••••••••••••" : "",
     };
   }
 
@@ -313,6 +319,11 @@ export class SystemSettingsService {
       slaThresholdMinutes: input.slaThresholdMinutes ?? current.slaThresholdMinutes,
       infraAlertMinCases: input.infraAlertMinCases ?? current.infraAlertMinCases,
       queueSaturationThreshold: input.queueSaturationThreshold ?? current.queueSaturationThreshold,
+      webhookSecret:
+        input.webhookSecret !== undefined && !isMaskedValue(input.webhookSecret)
+          ? input.webhookSecret.trim()
+          : current.webhookSecret,
+      commandsEnabled: input.commandsEnabled !== undefined ? input.commandsEnabled : current.commandsEnabled,
     };
 
     const validated = TelegramSettingsSchema.parse(merged);

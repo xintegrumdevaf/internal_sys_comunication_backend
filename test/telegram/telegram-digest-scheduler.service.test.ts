@@ -17,6 +17,8 @@ describe("TelegramDigestSchedulerService", () => {
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
+    webhookSecret: "",
+    commandsEnabled: true,
   };
 
   beforeEach(() => {
@@ -117,3 +119,4 @@ describe("TelegramDigestSchedulerService", () => {
     expect(fakeSendUseCase.execute).toHaveBeenCalledWith({ forced: true, timeLabel: "Manual" });
   });
 });
+

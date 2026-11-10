@@ -18,13 +18,17 @@ describe("SendTelegramAlertUseCase", () => {
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
+    webhookSecret: "",
+    commandsEnabled: true,
   };
 
   it("omite el envío silenciosamente si el módulo de Telegram está deshabilitado", async () => {
-    const fakeGateway: TelegramGatewayPort = {
+    const fakeGateway = {
       getMe: vi.fn(),
       sendMessage: vi.fn(),
-    };
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
 
     const useCase = new SendTelegramAlertUseCase({
       gateway: fakeGateway,
@@ -45,13 +49,15 @@ describe("SendTelegramAlertUseCase", () => {
 
   it("enruta alertas de SLA al topic configurado y formatea con prefijo [CRÍTICO]", async () => {
     let capturedInput: any = null;
-    const fakeGateway: TelegramGatewayPort = {
+    const fakeGateway = {
       getMe: vi.fn(),
       sendMessage: vi.fn().mockImplementation(async (input) => {
         capturedInput = input;
         return { ok: true, messageId: 55, chatId: input.chatId, date: Date.now() };
       }),
-    };
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
 
     const useCase = new SendTelegramAlertUseCase({
       gateway: fakeGateway,
@@ -83,13 +89,15 @@ describe("SendTelegramAlertUseCase", () => {
 
   it("enruta alertas de infraestructura al topic de infraestructura", async () => {
     let capturedInput: any = null;
-    const fakeGateway: TelegramGatewayPort = {
+    const fakeGateway = {
       getMe: vi.fn(),
       sendMessage: vi.fn().mockImplementation(async (input) => {
         capturedInput = input;
         return { ok: true, messageId: 56, chatId: input.chatId, date: Date.now() };
       }),
-    };
+      answerCallbackQuery: vi.fn(),
+      setWebhook: vi.fn(),
+    } as unknown as TelegramGatewayPort;
 
     const useCase = new SendTelegramAlertUseCase({
       gateway: fakeGateway,

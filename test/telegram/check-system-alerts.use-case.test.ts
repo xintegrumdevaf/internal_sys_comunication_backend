@@ -22,6 +22,8 @@ describe("CheckSystemAlertsUseCase", () => {
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
+    webhookSecret: "",
+    commandsEnabled: true,
   };
 
   it("omite la evaluación si Telegram está deshabilitado", async () => {

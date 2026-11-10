@@ -115,5 +115,70 @@ describe("TelegramGatewayHttp", () => {
       gateway.sendMessage({ text: "hola" }),
     ).rejects.toThrow(/chatId de Telegram no especificado/);
   });
+
+  it("answerCallbackQuery envía la confirmación de la pulsación inline a Telegram", async () => {
+    let capturedUrl = "";
+    let capturedBody: any = null;
+
+    global.fetch = vi.fn().mockImplementation(async (url, init) => {
+      capturedUrl = String(url);
+      capturedBody = JSON.parse(String(init.body));
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: true }),
+      };
+    });
+
+    const gateway = new TelegramGatewayHttp({
+      logger: silentLogger,
+      defaultBotToken: "bot-token-123",
+    });
+
+    const result = await gateway.answerCallbackQuery({
+      callbackQueryId: "cb-12345",
+      text: "Cargando métricas...",
+      showAlert: false,
+    });
+
+    expect(result).toBe(true);
+    expect(capturedUrl).toContain("/botbot-token-123/answerCallbackQuery");
+    expect(capturedBody).toMatchObject({
+      callback_query_id: "cb-12345",
+      text: "Cargando métricas...",
+    });
+  });
+
+  it("setWebhook registra la URL y el secretToken en Telegram", async () => {
+    let capturedUrl = "";
+    let capturedBody: any = null;
+
+    global.fetch = vi.fn().mockImplementation(async (url, init) => {
+      capturedUrl = String(url);
+      capturedBody = JSON.parse(String(init.body));
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: true }),
+      };
+    });
+
+    const gateway = new TelegramGatewayHttp({
+      logger: silentLogger,
+      defaultBotToken: "bot-token-123",
+    });
+
+    const result = await gateway.setWebhook({
+      url: "https://isp.example.com/api/v1/telegram/webhook",
+      secretToken: "secret-token-xyz",
+      dropPendingUpdates: true,
+    });
+
+    expect(result).toBe(true);
+    expect(capturedUrl).toContain("/botbot-token-123/setWebhook");
+    expect(capturedBody).toMatchObject({
+      url: "https://isp.example.com/api/v1/telegram/webhook",
+      secret_token: "secret-token-xyz",
+      drop_pending_updates: true,
+    });
+  });
 });
 

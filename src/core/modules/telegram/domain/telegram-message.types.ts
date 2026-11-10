@@ -78,3 +78,55 @@ export interface TelegramMessageResult {
   date: number;
 }
 
+/**
+ * Estructuras de Webhook entrante de Telegram (Updates).
+ */
+export interface TelegramUser {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
+export interface TelegramChat {
+  id: number | string;
+  type: "private" | "group" | "supergroup" | "channel";
+  title?: string;
+  username?: string;
+}
+
+export interface TelegramMessage {
+  message_id: number;
+  from?: TelegramUser;
+  chat: TelegramChat;
+  date: number;
+  text?: string;
+  message_thread_id?: number;
+}
+
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
+export interface TelegramUpdate {
+  update_id: number;
+  message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+export interface AnswerCallbackQueryInput {
+  callbackQueryId: string;
+  text?: string;
+  showAlert?: boolean;
+}
+
+export interface SetWebhookInput {
+  url: string;
+  secretToken?: string;
+  dropPendingUpdates?: boolean;
+}
+

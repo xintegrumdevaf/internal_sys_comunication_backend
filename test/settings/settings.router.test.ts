@@ -475,6 +475,61 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       expect(res.body.data.messageId).toBe(999);
       expect(fakeDigestUseCase.execute).toHaveBeenCalledWith({ forced: true, timeLabel: "Manual" });
     });
+
+    it("permite a un admin registrar el webhook en api.telegram.org", async () => {
+      currentRole = "admin";
+      await service.updateTelegramSettings({
+        enabled: true,
+        botToken: "123456:AABBCCDDEEFF11223344",
+        defaultChatId: "-100111",
+      });
+
+      let setWebhookCalledWith: any = null;
+      const fakeGateway = {
+        getMe: vi.fn(),
+        sendMessage: vi.fn(),
+        answerCallbackQuery: vi.fn(),
+        setWebhook: vi.fn().mockImplementation(async (input) => {
+          setWebhookCalledWith = input;
+          return true;
+        }),
+      } as any;
+
+      const customApp = express();
+      customApp.use(express.json());
+      customApp.use((req, _res, next) => {
+        (req as unknown as { agent: { id: string; role: string; name: string; active: boolean } }).agent = {
+          id: "agent-123",
+          role: "admin",
+          name: "Admin User",
+          active: true,
+        };
+        next();
+      });
+      customApp.use(
+        createSettingsRouter({
+          settingsService: service,
+          logger: silentLogger,
+          telegramGateway: fakeGateway,
+          appPublicUrl: "https://isp.test.org",
+        }),
+      );
+      customApp.use(createErrorHandler(silentLogger));
+
+      const res = await request(customApp)
+        .post("/api/admin/settings/telegram/set-webhook")
+        .send({ dropPendingUpdates: true });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.registered).toBe(true);
+      expect(res.body.data.webhookUrl).toBe("https://isp.test.org/api/v1/telegram/webhook");
+      expect(setWebhookCalledWith).toMatchObject({
+        url: "https://isp.test.org/api/v1/telegram/webhook",
+        dropPendingUpdates: true,
+      });
+      expect(setWebhookCalledWith.secretToken).toBeDefined();
+    });
   });
 });
 

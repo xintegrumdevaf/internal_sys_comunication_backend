@@ -21,6 +21,8 @@ describe("SendTelegramDigestUseCase", () => {
     slaThresholdMinutes: 15,
     infraAlertMinCases: 3,
     queueSaturationThreshold: 10,
+    webhookSecret: "",
+    commandsEnabled: true,
   };
 
   it("omite el envío si digestsEnabled está en false y no es forzado", async () => {

@@ -11,6 +11,7 @@ import type { Logger } from "../../../../shared/logging/logger";
 import type { TestTelegramConnectionUseCase } from "../../telegram/application/use-cases/test-telegram-connection.use-case";
 import type { CheckSystemAlertsUseCase } from "../../telegram/application/use-cases/check-system-alerts.use-case";
 import type { SendTelegramDigestUseCase } from "../../telegram/application/use-cases/send-telegram-digest.use-case";
+import type { TelegramGatewayPort } from "../../telegram/application/ports/telegram-gateway.port";
 
 const uploadTopology = multer({
   storage: multer.memoryStorage(),
@@ -24,6 +25,8 @@ export interface SettingsRouterDeps {
   testTelegramConnection?: TestTelegramConnectionUseCase;
   checkSystemAlerts?: CheckSystemAlertsUseCase;
   sendTelegramDigest?: SendTelegramDigestUseCase;
+  telegramGateway?: TelegramGatewayPort;
+  appPublicUrl?: string;
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
@@ -35,6 +38,8 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
     testTelegramConnection,
     checkSystemAlerts,
     sendTelegramDigest,
+    telegramGateway,
+    appPublicUrl,
   } = deps;
 
   /**
@@ -195,6 +200,62 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       res.json({
         success: Boolean(result?.ok),
         data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/set-webhook
+   * Registra o actualiza la URL del webhook en api.telegram.org.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/set-webhook", async (req, res, next) => {
+    try {
+      const agent = requireRole(req, ["admin"]);
+      if (!telegramGateway) {
+        throw validationError("Gateway de Telegram no disponible");
+      }
+      const settings = await settingsService.getTelegramSettings();
+      if (!settings.botToken) {
+        throw validationError("Debe configurar el botToken de Telegram antes de registrar el webhook");
+      }
+
+      const webhookUrl =
+        typeof req.body?.webhookUrl === "string" && req.body.webhookUrl.trim() !== ""
+          ? req.body.webhookUrl.trim()
+          : `${appPublicUrl || ""}/api/v1/telegram/webhook`;
+
+      if (!webhookUrl.startsWith("https://") && !webhookUrl.startsWith("http://")) {
+        throw validationError("La URL del webhook debe ser una URL válida (ej. https://tudominio.com/api/v1/telegram/webhook)");
+      }
+
+      const secretToken =
+        settings.webhookSecret && settings.webhookSecret.trim() !== ""
+          ? settings.webhookSecret.trim()
+          : randomUUID().replace(/-/g, "");
+
+      await telegramGateway.setWebhook(
+        {
+          url: webhookUrl,
+          secretToken,
+          dropPendingUpdates: Boolean(req.body?.dropPendingUpdates),
+        },
+        settings.botToken,
+      );
+
+      // Guardar el secretToken en la configuración del sistema
+      await settingsService.updateTelegramSettings({ webhookSecret: secretToken }, agent.id);
+
+      logger.info({ agentId: agent.id, webhookUrl }, "Webhook de Telegram registrado exitosamente");
+
+      res.json({
+        success: true,
+        data: {
+          webhookUrl,
+          registered: true,
+        },
       });
     } catch (err) {
       next(err);
