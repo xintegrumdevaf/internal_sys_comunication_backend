@@ -38,3 +38,4 @@ export class AlertCooldownCacheService {
     this.cache.clear();
   }
 }
+

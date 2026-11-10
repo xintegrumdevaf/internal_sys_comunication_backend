@@ -10,6 +10,7 @@ import type { Agent } from "../../departments/domain/agent.entity";
 import type { Logger } from "../../../../shared/logging/logger";
 import type { TestTelegramConnectionUseCase } from "../../telegram/application/use-cases/test-telegram-connection.use-case";
 import type { CheckSystemAlertsUseCase } from "../../telegram/application/use-cases/check-system-alerts.use-case";
+import type { SendTelegramDigestUseCase } from "../../telegram/application/use-cases/send-telegram-digest.use-case";
 
 const uploadTopology = multer({
   storage: multer.memoryStorage(),
@@ -22,11 +23,19 @@ export interface SettingsRouterDeps {
   departmentRepo?: DepartmentRepositoryPort;
   testTelegramConnection?: TestTelegramConnectionUseCase;
   checkSystemAlerts?: CheckSystemAlertsUseCase;
+  sendTelegramDigest?: SendTelegramDigestUseCase;
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   const router = Router();
-  const { settingsService, logger, departmentRepo, testTelegramConnection, checkSystemAlerts } = deps;
+  const {
+    settingsService,
+    logger,
+    departmentRepo,
+    testTelegramConnection,
+    checkSystemAlerts,
+    sendTelegramDigest,
+  } = deps;
 
   /**
    * GET /api/admin/settings
@@ -164,6 +173,27 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       const result = await checkSystemAlerts.execute();
       res.json({
         success: true,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/admin/settings/telegram/send-digest
+   * Dispara un envío manual inmediato del pulso operativo ejecutivo a Telegram.
+   * Exclusivo para administradores.
+   */
+  router.post("/api/admin/settings/telegram/send-digest", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      if (!sendTelegramDigest) {
+        throw validationError("Servicio de pulso operativo (digest) de Telegram no disponible");
+      }
+      const result = await sendTelegramDigest.execute({ forced: true, timeLabel: "Manual" });
+      res.json({
+        success: Boolean(result?.ok),
         data: result,
       });
     } catch (err) {

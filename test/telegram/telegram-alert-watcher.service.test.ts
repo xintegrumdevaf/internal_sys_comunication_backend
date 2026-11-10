@@ -43,3 +43,4 @@ describe("TelegramAlertWatcherService", () => {
     expect(callCount).toBe(countAfterStop);
   });
 });
+

@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createSettingsRouter } from "../../src/core/modules/settings/presentation/settings.router";
 import { SystemSettingsService } from "../../src/core/modules/settings/application/services/system-settings.service";
 import type { SystemSettingsRepositoryPort } from "../../src/core/modules/settings/application/ports/system-settings.repository.port";
@@ -442,6 +442,38 @@ describe("Endpoints de Configuración del Sistema (Settings Router)", () => {
       // Consultar de nuevo confirma que se conservó el valor enmascarado
       const getRes = await request(app).get("/api/admin/settings/telegram");
       expect(getRes.body.data.defaultChatId).toBe("-1001234567890");
+    });
+
+    it("permite a un admin disparar manualmente el envío del pulso ejecutivo (digest)", async () => {
+      currentRole = "admin";
+      const fakeDigestUseCase = {
+        execute: vi.fn().mockResolvedValue({ ok: true, messageId: 999 }),
+      } as any;
+      const customApp = express();
+      customApp.use(express.json());
+      customApp.use((req, _res, next) => {
+        (req as unknown as { agent: { id: string; role: string; name: string; active: boolean } }).agent = {
+          id: "agent-123",
+          role: "admin",
+          name: "Admin User",
+          active: true,
+        };
+        next();
+      });
+      customApp.use(
+        createSettingsRouter({
+          settingsService: service,
+          logger: silentLogger,
+          sendTelegramDigest: fakeDigestUseCase,
+        }),
+      );
+      customApp.use(createErrorHandler(silentLogger));
+
+      const res = await request(customApp).post("/api/admin/settings/telegram/send-digest");
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.messageId).toBe(999);
+      expect(fakeDigestUseCase.execute).toHaveBeenCalledWith({ forced: true, timeLabel: "Manual" });
     });
   });
 });

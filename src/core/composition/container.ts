@@ -257,6 +257,8 @@ import { SendTelegramAlertUseCase } from "../modules/telegram/application/use-ca
 import { AlertCooldownCacheService } from "../modules/telegram/application/services/alert-cooldown-cache.service";
 import { CheckSystemAlertsUseCase } from "../modules/telegram/application/use-cases/check-system-alerts.use-case";
 import { TelegramAlertWatcherService } from "../modules/telegram/application/services/telegram-alert-watcher.service";
+import { SendTelegramDigestUseCase } from "../modules/telegram/application/use-cases/send-telegram-digest.use-case";
+import { TelegramDigestSchedulerService } from "../modules/telegram/application/services/telegram-digest-scheduler.service";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
 
 /**
@@ -282,6 +284,8 @@ export type Container = {
   sendTelegramAlert?: SendTelegramAlertUseCase;
   checkSystemAlerts?: CheckSystemAlertsUseCase;
   telegramAlertWatcher?: TelegramAlertWatcherService;
+  sendTelegramDigest?: SendTelegramDigestUseCase;
+  telegramDigestScheduler?: TelegramDigestSchedulerService;
   shutdown: () => Promise<void>;
 };
 
@@ -1120,6 +1124,22 @@ export function createContainer(): Container {
   });
   telegramAlertWatcher.start();
 
+  const sendTelegramDigest = new SendTelegramDigestUseCase({
+    analyticsRepo,
+    caseRepo,
+    agentRepo,
+    sendTelegramAlert,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    appPublicUrl: env.APP_PUBLIC_URL,
+    logger: telegramLogger,
+  });
+  const telegramDigestScheduler = new TelegramDigestSchedulerService({
+    sendDigestUseCase: sendTelegramDigest,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    logger: telegramLogger,
+  });
+  telegramDigestScheduler.start();
+
   app.use(createAuditRouter({ listAuditEvents, getAuditStats }));
   app.use(
     createSettingsRouter({
@@ -1128,6 +1148,7 @@ export function createContainer(): Container {
       departmentRepo,
       testTelegramConnection,
       checkSystemAlerts,
+      sendTelegramDigest,
     }),
   );
   app.use(createRagRouter({ ragService, logger: aiLogger }));
@@ -1268,6 +1289,7 @@ export function createContainer(): Container {
 
   const shutdown = async (): Promise<void> => {
     telegramAlertWatcher.stop();
+    telegramDigestScheduler.stop();
     campaignWorker.stopWorker();
     zernioHistorySyncWorker.stopWorker();
     enqueueQualityReview.stop();
@@ -1292,6 +1314,8 @@ export function createContainer(): Container {
     sendTelegramAlert,
     checkSystemAlerts,
     telegramAlertWatcher,
+    sendTelegramDigest,
+    telegramDigestScheduler,
     shutdown,
   };
 }
