@@ -348,7 +348,44 @@ Endpoints para la gestión de Routers MikroTik y OLTs (administrados por `admin`
 
 ---
 
-## 17. Qué **no** es HTTP en esta API
+## 17. Módulo de Campañas Masivas de WhatsApp (/api/campaigns)
+
+Endpoints para la gestión, importación de destinatarios y despacho progresivo de campañas masivas por WhatsApp (vía plantillas Meta o mensajes con variables):
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/campaigns` | sesión | Lista campañas registradas con su progreso calculado `(sentCount + failedCount) / totalRecipients * 100`. Query: `status?` (`DRAFT`, `RUNNING`, `SUSPENDED`, `COMPLETED`, `FAILED`) |
+| `GET` | `/api/campaigns/:id` | sesión | Detalle completo de una campaña con su lista enriquecida de destinatarios. Consulta directamente la base de datos local (<10ms) sin hacer polling HTTP a Zernio |
+| `POST` | `/api/campaigns` | sesión | Crea una campaña en estado `DRAFT`. Body: `{ name, messageBody?, templateName?, templateLanguage?, variableMapping?, quickMode?, quickModeIntervalSeconds?, chatRouting? }` |
+| `POST` | `/api/campaigns/:id/recipients/import` | sesión | Importación masiva de destinatarios vía archivo multipart (`.csv` o `.xlsx`) |
+| `POST` | `/api/campaigns/:id/start` | sesión | Pasa la campaña a estado `RUNNING` y encola los lotes en Redis para su procesamiento por el worker |
+| `POST` | `/api/campaigns/:id/suspend` | sesión | Suspende la campaña en ejecución |
+| `POST` | `/api/campaigns/:id/resume` | sesión | Reanuda una campaña suspendida reencolando los pendientes |
+| `DELETE` | `/api/campaigns/:id` | sesión | Elimina una campaña (únicamente permitido si está en estado `DRAFT`) |
+
+### Enrutamiento de Chat (`chatRouting`) y Ciclo de Vida:
+* **Bandeja de Cerrados por Defecto (`initialStatus: "CLOSED"`)**:
+  Al enviar cada mensaje de campaña, el backend registra la conversación y el mensaje saliente en la base de datos local y aplica `status: 'closed'`. Esto evita saturar la **Bandeja de abiertos** de los asesores con cientos de mensajes mientras los destinatarios aún no responden.
+* **Reapertura y Análisis con IA al Recibir Respuesta**:
+  Cuando un cliente responde al mensaje de la campaña en WhatsApp:
+  1. `ReceiveInboundMessageUseCase` reabre automáticamente la conversación (`status: 'open'`), trasladándola a la bandeja de Abiertos en tiempo real.
+  2. La IA (Gemini) toma el mensaje junto con el contexto del mensaje previo de la campaña que el cliente recibió.
+  3. Si es una consulta de negocio (ventas, soporte técnico, facturación), la IA inicia el caso automatizado o lo deriva al área humana pertinente.
+  4. Si el cliente solo responde una cortesía (*"gracias"*, *"ok gracias"*, emojis), el filtro de cortesías lo mantiene en Cerrados sin crear casos falsos.
+* **Seguimiento Asíncrono de Entregas (Webhooks vs. Polling HTTP)**:
+  Los estados de entrega de cada destinatario (`SENT`, `FAILED`, recibos de lectura) son notificados asíncronamente vía webhooks de Zernio/Meta (`message.delivered`, `message.failed`). La consulta de campañas en la API no realiza llamadas HTTP externas a Zernio, protegiendo las cuotas de Rate Limit (429) de la empresa.
+* **Traducción y Normalización de Errores de Entrega de Meta (`errorMessage`)**:
+  Al consultar el detalle de una campaña (`GET /api/campaigns/:id`) o procesar webhooks de fallo, los mensajes técnicos en inglés de WhatsApp Cloud API se traducen automáticamente a explicaciones de negocio claras en español (`meta-delivery-error.ts`):
+  * `131049` (*Healthy ecosystem engagement*): *"Límite de protección de Meta: Meta bloqueó la entrega para evitar saturar al destinatario con mensajes de marketing/campaña (Error Meta 131049)"*.
+  * `131047` (*24-hour window*): *"Ventana de 24 horas cerrada: Han transcurrido más de 24h desde el último mensaje del cliente. WhatsApp requiere una plantilla oficial (Template) aprobada (Error Meta 131047)"*.
+  * `131026` (*Message undeliverable*): *"Número no disponible: El destinatario no tiene WhatsApp activo o no puede recibir mensajes (Error Meta 131026)"*.
+  * `131056` (*Param count mismatch*): *"Error en plantilla: Las variables enviadas no coinciden con los parámetros requeridos por la plantilla (Error Meta 131056)"*.
+  * `130429` / `429` (*Rate limit exceeded*): *"Límite de envíos excedido en Meta/Zernio (Error Rate Limit)"*.
+  Esto garantiza que tanto en pantalla como al descargar los reportes de fallidas (en Excel `.xlsx` o CSV), el operador y el administrador entiendan exactamente por qué no se entregó cada mensaje y qué acción comercial o técnica corresponde.
+
+---
+
+## 18. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.

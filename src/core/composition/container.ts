@@ -340,7 +340,9 @@ export function createContainer(): Container {
   );
 
   const metaSender = new WhatsAppSenderHttp(env, conversationsLogger, systemSettingsService);
-  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender, systemSettingsService);
+  // No inyectamos fallbackSender (metaSender) para evitar falsos positivos cuando
+  // la API de Meta está bloqueada o inactiva y Zernio es el proveedor configurado.
+  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, undefined, systemSettingsService);
   const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
   const mediaStorage: MediaStoragePort = new LocalMediaStorageAdapter({
     env,
@@ -946,6 +948,8 @@ export function createContainer(): Container {
     whatsappSender,
     campaignsLogger,
     messageTemplateRepo,
+    conversationRepo,
+    messageRepo,
   );
   const campaignWorker = new CampaignWorkerService(redisClient, processCampaignBatch, campaignsLogger);
   campaignWorker.startWorker();
@@ -963,7 +967,7 @@ export function createContainer(): Container {
   const getCampaign = new GetCampaignUseCase(
     campaignRepo,
     campaignRecipientRepo,
-    whatsappSender,
+    undefined,
     messageTemplateRepo,
   );
   const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);

@@ -40,9 +40,6 @@ export class DynamicWhatsAppSender implements WhatsAppSenderPort {
     if (sender.sendMedia) {
       return sender.sendMedia(input);
     }
-    if (this.metaSender.sendMedia) {
-      return this.metaSender.sendMedia(input);
-    }
     throw new Error("El proveedor activo de WhatsApp no soporta envío de archivos multimedia");
   }
 

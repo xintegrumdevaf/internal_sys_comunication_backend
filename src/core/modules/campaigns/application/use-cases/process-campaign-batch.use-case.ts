@@ -5,6 +5,10 @@ import type { CampaignRecipient } from "../../domain/campaign-recipient.entity";
 import type { Campaign } from "../../domain/campaign.entity";
 import type { CampaignRecipientRepositoryPort } from "../ports/campaign-recipient.repository.port";
 import type { CampaignRepositoryPort } from "../ports/campaign.repository.port";
+import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
+import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
+import type { ConversationStatus } from "../../../conversations/domain/conversation.entity";
+import { translateDeliveryError } from "../../../conversations/domain/meta-delivery-error";
 
 export type ProcessBatchResult = {
   finished: boolean;
@@ -69,6 +73,8 @@ export class ProcessCampaignBatchUseCase {
     private readonly whatsAppSender: WhatsAppSenderPort,
     private readonly logger: Logger,
     private readonly messageTemplateRepo?: MessageTemplateRepositoryPort,
+    private readonly conversationRepo?: ConversationRepositoryPort,
+    private readonly messageRepo?: MessageRepositoryPort,
   ) {}
 
   async execute(campaignId: string, batchSize = 10): Promise<ProcessBatchResult> {
@@ -177,6 +183,42 @@ export class ProcessCampaignBatchUseCase {
           { campaignId, recipientId: recipient.id, phone: recipient.phone, externalId: result.externalId },
           "Mensaje de campaña enviado exitosamente",
         );
+
+        if (this.conversationRepo) {
+          try {
+            const conv = await this.conversationRepo.findOrCreateByWaPhone(recipient.phone);
+
+            if (recipient.name && !conv.waProfileName) {
+              await this.conversationRepo.setWaProfileName(conv.id, recipient.name);
+            }
+
+            if (this.messageRepo) {
+              await this.messageRepo.insertOutbound({
+                conversationId: conv.id,
+                author: "agent",
+                body: finalSentBody || (campaign.templateName ? `[Plantilla: ${campaign.templateName}]` : "[Campaña]"),
+                externalId: result.externalId,
+                status: "sent",
+              });
+            }
+
+            // Aplicar chatRouting a la conversación (OPEN | PENDING | CLOSED)
+            const routing = campaign.chatRouting;
+            const rawStatus = (routing?.initialStatus ?? "CLOSED").toUpperCase();
+            const targetStatus: ConversationStatus =
+              rawStatus === "OPEN" ? "open" : rawStatus === "PENDING" ? "pending" : "closed";
+
+            // Se aplica el estado configurado en la campaña (por defecto "closed" para que no llene la bandeja de abiertos)
+            if (routing?.forceChatUpdate || !conv.activeCaseId || targetStatus === "closed") {
+              await this.conversationRepo.setStatus(conv.id, targetStatus);
+            }
+          } catch (convErr) {
+            this.logger.warn(
+              { err: convErr, phone: recipient.phone, campaignId },
+              "No se pudo sincronizar la conversación para el destinatario de la campaña",
+            );
+          }
+        }
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         const currentRetry = recipient.retryCount ?? 0;
@@ -206,8 +248,9 @@ export class ProcessCampaignBatchUseCase {
             `Fallo transitorio al enviar a destinatario; programado reintento #${nextRetry} en ${backoffMs}ms`,
           );
         } else {
+          const translatedError = translateDeliveryError(errorMessage);
           await this.recipientRepo.updateStatus(recipient.id, "FAILED", {
-            errorMessage,
+            errorMessage: translatedError,
             customBody: finalSentBody ?? recipient.customBody,
             retryCount: currentRetry,
             nextRetryAt: null,

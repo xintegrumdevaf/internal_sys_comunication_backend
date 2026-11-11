@@ -1,5 +1,7 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
+import { externalServiceError } from "../../../../../shared/errors/domain-errors";
+import { translateDeliveryError } from "../../domain/meta-delivery-error";
 import type {
   SendWhatsAppMediaInput,
   SendWhatsAppMediaOutput,
@@ -276,6 +278,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
         });
         if (!response.ok) {
           const secondErr = await response.text();
+          if (response.status === 429) {
+            this.logger.error({ status: 429, body: secondErr }, "Zernio API tasa de envíos excedida (429 Rate Limit)");
+            throw externalServiceError(
+              `Límite de solicitudes alcanzado en Zernio (429): ${secondErr || "Por favor espere unos segundos antes de reintentar."}`,
+              { retryable: true },
+            );
+          }
           if (this.fallbackSender) {
             this.logger.warn(
               { cleanPhone, secondErr },
@@ -284,7 +293,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
             return this.fallbackSender.sendText(waPhone, body);
           }
           this.logger.error({ status: response.status, body: secondErr }, "Zernio API rechazo el envio tras reintento de conversacion");
-          throw new Error(`Zernio sendText fallo (${response.status}): ${secondErr}`);
+          throw externalServiceError(`Zernio sendText fallo (${response.status}): ${secondErr}`);
         }
       } else if (
         response.status === 404 &&
@@ -317,6 +326,14 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           throw new Error(`Zernio sendText fallo (${response.status}): ${secondErr}`);
         }
       } else {
+        if (response.status === 429) {
+          this.logger.error({ status: 429, body: errorBody }, "Zernio API tasa de envíos excedida (429 Rate Limit)");
+          throw externalServiceError(
+            `Límite de solicitudes alcanzado en Zernio (429): ${errorBody || "Por favor espere unos segundos antes de reintentar."}`,
+            { retryable: true },
+          );
+        }
+
         if (this.fallbackSender) {
           this.logger.warn(
             { cleanPhone, status: response.status, errorBody },
@@ -325,7 +342,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           return this.fallbackSender.sendText(waPhone, body);
         }
         this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de mensaje");
-        throw new Error(`Zernio sendText fallo (${response.status}): ${errorBody}`);
+        throw externalServiceError(`Zernio sendText fallo (${response.status}): ${errorBody}`);
       }
     }
 
@@ -604,6 +621,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
       if (!response.ok) {
         const secondErr = await response.text().catch(() => errorBody);
+        if (response.status === 429) {
+          this.logger.error({ status: 429, body: secondErr, type: input.type }, "Zernio API tasa de envíos excedida al enviar media (429 Rate Limit)");
+          throw externalServiceError(
+            `Límite de solicitudes alcanzado en Zernio (429): ${secondErr || "Por favor espere unos segundos antes de reintentar."}`,
+            { retryable: true },
+          );
+        }
         if (this.fallbackSender?.sendMedia) {
           this.logger.warn(
             { cleanPhone, status: response.status, secondErr, type: input.type },
@@ -615,7 +639,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           { status: response.status, body: secondErr, type: input.type },
           "Zernio API rechazo el envio de archivo multimedia",
         );
-        throw new Error(`Zernio sendMedia fallo (${response.status}): ${secondErr}`);
+        throw externalServiceError(`Zernio sendMedia fallo (${response.status}): ${secondErr}`);
       }
     }
 
@@ -713,6 +737,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           throw new Error(`Zernio sendTemplate fallo (${response.status}): ${secondErr}`);
         }
       } else {
+        if (response.status === 429) {
+          this.logger.error({ status: 429, body: errorBody }, "Zernio API tasa de envíos excedida al enviar plantilla (429 Rate Limit)");
+          throw externalServiceError(
+            `Límite de solicitudes alcanzado en Zernio (429): ${errorBody || "Por favor espere unos segundos antes de reintentar."}`,
+            { retryable: true },
+          );
+        }
         if (this.fallbackSender) {
           this.logger.warn(
             { cleanPhone, templateName, status: response.status, errorBody },
@@ -721,7 +752,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           return this.fallbackSender.sendTemplate(waPhone, templateName, languageCode, parameters);
         }
         this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de plantilla");
-        throw new Error(`Zernio sendTemplate fallo (${response.status}): ${errorBody}`);
+        throw externalServiceError(`Zernio sendTemplate fallo (${response.status}): ${errorBody}`);
       }
     }
 
@@ -767,13 +798,13 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       const matched = (data.messages || []).find((m) => m.id === externalId);
       if (matched) {
         if (matched.deliveryStatus === "failed") {
-          const errDetail =
+          const rawDetail =
             matched.deliveryError?.details ||
             matched.deliveryError?.message ||
             matched.deliveryError?.title ||
             "Error de entrega en Meta / WhatsApp";
-          const errCode = matched.deliveryError?.code ? ` (Meta Error ${matched.deliveryError.code})` : "";
-          return { status: "failed", errorMessage: `${errDetail}${errCode}` };
+          const translatedError = translateDeliveryError(rawDetail, matched.deliveryError?.code);
+          return { status: "failed", errorMessage: translatedError };
         }
         if (matched.deliveryStatus === "delivered" || matched.deliveryStatus === "read") {
           return { status: "delivered" };
