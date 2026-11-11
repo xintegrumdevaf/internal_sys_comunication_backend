@@ -253,5 +253,51 @@ describe("TelegramGatewayHttp", () => {
       /Telegram convirtió tu grupo en un Supergrupo/,
     );
   });
+
+  it("sendMessage reintenta en texto plano si Telegram rechaza el HTML por can't parse entities", async () => {
+    const sentPayloads: any[] = [];
+    global.fetch = vi
+      .fn()
+      .mockImplementationOnce(async (_url, init) => {
+        sentPayloads.push(JSON.parse(String(init.body)));
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: can't parse entities: Unexpected end tag",
+          }),
+        };
+      })
+      .mockImplementationOnce(async (_url, init) => {
+        sentPayloads.push(JSON.parse(String(init.body)));
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            result: {
+              message_id: 777,
+              chat: { id: -100111 },
+              date: 1700000100,
+            },
+          }),
+        };
+      });
+
+    const gateway = new TelegramGatewayHttp({
+      logger: silentLogger,
+      defaultBotToken: "bot-token-123",
+      defaultChatId: "-100111",
+    });
+
+    const result = await gateway.sendMessage({ text: "<b>Rotura</code>" });
+    expect(result.ok).toBe(true);
+    expect(result.messageId).toBe(777);
+    expect(sentPayloads).toHaveLength(2);
+    expect(sentPayloads[0].parse_mode).toBe("HTML");
+    expect(sentPayloads[1].parse_mode).toBeUndefined();
+    expect(sentPayloads[1].text).toBe("Rotura");
+  });
 });
 

@@ -5,6 +5,10 @@ import type { AnalyticsRepositoryPort } from "../../analytics/application/ports/
 import type { CaseRepositoryPort } from "../../cases/application/ports/case.repository.port";
 import type { AgentRepositoryPort } from "../../departments/application/ports/agent.repository.port";
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
+import {
+  formatWorkflowDisplayName,
+  getStartOfDayInTimeZone,
+} from "../application/helpers/telegram-formatting.helper";
 
 export interface TelegramSnapshotRouterDeps {
   analyticsRepo: AnalyticsRepositoryPort;
@@ -161,27 +165,6 @@ export function createTelegramSnapshotRouter(deps: TelegramSnapshotRouterDeps): 
   return router;
 }
 
-function getStartOfDayInTimeZone(timeZone: string): Date {
-  try {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-    const parts = formatter.formatToParts(now);
-    const year = Number(parts.find((p) => p.type === "year")?.value);
-    const month = Number(parts.find((p) => p.type === "month")?.value);
-    const day = Number(parts.find((p) => p.type === "day")?.value);
-    return new Date(Date.UTC(year, month - 1, day, 5, 0, 0));
-  } catch {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }
-}
-
 interface RenderSnapshotProps {
   overview: AnalyticsOverviewDto;
   dashboard?: {
@@ -217,19 +200,6 @@ interface RenderSnapshotProps {
   timeZone: string;
   now: Date;
   frontendUrl: string;
-}
-
-function formatWorkflowName(wf: string): string {
-  const map: Record<string, string> = {
-    SUPPORT_INTERNET: "Soporte Técnico (Internet / Fibra)",
-    BILLING: "Facturación y Cobranzas",
-    SALES: "Ventas y Planes Nuevos",
-    CHANGE_PLAN: "Cambio de Plan / Upgrade",
-    MOVE_REQUEST: "Traslado de Domicilio",
-    CANCELLATION: "Bajas y Retenciones",
-    GENERAL_INQUIRY: "Consultas Generales",
-  };
-  return map[wf] || wf.replace(/_/g, " ");
 }
 
 function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
@@ -692,7 +662,7 @@ function renderExecutiveSnapshotHtml(props: RenderSnapshotProps): string {
       .map(
         (wf) => `
       <div class="workflow-row">
-        <span><b>${formatWorkflowName(wf.workflowType)}</b></span>
+        <span><b>${formatWorkflowDisplayName(wf.workflowType)}</b></span>
         <span style="color: var(--text-muted);">${wf.count} casos (${Math.round(wf.percentage)}%)</span>
       </div>
       <div class="progress-bar-bg" style="margin-top: 2px; margin-bottom: 10px;">

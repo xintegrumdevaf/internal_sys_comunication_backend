@@ -84,7 +84,11 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
     }
   }
 
-  async sendMessage(input: SendTelegramMessageInput, token?: string): Promise<TelegramMessageResult> {
+  async sendMessage(
+    input: SendTelegramMessageInput,
+    token?: string,
+    omitParseMode = false,
+  ): Promise<TelegramMessageResult> {
     const effectiveToken = await this.resolveToken(token);
     const chatId = (input.chatId ?? this.deps.defaultChatId ?? "").trim();
     if (!chatId) {
@@ -98,9 +102,12 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
     const payload: Record<string, unknown> = {
       chat_id: chatId,
       text: input.text,
-      parse_mode: input.parseMode ?? "HTML",
       disable_notification: Boolean(input.disableNotification),
     };
+
+    if (!omitParseMode) {
+      payload.parse_mode = input.parseMode ?? "HTML";
+    }
 
     if (input.messageThreadId) {
       payload.message_thread_id = input.messageThreadId;
@@ -138,6 +145,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
             chatId: newChatId,
           },
           effectiveToken,
+          omitParseMode,
         );
         return {
           ...retryResult,
@@ -148,6 +156,19 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
       if (!response.ok || !body.ok || !body.result) {
         const desc = body.description || `HTTP ${response.status}`;
         this.deps.logger.warn({ status: response.status, description: desc, chatId }, "Telegram sendMessage rechazado");
+
+        if (!omitParseMode && desc.toLowerCase().includes("can't parse entities")) {
+          const plainText = input.text.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+          this.deps.logger.warn({ chatId }, "reintentando envío a Telegram sin parse_mode por error de entidades");
+          return this.sendMessage(
+            {
+              ...input,
+              text: plainText,
+            },
+            effectiveToken,
+            true,
+          );
+        }
 
         if (desc.toLowerCase().includes("group chat was upgraded to a supergroup")) {
           throw businessError(

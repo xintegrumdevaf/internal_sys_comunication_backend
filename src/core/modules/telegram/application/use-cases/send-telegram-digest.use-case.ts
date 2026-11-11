@@ -6,6 +6,11 @@ import type { AgentRepositoryPort } from "../../../departments/application/ports
 import type { SendTelegramAlertUseCase } from "./send-telegram-alert.use-case";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
 import type { TelegramMessageResult } from "../../domain/telegram-message.types";
+import {
+  escapeTelegramHtml,
+  formatWorkflowDisplayName,
+  getStartOfDayInTimeZone,
+} from "../helpers/telegram-formatting.helper";
 
 export interface SendTelegramDigestDeps {
   analyticsRepo: AnalyticsRepositoryPort;
@@ -189,8 +194,8 @@ export class SendTelegramDigestUseCase {
       lines.push("━━━━━━━━━━━━━━━━━━━━━━");
       lines.push(`• <b>${unattendedCases.length} caso(s) excediendo tiempo máximo de espera:</b>`);
       for (const c of unattendedCases.slice(0, 3)) {
-        const dept = c.departmentName ? `${escapeHtml(c.departmentName)}: ` : "";
-        const client = c.customerName ? escapeHtml(c.customerName) : "Cliente";
+        const dept = c.departmentName ? `${escapeTelegramHtml(c.departmentName)}: ` : "";
+        const client = c.customerName ? escapeTelegramHtml(c.customerName) : "Cliente";
         lines.push(`  ⚠️ ${dept}${client} (<b>${Math.round(c.waitMinutes)}m</b> en espera)`);
       }
     }
@@ -216,7 +221,7 @@ export class SendTelegramDigestUseCase {
         if (activeDepts.length > 0) {
           for (const dept of activeDepts) {
             const queuePart = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
-            lines.push(`• <b>${escapeHtml(dept.departmentName)}:</b> <b>${dept.activeCases} activos${queuePart}</b>`);
+            lines.push(`• <b>${escapeTelegramHtml(dept.departmentName)}:</b> <b>${dept.activeCases} activos${queuePart}</b>`);
           }
           if (idleDeptsCount > 0) {
             lines.push(`• <i>Otros departamentos sin carga (${idleDeptsCount}):</i> 0 activos | cola libre`);
@@ -235,7 +240,7 @@ export class SendTelegramDigestUseCase {
         lines.push("🏷️ <b>DEMANDA POR TIPO DE GESTIÓN</b>");
         lines.push("━━━━━━━━━━━━━━━━━━━━━━");
         for (const w of topWorkflows) {
-          lines.push(`• <b>${escapeHtml(formatWorkflowDigestName(w.workflowType))}:</b> <b>${w.count}</b> (${w.percentage}%)`);
+          lines.push(`• <b>${escapeTelegramHtml(formatWorkflowDisplayName(w.workflowType))}:</b> <b>${w.count}</b> (${w.percentage}%)`);
         }
       }
     }
@@ -247,7 +252,7 @@ export class SendTelegramDigestUseCase {
     if (infraAlerts.length > 0) {
       lines.push(`• ⚠️ <b>${infraAlerts.length} alerta(s) de concentración OLT / Sector detectadas:</b>`);
       for (const a of infraAlerts.slice(0, 3)) {
-        lines.push(`  - <b>${escapeHtml(a.oltName || a.sector)}:</b> ${a.activeCasesCount} casos concurrentes`);
+        lines.push(`  - <b>${escapeTelegramHtml(a.oltName || a.sector)}:</b> ${a.activeCasesCount} casos concurrentes`);
       }
     } else {
       lines.push("• <b>Red OLT / Fibra Óptica:</b> 🟢 Sin incidentes masivos reportados");
@@ -290,51 +295,6 @@ export class SendTelegramDigestUseCase {
 
     return result;
   }
-}
-
-function getStartOfDayInTimeZone(timeZone: string): Date {
-  try {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-    const parts = formatter.formatToParts(now);
-    const year = parts.find((p) => p.type === "year")?.value;
-    const month = parts.find((p) => p.type === "month")?.value;
-    const day = parts.find((p) => p.type === "day")?.value;
-    if (year && month && day) {
-      return new Date(`${year}-${month}-${day}T00:00:00Z`);
-    }
-  } catch {
-    // fallback a UTC midnight si la zona horaria fallara
-  }
-  const fallback = new Date();
-  fallback.setUTCHours(0, 0, 0, 0);
-  return fallback;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function formatWorkflowDigestName(workflowType: string): string {
-  const map: Record<string, string> = {
-    SUPPORT_INTERNET: "Soporte Internet / Fibra",
-    BILLING_QUERY: "Consultas de Facturación",
-    PAYMENT_REPORT: "Reporte de Pago",
-    SALES_LEAD: "Ventas y Contratación",
-    CHANGE_PLAN: "Cambio de Plan",
-    HUMAN_ESCALATION: "Derivación a Asesor",
-    GENERAL_QUERY: "Consultas Generales",
-  };
-  return map[workflowType] || workflowType.replace(/_/g, " ").toLowerCase();
 }
 
 

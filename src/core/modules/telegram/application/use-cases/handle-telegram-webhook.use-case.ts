@@ -104,8 +104,19 @@ export class HandleTelegramWebhookUseCase {
     // 6. Procesar Mensaje de Texto (comandos /resumen, /sla, /agentes, o Copilot con IA)
     if (message?.text) {
       const rawText = message.text.trim();
-      // Limpiar mención al bot al inicio si fue arrobado en un grupo (ej: "@CentinelaIsp_bot cómo venimos hoy?" -> "cómo venimos hoy?")
-      const cleanText = rawText.replace(/^@\w+[\s:,]*/i, "").trim();
+      // Limpiar menciones al bot al inicio o al final si fue arrobado en un grupo
+      const cleanText = rawText
+        .replace(/^@\w+[\s:,]*/i, "")
+        .replace(/\s+@\w*bot\b[\s:,?!.]*$/i, "")
+        .trim();
+
+      if (cleanText === "") {
+        if (!settings.commandsEnabled) {
+          return { handled: false, reason: "disabled" };
+        }
+        await this.handleHelpCommand(chatId, messageThreadId, settings);
+        return { handled: true, command: "ayuda" };
+      }
 
       if (cleanText.startsWith("/")) {
         if (!settings.commandsEnabled) {

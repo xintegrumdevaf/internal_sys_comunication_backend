@@ -208,5 +208,122 @@ describe("AnswerTelegramCopilotQuestionUseCase", () => {
     expect(msg.text).toContain("Sector: El Vecino");
     expect(msg.text).toContain("OLT-SUR-01");
   });
+
+  it("incluye desglose de ventas, departamentos, carga en vivo y tendencia de 7 días en METRICS_OVERVIEW", async () => {
+    const { useCase, sentMessages, fakeCaseRepo, fakeAnalyticsRepo } = createHarness();
+
+    (fakeCaseRepo as any).getDashboardMetrics = vi.fn().mockResolvedValue({
+      myAssignedCases: 5,
+      escalatedPending: 3,
+      waitingUser: 1,
+      resolvedToday: 0,
+      departmentBreakdown: [
+        { departmentId: "d-ventas", departmentName: "Ventas", activeCases: 2, queueCases: 1 },
+        { departmentId: "d-soporte", departmentName: "Soporte tecnico", activeCases: 2, queueCases: 1 },
+      ],
+    });
+
+    (fakeAnalyticsRepo as any).getCasesDistribution = vi
+      .fn()
+      .mockResolvedValueOnce({
+        totalCases: 2,
+        byWorkflow: [{ workflowType: "SALES", count: 2, percentage: 100 }],
+        byFinalStatus: [{ status: "COMPLETED", count: 2, percentage: 100 }],
+        topEscalationReasons: [],
+        byDepartment: [{ departmentId: "d-ventas", departmentName: "Ventas", count: 2, percentage: 100 }],
+      })
+      .mockResolvedValueOnce({
+        totalCases: 8,
+        byWorkflow: [{ workflowType: "SALES", count: 4, percentage: 50 }],
+        byFinalStatus: [],
+        topEscalationReasons: [],
+        byDepartment: [{ departmentId: "d-ventas", departmentName: "Ventas", count: 4, percentage: 50 }],
+      });
+
+    (fakeAnalyticsRepo as any).getAIEfficiency = vi.fn().mockResolvedValue({
+      overallContainmentRate: 75,
+      botCompletedCases: 3,
+      humanEscalatedCases: 1,
+      funnelDropOff: [],
+      unclearTriageCount: 0,
+    });
+
+    (fakeAnalyticsRepo as any).getAgentsPerformance = vi.fn().mockResolvedValue([
+      {
+        agentId: "a1",
+        agentName: "Carlos Agente",
+        primaryDepartmentId: "d-ventas",
+        primaryDepartmentName: "Ventas",
+        role: "agent",
+        autoAssignEnabled: true,
+        activeCasesNow: 2,
+        maxCapacityThreshold: 5,
+        casesAssigned: 3,
+        casesCompleted: 2,
+        casesTransferred: 0,
+        avgFirstResponseTimeMs: 12000,
+        avgHandlingTimeMinutes: 8,
+        fcrRatePercentage: 90,
+        avgCordialityScore: 95,
+        criticalAlertsCount: 0,
+        openCoachingNotesCount: 0,
+      },
+    ]);
+
+    const result = await useCase.execute({
+      question: "¿Cuántas ventas tuvimos hoy?",
+      chatId: "-100111",
+    });
+
+    expect(result?.ok).toBe(true);
+    const msg = sentMessages[0]!;
+    expect(msg.text).toContain("Ventas y Planes Nuevos [SALES] (2)");
+    expect(msg.text).toContain("Ventas: 2 activos | 1 en cola");
+    expect(msg.text).toContain("FCR promedio: 90% | Cordialidad media: 95/100");
+    expect(msg.text).toContain("Total casos ingresados últimos 7 días: 8");
+  });
+
+  it("enriquece AGENTS_STATUS con carga actual y calidad cuando getAgentsPerformance está disponible", async () => {
+    const { useCase, sentMessages, fakeCopilotPort, fakeAnalyticsRepo } = createHarness();
+
+    fakeCopilotPort.classifyQuestion = vi.fn().mockResolvedValue({
+      intent: "AGENTS_STATUS",
+      confidence: 0.94,
+    });
+
+    (fakeAnalyticsRepo as any).getAgentsPerformance = vi.fn().mockResolvedValue([
+      {
+        agentId: "a1",
+        agentName: "Carlos Agente",
+        primaryDepartmentId: "d-soporte",
+        primaryDepartmentName: "Soporte tecnico",
+        role: "agent",
+        autoAssignEnabled: true,
+        activeCasesNow: 3,
+        maxCapacityThreshold: 5,
+        casesAssigned: 4,
+        casesCompleted: 2,
+        casesTransferred: 0,
+        avgFirstResponseTimeMs: 15000,
+        avgHandlingTimeMinutes: 10,
+        fcrRatePercentage: 88,
+        avgCordialityScore: 92,
+        criticalAlertsCount: 0,
+        openCoachingNotesCount: 0,
+        unattendedActiveCases: 1,
+      },
+    ]);
+
+    const result = await useCase.execute({
+      question: "¿Quiénes están en turno y con cuánta carga?",
+      chatId: "-100111",
+    });
+
+    expect(result?.ok).toBe(true);
+    const msg = sentMessages[0]!;
+    expect(msg.text).toContain("activos ahora: 3/5");
+    expect(msg.text).toContain("resueltos hoy: 2");
+    expect(msg.text).toContain("FCR: 88%");
+  });
 });
 
