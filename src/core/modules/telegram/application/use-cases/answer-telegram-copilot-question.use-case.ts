@@ -141,7 +141,7 @@ export class AnswerTelegramCopilotQuestionUseCase {
     const startOfDay = getStartOfDayInTimeZone(timeZone, now);
     const sevenDaysAgo = getDaysAgoStartInTimeZone(timeZone, 7, now);
 
-    const [overview, distToday, aiEffToday, agentsPerfToday, dashboard, distLast7d] = await Promise.all([
+    const [overview, distToday, aiEffToday, agentsPerfToday, dashboard, distLast7d, agents] = await Promise.all([
       this.safeCall(() => this.deps.analyticsRepo.getOverview({ from: startOfDay, to: now }), {
         totalCases: 0,
         completedCases: 0,
@@ -178,6 +178,9 @@ export class AnswerTelegramCopilotQuestionUseCase {
             null,
           )
         : Promise.resolve(null),
+      typeof this.deps.agentRepo.list === "function"
+        ? this.safeCall(() => this.deps.agentRepo.list(), [])
+        : Promise.resolve([]),
     ]);
 
     const lines: string[] = [
@@ -229,16 +232,43 @@ export class AnswerTelegramCopilotQuestionUseCase {
       }
     }
 
-    if (dashboard) {
+    const activeAgentsList = agents.filter((a) => a.active);
+    const availableAgentsList = activeAgentsList.filter((a) => a.autoAssignEnabled);
+    const humanActiveCases = agentsPerfToday
+      ? agentsPerfToday.reduce((sum, a) => sum + a.activeCasesNow, 0)
+      : dashboard
+        ? dashboard.departmentBreakdown?.reduce(
+            (sum, d) => sum + ((d as { handledCases?: number }).handledCases ?? 0),
+            0,
+          ) || Math.max(0, overview.activeCases - (dashboard.escalatedPending ?? 0) - (dashboard.waitingUser ?? 0))
+        : overview.activeCases;
+
+    if (dashboard || activeAgentsList.length > 0) {
       lines.push("", "=== OPERACIÓN EN VIVO AHORA MISMO (Casos Abiertos en Curso) ===");
-      lines.push(`- En atención humana activa ahora: ${dashboard.myAssignedCases}`);
-      lines.push(`- En cola de espera sin asignar ahora: ${dashboard.escalatedPending}`);
-      lines.push(`- Casos en seguimiento / espera del cliente ahora: ${dashboard.waitingUser}`);
-      if (dashboard.departmentBreakdown && dashboard.departmentBreakdown.length > 0) {
-        lines.push("- Carga abierta actual por Departamento:");
-        for (const dept of dashboard.departmentBreakdown) {
-          const queueText = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
-          lines.push(`  * ${dept.departmentName}: ${dept.activeCases} activos${queueText}`);
+      if (activeAgentsList.length > 0) {
+        lines.push(
+          `- Asesores en turno: ${activeAgentsList.length} activos (${availableAgentsList.length} disponibles para asignación)`,
+        );
+      }
+      lines.push(`- En atención humana activa ahora (asignados a asesores): ${humanActiveCases}`);
+      if (agentsPerfToday && agentsPerfToday.some((a) => a.activeCasesNow > 0)) {
+        const busy = agentsPerfToday
+          .filter((a) => a.activeCasesNow > 0)
+          .map(
+            (a) =>
+              `${a.agentName} (${a.activeCasesNow} activos${a.unattendedActiveCases ? `, ${a.unattendedActiveCases} sin responder` : ""})`,
+          );
+        lines.push(`- Asesores atendiendo casos ahora: ${busy.join(", ")}`);
+      }
+      if (dashboard) {
+        lines.push(`- En cola de espera sin asignar ahora: ${dashboard.escalatedPending}`);
+        lines.push(`- Casos en seguimiento / espera del cliente ahora: ${dashboard.waitingUser}`);
+        if (dashboard.departmentBreakdown && dashboard.departmentBreakdown.length > 0) {
+          lines.push("- Carga abierta actual por Departamento:");
+          for (const dept of dashboard.departmentBreakdown) {
+            const queueText = dept.queueCases !== undefined ? ` | ${dept.queueCases} en cola` : "";
+            lines.push(`  * ${dept.departmentName}: ${dept.activeCases} activos${queueText}`);
+          }
         }
       }
     }

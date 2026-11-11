@@ -554,13 +554,12 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
     const query = `
       SELECT
         COALESCE(
-          c.context->'contract'->>'sector',
-          ct.sector,
-          'Sin Sector'
+          NULLIF(TRIM(c.context->'contract'->>'sector'), ''),
+          NULLIF(TRIM(ct.sector), '')
         ) AS sector,
         COALESCE(
-          c.context->'contract'->>'oltName',
-          ct.olt_name
+          NULLIF(TRIM(c.context->'contract'->>'oltName'), ''),
+          NULLIF(TRIM(ct.olt_name), '')
         ) AS olt_name,
         COUNT(*)::int AS active_cases_count
       FROM "case" c
@@ -569,6 +568,10 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       WHERE c.status IN ('NEW', 'ACTIVE', 'WAITING_USER', 'PAUSED', 'ESCALATED', 'HUMAN_ACTIVE')
         AND c.created_at >= $1 AND c.created_at <= $2
         AND ($3::uuid[] IS NULL OR c.department_id = ANY($3::uuid[]))
+        AND COALESCE(
+          NULLIF(TRIM(c.context->'contract'->>'sector'), ''),
+          NULLIF(TRIM(ct.sector), '')
+        ) IS NOT NULL
       GROUP BY 1, 2
       HAVING COUNT(*) > 0
       ORDER BY active_cases_count DESC
