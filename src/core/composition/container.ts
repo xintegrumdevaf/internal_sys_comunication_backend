@@ -1152,6 +1152,13 @@ export function createContainer(): Container {
     sendDigestUseCase: sendTelegramDigest,
     getSettings: () => systemSettingsService.getTelegramSettings(),
     logger: telegramLogger,
+    acquireSlotLock: async (slotKey, ttlSeconds) => {
+      const ok = await redisClient.set(`telegram:digest-slot:${slotKey}`, "1", "EX", ttlSeconds, "NX");
+      return ok === "OK";
+    },
+    releaseSlotLock: async (slotKey) => {
+      await redisClient.del(`telegram:digest-slot:${slotKey}`);
+    },
   });
   telegramDigestScheduler.start();
 
