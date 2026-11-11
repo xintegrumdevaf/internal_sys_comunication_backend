@@ -14,6 +14,7 @@ export interface TelegramGatewayHttpDeps {
   logger: Logger;
   defaultBotToken?: string;
   defaultChatId?: string;
+  getToken?: () => Promise<string | undefined> | string | undefined;
   baseUrl?: string;
   timeoutMs?: number;
 }
@@ -27,11 +28,24 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
     this.timeoutMs = deps.timeoutMs ?? 10_000;
   }
 
-  private resolveToken(explicitToken?: string): string {
+  private async resolveToken(explicitToken?: string): Promise<string> {
     const isMasked =
       typeof explicitToken === "string" &&
       (explicitToken.includes("•") || explicitToken.includes("*"));
-    const token = (!isMasked && explicitToken ? explicitToken : this.deps.defaultBotToken ?? "").trim();
+    if (!isMasked && explicitToken && explicitToken.trim() !== "") {
+      return explicitToken.trim();
+    }
+    if (this.deps.getToken) {
+      try {
+        const dynamicToken = await this.deps.getToken();
+        if (dynamicToken && !dynamicToken.includes("•") && dynamicToken.trim() !== "") {
+          return dynamicToken.trim();
+        }
+      } catch {
+        // fallback
+      }
+    }
+    const token = (this.deps.defaultBotToken ?? "").trim();
     if (!token) {
       throw businessError("Telegram botToken no está configurado ni provisto");
     }
@@ -39,7 +53,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   async getMe(token?: string): Promise<TelegramBotInfo> {
-    const effectiveToken = this.resolveToken(token);
+    const effectiveToken = await this.resolveToken(token);
     const url = `${this.baseUrl}/bot${effectiveToken}/getMe`;
 
     try {
@@ -71,7 +85,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   async sendMessage(input: SendTelegramMessageInput, token?: string): Promise<TelegramMessageResult> {
-    const effectiveToken = this.resolveToken(token);
+    const effectiveToken = await this.resolveToken(token);
     const chatId = (input.chatId ?? this.deps.defaultChatId ?? "").trim();
     if (!chatId) {
       throw businessError("chatId de Telegram no especificado en el mensaje ni en la configuración general");
@@ -163,7 +177,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   async answerCallbackQuery(input: AnswerCallbackQueryInput, token?: string): Promise<boolean> {
-    const effectiveToken = this.resolveToken(token);
+    const effectiveToken = await this.resolveToken(token);
     const url = `${this.baseUrl}/bot${effectiveToken}/answerCallbackQuery`;
 
     const payload: Record<string, unknown> = {
@@ -193,7 +207,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   async setWebhook(input: SetWebhookInput, token?: string): Promise<boolean> {
-    const effectiveToken = this.resolveToken(token);
+    const effectiveToken = await this.resolveToken(token);
     const url = `${this.baseUrl}/bot${effectiveToken}/setWebhook`;
 
     const payload: Record<string, unknown> = {
@@ -232,7 +246,7 @@ export class TelegramGatewayHttp implements TelegramGatewayPort {
   }
 
   async getRecentChats(token?: string): Promise<Array<{ id: string; title: string; type: string }>> {
-    const effectiveToken = this.resolveToken(token);
+    const effectiveToken = await this.resolveToken(token);
     const url = `${this.baseUrl}/bot${effectiveToken}/getUpdates?limit=50`;
 
     try {

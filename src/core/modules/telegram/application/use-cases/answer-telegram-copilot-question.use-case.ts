@@ -109,12 +109,15 @@ export class AnswerTelegramCopilotQuestionUseCase {
     };
 
     // 4. Enviar respuesta al chat
-    return this.deps.gateway.sendMessage({
-      chatId,
-      messageThreadId,
-      text: formattedHtml,
-      replyMarkup,
-    });
+    return this.deps.gateway.sendMessage(
+      {
+        chatId,
+        messageThreadId,
+        text: formattedHtml,
+        replyMarkup,
+      },
+      settings.botToken,
+    );
   }
 
   private async collectMetricsOverviewGroundTruth(timeZone: string): Promise<string> {

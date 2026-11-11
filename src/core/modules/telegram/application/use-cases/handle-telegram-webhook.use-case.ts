@@ -80,10 +80,13 @@ export class HandleTelegramWebhookUseCase {
 
     // 5. Procesar Callback Query (botones interactivos en línea)
     if (callbackQuery) {
-      await this.deps.gateway.answerCallbackQuery({
-        callbackQueryId: callbackQuery.id,
-        text: "Procesando consulta...",
-      });
+      await this.deps.gateway.answerCallbackQuery(
+        {
+          callbackQueryId: callbackQuery.id,
+          text: "Procesando consulta...",
+        },
+        settings.botToken,
+      );
 
       const data = callbackQuery.data ?? "";
       if (data.startsWith("cmd:")) {
@@ -154,7 +157,7 @@ export class HandleTelegramWebhookUseCase {
       }
 
       case "agentes": {
-        await this.handleAgentsCommand(chatId, messageThreadId);
+        await this.handleAgentsCommand(chatId, messageThreadId, settings);
         break;
       }
 
@@ -168,7 +171,7 @@ export class HandleTelegramWebhookUseCase {
       case "help":
       case "start":
       default: {
-        await this.handleHelpCommand(chatId, messageThreadId);
+        await this.handleHelpCommand(chatId, messageThreadId, settings);
         break;
       }
     }
@@ -200,12 +203,15 @@ export class HandleTelegramWebhookUseCase {
         "<i>Todos los clientes están siendo atendidos dentro de la ventana de servicio.</i>",
       ].join("\n");
 
-      await this.deps.gateway.sendMessage({
-        chatId,
-        messageThreadId,
-        text,
-        replyMarkup: this.buildQuickButtons(),
-      });
+      await this.deps.gateway.sendMessage(
+        {
+          chatId,
+          messageThreadId,
+          text,
+          replyMarkup: this.buildQuickButtons(),
+        },
+        settings.botToken,
+      );
       return;
     }
 
@@ -239,17 +245,21 @@ export class HandleTelegramWebhookUseCase {
       ],
     };
 
-    await this.deps.gateway.sendMessage({
-      chatId,
-      messageThreadId,
-      text: lines.join("\n"),
-      replyMarkup,
-    });
+    await this.deps.gateway.sendMessage(
+      {
+        chatId,
+        messageThreadId,
+        text: lines.join("\n"),
+        replyMarkup,
+      },
+      settings.botToken,
+    );
   }
 
   private async handleAgentsCommand(
     chatId: string,
     messageThreadId: number | undefined,
+    settings: TelegramSettings,
   ): Promise<void> {
     const allAgents = await this.deps.agentRepo.list();
     const activeAgents = allAgents.filter((a) => a.active);
@@ -271,12 +281,15 @@ export class HandleTelegramWebhookUseCase {
       }
     }
 
-    await this.deps.gateway.sendMessage({
-      chatId,
-      messageThreadId,
-      text: lines.join("\n"),
-      replyMarkup: this.buildQuickButtons(),
-    });
+    await this.deps.gateway.sendMessage(
+      {
+        chatId,
+        messageThreadId,
+        text: lines.join("\n"),
+        replyMarkup: this.buildQuickButtons(),
+      },
+      settings.botToken,
+    );
   }
 
   private async handleInfraCommand(
@@ -299,12 +312,15 @@ export class HandleTelegramWebhookUseCase {
         `No se detectan concentraciones de fallas o cortes masivos (&ge; ${minCases} casos) en ninguna OLT o sector.`,
       ].join("\n");
 
-      await this.deps.gateway.sendMessage({
-        chatId,
-        messageThreadId,
-        text,
-        replyMarkup: this.buildQuickButtons(),
-      });
+      await this.deps.gateway.sendMessage(
+        {
+          chatId,
+          messageThreadId,
+          text,
+          replyMarkup: this.buildQuickButtons(),
+        },
+        settings.botToken,
+      );
       return;
     }
 
@@ -321,17 +337,21 @@ export class HandleTelegramWebhookUseCase {
       lines.push(`  <b>Casos activos:</b> <code>${a.activeCasesCount}</code> | ${tag}`);
     }
 
-    await this.deps.gateway.sendMessage({
-      chatId,
-      messageThreadId,
-      text: lines.join("\n"),
-      replyMarkup: this.buildQuickButtons(),
-    });
+    await this.deps.gateway.sendMessage(
+      {
+        chatId,
+        messageThreadId,
+        text: lines.join("\n"),
+        replyMarkup: this.buildQuickButtons(),
+      },
+      settings.botToken,
+    );
   }
 
   private async handleHelpCommand(
     chatId: string,
     messageThreadId: number | undefined,
+    settings: TelegramSettings,
   ): Promise<void> {
     const text = [
       "🤖 <b>CENTINELA OPERATIVO - COMANDOS EJECUTIVOS</b>",
@@ -346,12 +366,15 @@ export class HandleTelegramWebhookUseCase {
       "<i>También podés interactuar tocando los botones a continuación:</i>",
     ].join("\n");
 
-    await this.deps.gateway.sendMessage({
-      chatId,
-      messageThreadId,
-      text,
-      replyMarkup: this.buildQuickButtons(),
-    });
+    await this.deps.gateway.sendMessage(
+      {
+        chatId,
+        messageThreadId,
+        text,
+        replyMarkup: this.buildQuickButtons(),
+      },
+      settings.botToken,
+    );
   }
 
   private buildQuickButtons(): TelegramInlineKeyboard {

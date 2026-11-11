@@ -1104,6 +1104,7 @@ export function createContainer(): Container {
     logger: telegramLogger,
     defaultBotToken: env.TELEGRAM_BOT_TOKEN,
     defaultChatId: env.TELEGRAM_DEFAULT_CHAT_ID,
+    getToken: async () => (await systemSettingsService.getTelegramSettings().catch(() => null))?.botToken,
   });
   const testTelegramConnection = new TestTelegramConnectionUseCase({
     gateway: telegramGateway,
