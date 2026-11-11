@@ -348,7 +348,28 @@ Endpoints para la gestión de Routers MikroTik y OLTs (administrados por `admin`
 
 ---
 
-## 17. Qué **no** es HTTP en esta API
+## 17. Centinela & Ops de Telegram (`/api/admin/settings/telegram`, `/api/v1/telegram/webhook`, `/analitica`)
+
+Gestión ejecutiva por Telegram Bot API (alertas reactivas de SLA/OLT/cola, pulso operativo programado, Copilot IA y Snapshot Ejecutivo Web):
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| `GET` | `/api/admin/settings/telegram` | `admin` | Obtiene la configuración de Telegram con `botToken` enmascarado |
+| `PUT` | `/api/admin/settings/telegram` | `admin` | Actualiza credenciales, `frontendUrl`, modo/temas, horarios de pulso, reglas del Centinela y Copilot IA |
+| `POST` | `/api/admin/settings/telegram/detect-chat` | `admin` | Consulta actualizaciones recientes (`getUpdates`) para detectar grupos/supergrupos candidatos |
+| `POST` | `/api/admin/settings/telegram/test` | `admin` | Valida el bot vía `getMe` y envía mensaje opcional de prueba (auto-persiste `migratedToChatId` si el grupo migró a supergrupo) |
+| `POST` | `/api/admin/settings/telegram/test-topic` | `admin` | Envía mensaje de prueba a un `threadId` específico dentro de un supergrupo con Temas (Forum Topics) |
+| `POST` | `/api/admin/settings/telegram/send-digest` | `admin` | Dispara envío manual inmediato (`timeLabel: "Manual"`) del Pulso Operativo Ejecutivo |
+| `POST` | `/api/admin/settings/telegram/check-alerts` | `admin` | Ejecuta una evaluación inmediata del Centinela Reactivo (brechas SLA, cortes OLT, saturación de cola) |
+| `POST` | `/api/admin/settings/telegram/test-alert` | `admin` | Envía una alerta simulada (`category`: `SLA` \| `INFRASTRUCTURE` \| `QUEUE`) sin esperar incidente real |
+| `POST` | `/api/admin/settings/telegram/set-webhook` | `admin` | Registra la URL del webhook en `api.telegram.org` con `secretToken` (`webhookSecret`) |
+| `POST` | `/api/v1/telegram/webhook` | `x-telegram-bot-api-secret-token` | Receptor público de updates de Telegram (comandos `/resumen`, `/sla`, `/agentes`, callbacks y Copilot IA) |
+| `GET` | `/analitica` (`/analitica/snapshot`) | público | Snapshot Ejecutivo Web HTML responsivo en vivo (`?format=json` o `Accept: application/json` retorna payload JSON) |
+| `GET` | `/cases/:caseId` (`/case/:caseId`), `/casos`, `/bandeja`, `/settings`, `/configuracion` | público | Redirecciones HTTP `302` amigables hacia la URL pública del frontend (`frontendUrl` / `FRONTEND_URL`) |
+
+---
+
+## 18. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.

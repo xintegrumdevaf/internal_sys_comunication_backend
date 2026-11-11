@@ -218,11 +218,43 @@ isp-platform/
 │           │   └── presentation/
 │           │       └── quality.router.ts
 │           │
-│           └── realtime/             ← Etapa 7
+│           ├── realtime/             ← Etapa 7
+│           │   ├── application/
+│           │   │   └── realtime-broadcaster.ts       ← emite MESSAGE_RECEIVED/SENT, CASE_CLAIMED, etc.
+│           │   └── presentation/
+│           │       └── realtime.router.ts   ← WebSocket/SSE, 03_API_CONTRACT.md §C.3
+│           │
+│           └── telegram/             ← Centinela & Ops por Telegram + Snapshot Web /analitica
+│               ├── domain/
+│               │   ├── telegram-config.entity.ts
+│               │   └── telegram-message.types.ts
 │               ├── application/
-│               │   └── realtime-broadcaster.ts       ← emite MESSAGE_RECEIVED/SENT, CASE_CLAIMED, etc.
+│               │   ├── helpers/
+│               │   │   └── telegram-formatting.helper.ts
+│               │   ├── ports/
+│               │   │   ├── telegram-ai-copilot.port.ts
+│               │   │   └── telegram-gateway.port.ts
+│               │   ├── services/
+│               │   │   ├── alert-cooldown-cache.service.ts
+│               │   │   ├── telegram-alert-watcher.service.ts
+│               │   │   └── telegram-digest-scheduler.service.ts
+│               │   └── use-cases/
+│               │       ├── answer-telegram-copilot-question.use-case.ts
+│               │       ├── check-system-alerts.use-case.ts
+│               │       ├── handle-telegram-webhook.use-case.ts
+│               │       ├── send-telegram-alert.use-case.ts
+│               │       ├── send-telegram-digest.use-case.ts
+│               │       └── test-telegram-connection.use-case.ts
+│               ├── infrastructure/
+│               │   ├── ai/
+│               │   │   └── telegram-ai-copilot.adapter.ts
+│               │   └── http/
+│               │       └── telegram-gateway.http.ts
 │               └── presentation/
-│                   └── realtime.router.ts   ← WebSocket/SSE, 03_API_CONTRACT.md §C.3
+│                   ├── telegram.router.ts
+│                   ├── telegram-snapshot.router.ts
+│                   ├── telegram-snapshot.renderer.ts
+│                   └── telegram-snapshot.styles.ts
 │
 ├── n8n/                               ← Etapa 4, exportables .json de los workflows de acción de 04_N8N_WORKFLOW_SPEC.md
 │   ├── validate-client.json
@@ -239,6 +271,7 @@ isp-platform/
     ├── ai/
     ├── escalation/
     ├── quality/
+    ├── telegram/
     └── e2e/
         └── support-internet-flow.e2e.test.ts   ← caso A del brief original: no tengo internet → resolver
 ```

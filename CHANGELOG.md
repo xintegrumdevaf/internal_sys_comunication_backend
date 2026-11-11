@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.14] - 2026-11-11
+
+### Added & Improved
+- **Módulo Telegram Ops & Centinela Ejecutivo (`src/core/modules/telegram`)**: Implementación completa de supervisión operativa por Telegram Bot API con arquitectura hexagonal:
+  - **Gateway HTTP resiliente (`TelegramGatewayHttp`)**: Resolución dinámica de `botToken` mediante `getToken` (leyendo cambios guardados sin reiniciar el proceso e ignorando tokens enmascarados `•`/`*`), autodetección de grupos recientes (`getRecentChats`), manejo automático de migración de grupo a supergrupo (`migrate_to_chat_id` con auto-persistencia en `defaultChatId`) y fallback automático a texto plano cuando Telegram rechaza formato HTML (`400 Bad Request` por entidades).
+  - **Centinela Reactivo (`TelegramAlertWatcherService`, `CheckSystemAlertsUseCase`, `AlertCooldownCacheService`)**: Evaluación periódica de brechas SLA (`SLA`), caídas masivas por sector/OLT (`INFRASTRUCTURE`) y saturación de colas (`QUEUE`) con reglas configurables (`alertRules`), simulación por categoría (`/api/admin/settings/telegram/test-alert`) y deduplicación por cooldown.
+  - **Pulso Operativo Programado (`TelegramDigestSchedulerService`, `SendTelegramDigestUseCase`)**: Programación horaria por zona horaria (`timeZone`, default `America/Guayaquil`) con sondeo cada 15 segundos, verificación inicial al segundo 1 tras arranque, ventana de tolerancia de 3 minutos (`graceMinutes: 3`) y lock distribuido en Redis (`telegram:digest-slot:*`) para evitar pérdidas ante reinicios o duplicados entre réplicas.
+  - **Webhook Bidireccional & Copilot IA (`POST /api/v1/telegram/webhook`, `HandleTelegramWebhookUseCase`, `TelegramAiCopilotAdapter`, `AnswerTelegramCopilotQuestionUseCase`)**: Soporte de comandos (`/resumen`, `/sla`, `/agentes`) y botones interactivos. Clasificación semántica con IA cubriendo métricas comerciales/ventas, facturación, soporte técnico, FCR y desglose por departamentos; grounding determinístico en PostgreSQL (conteo global de atención humana activa y asesores disponibles reales) y sanitización/balanceo de HTML con `sanitizeTelegramHtml`.
+  - **Snapshot Ejecutivo Web (`GET /analitica`, `/analitica/snapshot`) y Redirecciones SPA**: Panel HTML oscuro responsivo en tiempo real (con soporte `?format=json`) y redirecciones HTTP `302` desde `/cases/:caseId`, `/bandeja` y `/configuracion` hacia `frontendUrl`.
+  - **Endpoints de Administración (`/api/admin/settings/telegram/*`)**: Gestión completa de credenciales, detección de chat, pruebas de conexión/temas/alertas, disparo manual de pulso y registro de webhook.
+- **Calidad y Refactorización SRP**:
+  - Extracción de estilos y renderizado HTML del snapshot en `telegram-snapshot.styles.ts` y `telegram-snapshot.renderer.ts` (cumpliendo regla `max-lines <= 400` y escape HTML con `escapeTelegramHtml`).
+  - Helpers dedicados en `telegram-formatting.helper.ts` (`getStartOfDayInTimeZone`, `sanitizeTelegramHtml`, `formatGroundTruthFallbackHtml`).
+
+### Fixed
+- **Alertas de Infraestructura OLT (`AnalyticsRepositoryPg.getInfrastructureAlerts`)**: Exclusión de registros con sector nulo o vacío para evitar falsas detecciones de corte masivo en reportes y snapshots.
+
 ## [0.2.13] - 2026-11-09
 
 - **Drenado Reactivo de Cola Departamental al Pasar Casos a "En Espera" (`ScheduleCaseUseCase`, `container.ts`, `schedule-and-close-reasons.test.ts`)**:
