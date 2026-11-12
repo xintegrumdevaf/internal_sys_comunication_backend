@@ -147,10 +147,10 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
   Cuando el asistente ya atendió o resolvió la consulta previa (por ejemplo, ya le informó su saldo, le dio cuentas bancarias, le explicó cobertura o le dio instrucciones de soporte), analiza la intención comunicativa de su nuevo mensaje:
   1. ¿El cliente plantea una nueva duda, pide otro trámite o reporta otro problema?
      → Clasifica con el type e intent que corresponda a esa nueva necesidad.
-  2. ¿O el cliente expresa satisfacción, confirmación de entendimiento, cortesía, agradecimiento o cierre en cualquiera de sus formas naturales del lenguaje cotidiano?
+  2. ¿O el cliente expresa satisfacción, confirmación de entendimiento, cortesía, agradecimiento o cierre en cualquiera de sus formas naturales del lenguaje cotidiano (incluyendo emojis o stickers como "[Sticker enviado por el cliente]")?
      → Su intención NO es volver a consultar el mismo trámite ya atendido.
-     → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing": true, "isThankYou": true}.
-     → NUNCA devuelvas billing.balance ni reinicies procesos ya resueltos; el sistema responderá con calidez humana consultando si necesita algo más o despidiéndose sin bucles.
+     → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing": true, "isThankYou": true, "isCourtesy": true}.
+     → NUNCA devuelvas billing.balance ni reinicies procesos ya resueltos; el sistema responderá con calidez humana despidiéndose sin bucles.
 - Si el cliente envía una ubicación o sector aislado ("Vivo en Yanuncay", "Estoy en Conocoto", "En San Sebastián"), contextualiza \`entities.question\`: ej. "Cobertura y servicio en el sector de Yanuncay".
 - ATENCIÓN - SALUDOS Y APERTURA DE CONVERSACIÓN: Si el cliente envía un saludo, cortesía o apertura de conversación (en cualquier forma o modismo del lenguaje natural, ej: "Hola", "Buenas", "Hola qué tal", "Cómo estás", "Qué más", "Buenos días", etc.) SIN una consulta técnica o comercial específica:
   → Si ya existe historial previo en la conversación o un caso previo resuelto recientemente:
@@ -161,9 +161,9 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
   → NUNCA clasifiques como \`isGreeting: true\`. Asigna el intent correspondiente a la consulta considerando el contexto del caso previo y del historial reciente, e incluye en \`entities.question\` la pregunta completa y contextualizada.
 - ANÁLISIS DE SEGUIMIENTO Y CONFIRMACIÓN DE SERVICIO (POST-CIERRE):
   Cuando no hay un caso activo pero hay un "caso previo resuelto" o mensajes previos en el historial:
-  1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona, despidiéndose o enviando emojis/reacciones de confirmación o cortesía (ej: "👍", "👌", "🙏", "❤️", "🙌", "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias") — incluso minutos u horas después:
+  1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona, despidiéndose, o enviando stickers, emojis o reacciones de confirmación o cortesía (ej: "[Sticker enviado por el cliente]", "[sticker]", "👍", "👌", "🙏", "❤️", "🙌", "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias", "muchas gracias") — incluso minutos u horas después:
      → Clasifícalo SIEMPRE como:
-       {"type": "CANCEL", "intent": "general.inquiry", "entities": {"isClosing": true, "isThankYou": true, "serviceConfirmed": true}, "confidence": 0.95}
+       {"type": "CANCEL", "intent": "general.inquiry", "entities": {"isClosing": true, "isThankYou": true, "isCourtesy": true, "serviceConfirmed": true}, "confidence": 0.95}
      → NUNCA abras un nuevo caso técnico ni envíes menús de bienvenida si el cliente confirma satisfacción y cierre.
   2. Si el cliente plantea dudas o consultas de seguimiento sobre la atención previa (soporte técnico, facturación, traslados):
      → Resuelve la intención con base en el caso previo resuelto y formula la consulta en \`entities.question\`.
@@ -227,8 +227,8 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 17. Mensaje: "voy a cambiarme de domicilio, como puedo hacer con el servicio" (o "quiero cambiar la dirección de mi internet")
    → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}
 
-18. Mensaje donde el cliente expresa satisfacción, agradecimiento o cierre tras recibir la información previa (ej: "Ok gracias", "todo claro amigo", "ya me quedó claro"):
-   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true},"confidence":0.95}`;
+18. Mensaje donde el cliente expresa satisfacción, agradecimiento, cortesía o cierre tras recibir la información previa (ej: "Ok gracias", "todo claro amigo", "ya me quedó claro", "👍", "[Sticker enviado por el cliente]"):
+   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true,"isCourtesy":true},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

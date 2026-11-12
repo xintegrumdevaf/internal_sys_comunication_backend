@@ -271,7 +271,9 @@ export async function parseZernioWebhookPayload(
     const rawType = (firstAttachment.type || "").toLowerCase();
     const mime = (firstAttachment.mimeType || "").toLowerCase();
     const fname = (firstAttachment.filename || firstAttachment.name || firstAttachment.url || "").toLowerCase();
-    if (rawType === "video" || mime.startsWith("video/") || /\.(mp4|mov|webm|3gp|3gpp|mkv)$/i.test(fname)) {
+    if (rawType === "sticker") {
+      type = "sticker";
+    } else if (rawType === "video" || mime.startsWith("video/") || /\.(mp4|mov|webm|3gp|3gpp|mkv)$/i.test(fname)) {
       type = "video";
     } else if (rawType === "audio" || mime.startsWith("audio/") || /\.(ogg|oga|opus|mp3|m4a|wav|aac)$/i.test(fname)) {
       type = "audio";

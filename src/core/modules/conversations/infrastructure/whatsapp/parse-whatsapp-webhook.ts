@@ -45,6 +45,7 @@ type WhatsAppInboundMessage = {
   image?: WhatsAppMediaObject;
   audio?: WhatsAppMediaObject;
   video?: WhatsAppMediaObject;
+  sticker?: WhatsAppMediaObject;
   document?: WhatsAppDocumentObject;
   interactive?: WhatsAppInteractiveReply;
   location?: WhatsAppLocationObject;
@@ -194,6 +195,16 @@ function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | n
         filename: null,
       };
     }
+    case "sticker":
+      return {
+        ...base,
+        type: "sticker",
+        body: "[sticker]",
+        mediaId: raw.sticker?.id ?? null,
+        mimeType: raw.sticker?.mime_type ?? null,
+        caption: null,
+        filename: null,
+      };
     default:
       return { ...base, body: "", mediaId: null, mimeType: null, caption: null, filename: null };
   }

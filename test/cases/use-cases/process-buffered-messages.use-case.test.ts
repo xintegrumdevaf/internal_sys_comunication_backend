@@ -1348,7 +1348,6 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     // 1. Debe haber enviado una respuesta cordial reconociendo el soporte resuelto
     expect(whatsappSender.sent).toHaveLength(1);
     expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
-    expect(whatsappSender.sent[0]!.body).toContain("funcionando correctamente");
     expect(whatsappSender.sent[0]!.body).not.toContain("¿En qué te podemos ayudar hoy? Puedes consultarnos sobre nuestros planes");
 
     // 2. NO debe haber creado un nuevo caso en la base de datos
@@ -1433,14 +1432,13 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
 
     expect(whatsappSender.sent).toHaveLength(1);
     expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
-    expect(whatsappSender.sent[0]!.body).toContain("funcionando correctamente");
 
     const allCases = await caseRepo.listByConversation(conversation.id);
     expect(allCases).toHaveLength(1);
     expect(allCases[0]!.status).toBe("COMPLETED");
   });
 
-  it("evita bucle post-cierre cuando el cliente envía varios emojis 👍 o confirmaciones repetidas tras cerrar el caso", async () => {
+  it("evita bucle post-cierre cuando el cliente envía varios emojis 👍, stickers o confirmaciones repetidas tras cerrar el caso", async () => {
     const scenario = buildScenario();
     const {
       caseRepo,
@@ -1495,7 +1493,13 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       {
         type: "CANCEL",
         intent: "general.inquiry",
-        entities: { isThankYou: true, isClosing: true },
+        entities: { isThankYou: true, isClosing: true, isCourtesy: true },
+        confidence: 0.95,
+      },
+      {
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isThankYou: true, isClosing: true, isCourtesy: true },
         confidence: 0.95,
       },
     ]);
@@ -1516,7 +1520,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
       logger: silentLogger,
     });
 
-    // 1. Cliente envía primer 👍 -> responde una sola vez con acuse breve y cordial
+    // 1. Cliente envía primer 👍 -> NLU interpreta semánticamente y responde una sola vez de forma natural
     const thumb1 = messageRepo.seedText(conversation.id, "👍");
     await useCase.execute({
       conversationId: conversation.id,
@@ -1526,7 +1530,7 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(whatsappSender.sent).toHaveLength(1);
     expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
 
-    // 2. Cliente envía segundo 👍 -> NO debe responder de nuevo
+    // 2. Cliente envía segundo 👍 -> post-close ack ya enviado, silencio absoluto
     const thumb2 = messageRepo.seedText(conversation.id, "👍");
     await useCase.execute({
       conversationId: conversation.id,
@@ -1535,12 +1539,115 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     });
     expect(whatsappSender.sent).toHaveLength(1);
 
-    // 3. Cliente envía "ok gracias" -> tampoco debe repetir la despedida en bucle
+    // 3. Cliente envía un sticker -> post-close ack ya enviado, silencio absoluto
+    const stickerMsg = messageRepo.seedText(conversation.id, "[sticker]", { type: "sticker" });
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-sticker-3",
+      messages: [stickerMsg],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+
+    // 4. Cliente envía "ok gracias" -> tampoco debe repetir la despedida en bucle
     const ackText = messageRepo.seedText(conversation.id, "ok gracias");
     await useCase.execute({
       conversationId: conversation.id,
-      correlationId: "corr-ack-3",
+      correlationId: "corr-ack-4",
       messages: [ackText],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+  });
+
+  it("interpreta semánticamente un sticker post-cierre en primera instancia y responde con despedida natural única", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen({ status: "resolved" });
+
+    const { case: prevCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: prevCase.id,
+      expectedCaseVersion: prevCase.version,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: { ...prevCase.context, closeReason: "RESOLVED" },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "system",
+      body: "🔒 Caso completado por Aracely Novillo • Motivo: Resuelto",
+      status: "sent",
+    });
+
+    let receivedTextInNLU = "";
+    const interpretationProvider = {
+      interpretMessage: async (input: { text: string }) => {
+        receivedTextInNLU = input.text;
+        return {
+          type: "CANCEL" as const,
+          intent: "general.inquiry",
+          entities: { isClosing: true, isCourtesy: true, isThankYou: true },
+          confidence: 0.95,
+        };
+      },
+    } as any;
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const stickerMsg = messageRepo.seedText(conversation.id, "[sticker]", { type: "sticker" });
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-sticker-first",
+      messages: [stickerMsg],
+    });
+
+    expect(receivedTextInNLU).toBe("[Sticker enviado por el cliente]");
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
+
+    // Sticker subsecuente -> silencio absoluto
+    const stickerMsg2 = messageRepo.seedText(conversation.id, "[sticker]", { type: "sticker" });
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-sticker-second",
+      messages: [stickerMsg2],
     });
     expect(whatsappSender.sent).toHaveLength(1);
   });

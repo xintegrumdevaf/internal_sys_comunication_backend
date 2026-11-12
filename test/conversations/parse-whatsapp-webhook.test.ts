@@ -141,6 +141,41 @@ describe("parseWhatsAppWebhookPayload — contacts[].profile.name", () => {
     const messages = parseWhatsAppWebhookPayload(payload);
     expect(messages).toHaveLength(0);
   });
+
+  it("normaliza mensajes de tipo sticker con type 'sticker' y body '[sticker]'", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                contacts: [{ profile: { name: "Carlos" }, wa_id: "593998217993" }],
+                messages: [
+                  {
+                    from: "593998217993",
+                    id: "wamid.STICKER1",
+                    type: "sticker",
+                    timestamp: "1710000010",
+                    sticker: {
+                      id: "media-sticker-1",
+                      mime_type: "image/webp",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized?.type).toBe("sticker");
+    expect(normalized?.body).toBe("[sticker]");
+    expect(normalized?.mediaId).toBe("media-sticker-1");
+    expect(normalized?.mimeType).toBe("image/webp");
+  });
 });
 
 describe("parseWhatsAppWebhookEdits", () => {

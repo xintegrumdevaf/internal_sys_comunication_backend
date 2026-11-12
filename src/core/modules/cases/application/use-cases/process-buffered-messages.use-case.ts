@@ -262,24 +262,17 @@ export class ProcessBufferedMessagesUseCase {
         (m) => !messages.some((bm) => bm.id === m.id),
       );
 
-      if (!activeAggregate && isPureAcknowledgmentEmoji(text)) {
-        if (hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase)) {
-          log.info(
-            { conversationId, text },
-            "Reacción/emoji post-cierre ya acusada previamente; omitiendo respuesta duplicada para evitar bucle",
-          );
-          return;
-        }
+      // Si no hay caso activo, ya se envió un acuse/despedida previa tras el cierre y el cliente
+      // reacciona con otro emoji o sticker sin contenido verbal, guardar silencio absoluto sin llamar a NLU.
+      if (
+        !activeAggregate &&
+        hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase) &&
+        isNonVerbalPostCloseMessage(text, messages)
+      ) {
         log.info(
-          { conversationId, text, lastWorkflowType: lastCompletedCase?.workflowType },
-          "Primera reacción/emoji post-cierre recibida: respondiendo acuse breve único sin reabrir caso",
+          { conversationId, text: text.slice(0, 60) },
+          "Reacción o sticker no verbal recibido tras acuse post-cierre; guardando silencio para evitar bucle",
         );
-        await this.deliverFixedReply({
-          conversationId,
-          correlationId,
-          body: "¡Con mucho gusto! Estamos a tus órdenes por este medio cuando lo necesites. ¡Excelente día! 🙌",
-          log,
-        });
         return;
       }
 
@@ -347,10 +340,11 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       // La IA analiza y decide el propósito real del mensaje (cierre, satisfacción o cortesía)
-      // sin depender de listas de palabras ni expresiones regulares quemadas en código
+      // sin depender de listas de emojis ni expresiones regulares quemadas en código
       const isClosingOrThankYou = Boolean(
         interpretation.entities?.isClosing ||
         interpretation.entities?.isThankYou ||
+        interpretation.entities?.isCourtesy ||
         interpretation.entities?.serviceConfirmed ||
         interpretation.type === "CANCEL",
       );
@@ -360,34 +354,30 @@ export class ProcessBufferedMessagesUseCase {
           ...interpretation,
           type: "CANCEL",
           intent: "general.inquiry",
-          entities: { ...interpretation.entities, isClosing: true, isThankYou: true },
+          entities: { ...interpretation.entities, isClosing: true, isThankYou: true, isCourtesy: true },
         };
       }
 
-      // Si no hay un caso activo y el cliente está agradeciendo o confirmando satisfacción/cierre post-atención previa:
-      // Redactar respuesta natural con composeReply adaptada a lo que el cliente escribió y NO abrir casos nuevos.
-      // Si ya se envió un acuse/despedida previa tras el cierre, guardar silencio para evitar bucles.
+      // Si no hay un caso activo y el cliente expresa agradecimiento, cortesía o cierre post-atención previa:
+      // 1) Si ya se envió un acuse/despedida previa tras el cierre, guardar silencio absoluto para evitar bucles.
+      // 2) Caso contrario, componer una despedida 100% natural con composeReply (sin plantilla mecánica).
       if (!activeAggregate && isClosingOrThankYou) {
         if (hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase)) {
           log.info(
             { conversationId, customerText: text.slice(0, 60) },
-            "Agradecimiento/confirmación post-cierre ya respondido anteriormente; omitiendo para evitar bucle",
+            "Agradecimiento/cortesía post-cierre ya respondido anteriormente; guardando silencio para evitar bucle",
           );
           return;
         }
         log.info(
           { interpretation, lastWorkflowType: lastCompletedCase?.workflowType },
-          "Agradecimiento / confirmación de servicio post-cierre recibido: redactando respuesta natural sin abrir casos nuevos",
+          "Cierre / agradecimiento / cortesía post-cierre interpretado: redactando despedida natural única",
         );
 
-        const templateHint =
-          lastCompletedCase?.workflowType === "SUPPORT_INTERNET"
-            ? "¡Con mucho gusto! Nos alegra mucho saber que todo quedó solucionado y tu servicio de internet está funcionando correctamente. Si llegas a necesitar cualquier otra ayuda, estamos a las órdenes por este medio. ¡Que tengas un excelente día! 🙌"
-            : lastCompletedCase?.workflowType === "BILLING_BALANCE"
-              ? "¡Con mucho gusto! Tu pago quedó registrado correctamente. Si tienes cualquier otra consulta sobre tu cuenta o facturación, con gusto te ayudamos. ¡Excelente día! 🙌"
-              : lastCompletedCase?.workflowType === "HOME_RELOCATION"
-                ? "¡Con mucho gusto! Seguimos atentos al seguimiento de tu traslado de domicilio. Si tienes cualquier otra inquietud, estamos para servirte. ¡Que tengas un excelente día! 🙌"
-                : "¡Con mucho gusto! Nos alegra haberte podido ayudar. Si tienes cualquier otra duda, estamos a tu disposición por este canal oficial. ¡Que tengas un excelente día! 🙌";
+        const lastAssistantOrAgentMessage = [...priorChronological]
+          .reverse()
+          .find((m) => m.direction === "outbound" && (m.author === "ai" || m.author === "agent"))
+          ?.body?.slice(0, 280);
 
         const thankYouReply = await this.deps.composeReply.execute({
           caseId: lastCompletedCase?.id ?? "none",
@@ -396,11 +386,14 @@ export class ProcessBufferedMessagesUseCase {
             action: "CLOSING_ACKNOWLEDGMENT",
             status: "COMPLETED",
             result: {
-              priorWorkflowType: lastCompletedCase?.workflowType,
-              serviceConfirmed: interpretation.entities?.serviceConfirmed ?? true,
+              priorWorkflowType: lastCompletedCase?.workflowType ?? null,
+              closeReason: previousCompletedCase?.closeReason ?? null,
+              resolutionNote: previousCompletedCase?.resolutionNote ?? null,
+              serviceConfirmed: Boolean(interpretation.entities?.serviceConfirmed),
+              customerSentSticker: messages.some((m) => m.type.toLowerCase() === "sticker"),
+              lastAssistantOrAgentMessage: lastAssistantOrAgentMessage ?? null,
             },
           },
-          templateHint,
           customerText: text,
         });
 
@@ -922,6 +915,12 @@ export class ProcessBufferedMessagesUseCase {
         continue;
       }
 
+      if (type === "sticker" || message.body?.trim().toLowerCase() === "[sticker]") {
+        parts.push("[Sticker enviado por el cliente]");
+        if (message.caption?.trim()) parts.push(message.caption.trim());
+        continue;
+      }
+
       if (type === "image") {
         try {
           const mediaUrl = message.mediaId ?? "";
@@ -1427,43 +1426,24 @@ function looksLikeClosingAckBody(body: string): boolean {
     lower.includes("a las ordenes") ||
     lower.includes("a tus órdenes") ||
     lower.includes("a tu disposición") ||
+    lower.includes("a tu disposicion") ||
+    lower.includes("a la orden") ||
+    lower.includes("un gusto") ||
     lower.includes("para servirte") ||
+    lower.includes("quedamos pendientes") ||
     lower.includes("quedó registrado correctamente")
   );
 }
 
-const ACKNOWLEDGMENT_EMOJIS = new Set([
-  "👍",
-  "👌",
-  "🙏",
-  "🤝",
-  "👏",
-  "🙌",
-  "❤",
-  "💚",
-  "💙",
-  "💜",
-  "🧡",
-  "💛",
-  "♥",
-  "😊",
-  "😁",
-  "😄",
-  "🙂",
-  "🎉",
-  "✨",
-  "✅",
-  "💯",
-]);
-
-function isPureAcknowledgmentEmoji(text: string): boolean {
-  const cleaned = text
-    .replace(/\uFE0F|\u200D/gu, "")
-    .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
-    .replace(/\s+/g, "");
-  if (!cleaned || cleaned.length > 16) return false;
-  const chars = Array.from(cleaned);
-  return chars.length > 0 && chars.every((ch) => ACKNOWLEDGMENT_EMOJIS.has(ch));
+function isNonVerbalPostCloseMessage(text: string, messages: Message[]): boolean {
+  if (messages.length > 0 && messages.every((m) => m.type.toLowerCase() === "sticker")) {
+    return true;
+  }
+  const stripped = text
+    .replace(/\[Sticker enviado por el cliente\]/gi, "")
+    .replace(/\[sticker\]/gi, "")
+    .trim();
+  return !/[\p{L}\p{N}]/u.test(stripped);
 }
 
 function hasAlreadySentPostCloseAck(

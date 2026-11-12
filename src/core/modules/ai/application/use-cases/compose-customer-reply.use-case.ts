@@ -34,14 +34,21 @@ export class ComposeCustomerReplyUseCase {
       return rendered;
     }
 
-    const composed = (await this.provider.composeReply(input)).trim();
-    if (looksLikeRawJson(composed)) {
-      return "Estamos procesando tu solicitud. En breve te damos más información.";
+    const fallbackMessage =
+      input.stepOutcome?.action === "CLOSING_ACKNOWLEDGMENT"
+        ? "¡Con mucho gusto! Quedamos a tu disposición si necesitas algo más."
+        : "Estamos procesando tu solicitud. En breve te damos más información.";
+
+    try {
+      const composed = (await this.provider.composeReply(input)).trim();
+      if (looksLikeRawJson(composed)) {
+        return fallbackMessage;
+      }
+      const cleaned = cleanResidualPlaceholders(composed);
+      return cleaned.length > 0 ? cleaned : fallbackMessage;
+    } catch {
+      return fallbackMessage;
     }
-    const cleaned = cleanResidualPlaceholders(composed);
-    return cleaned.length > 0
-      ? cleaned
-      : "Estamos procesando tu solicitud. En breve te damos más información.";
   }
 }
 

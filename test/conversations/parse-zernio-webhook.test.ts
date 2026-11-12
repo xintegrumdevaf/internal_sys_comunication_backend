@@ -203,6 +203,38 @@ describe("parseZernioWebhookPayload", () => {
     expect(normalized!.body).toBe("[video]");
     expect(normalized!.filename).toBe("router_recording.mp4");
   });
+
+  it("identifica sticker si rawType es 'sticker' evitando ser confundido con imagen", async () => {
+    const payload = {
+      id: "evt_stk1",
+      event: "message.received",
+      message: {
+        id: "msg_stk_1",
+        conversationId: "conv_xyz",
+        platform: "whatsapp",
+        platformMessageId: "wamid.STK101",
+        direction: "incoming",
+        text: "",
+        attachments: [
+          {
+            type: "sticker",
+            filename: "sticker.webp",
+            url: "https://zernio.com/api/v1/whatsapp/media/1042377638962976/sticker_test",
+            mimeType: "image/webp",
+          },
+        ],
+        sender: {
+          id: "593994844050",
+          name: "Marcela Carpio",
+        },
+      },
+    };
+
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.type).toBe("sticker");
+    expect(normalized!.body).toBe("[sticker]");
+  });
 });
 
 describe("verifyZernioSignature", () => {

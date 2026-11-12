@@ -20,7 +20,10 @@ export class FakeAIProvider implements AIProviderPort {
   });
 
   composeImpl: (input: ComposeReplyInput) => Promise<string> = async (input) =>
-    input.templateHint?.trim() || "Mensaje de negocio.";
+    input.templateHint?.trim() ||
+    (input.stepOutcome?.action === "CLOSING_ACKNOWLEDGMENT"
+      ? "¡Con mucho gusto! Que tengas un excelente día."
+      : "Mensaje de negocio.");
 
   transcribeImpl: (mediaUrl: string, mimeType: string) => Promise<{ transcript: string }> = async () => ({
     transcript: "",
