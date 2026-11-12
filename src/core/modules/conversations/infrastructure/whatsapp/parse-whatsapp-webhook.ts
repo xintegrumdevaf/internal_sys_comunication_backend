@@ -219,9 +219,9 @@ function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | n
         type: "sticker",
         body: "[sticker]",
         mediaId: raw.sticker?.id ?? null,
-        mimeType: raw.sticker?.mime_type ?? null,
+        mimeType: raw.sticker?.mime_type ?? "image/webp",
         caption: null,
-        filename: null,
+        filename: "sticker.webp",
       };
     default:
       return { ...base, body: "", mediaId: null, mimeType: null, caption: null, filename: null };

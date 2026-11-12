@@ -84,8 +84,10 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       const uploadUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${creds.phoneNumberId}/media`;
       const form = new FormData();
       form.append("messaging_product", "whatsapp");
-      form.append("type", input.mimeType || "application/octet-stream");
-      const filename = input.filename || `adjunto.${input.type === "image" ? "jpg" : input.type === "video" ? "mp4" : input.type === "audio" ? "ogg" : "pdf"}`;
+      form.append("type", input.type === "sticker" ? "image/webp" : (input.mimeType || "application/octet-stream"));
+      const filename =
+        input.filename ||
+        `adjunto.${input.type === "image" ? "jpg" : input.type === "video" ? "mp4" : input.type === "audio" ? "ogg" : input.type === "sticker" ? "webp" : "pdf"}`;
       const blob = new Blob([new Uint8Array(input.buffer)], {
         type: input.mimeType || "application/octet-stream",
       });
@@ -122,7 +124,7 @@ export class WhatsAppSenderHttp implements WhatsAppSenderPort {
       ? { id: uploadedMediaId }
       : { link: input.mediaUrl };
 
-    if (input.caption && input.type !== "audio") {
+    if (input.caption && input.type !== "audio" && input.type !== "sticker") {
       mediaPayload.caption = input.caption;
     }
     if (input.type === "document" && input.filename) {

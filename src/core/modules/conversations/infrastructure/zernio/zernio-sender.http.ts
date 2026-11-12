@@ -485,7 +485,12 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           const putRes = await fetch(uploadUrl, {
             method: "PUT",
             headers: {
-              "Content-Type": mimeType === "application/octet-stream" ? "application/pdf" : mimeType,
+              "Content-Type":
+                input.type === "sticker"
+                  ? "image/webp"
+                  : mimeType === "application/octet-stream"
+                    ? "application/pdf"
+                    : mimeType,
             },
             body: new Uint8Array(input.buffer),
           });
@@ -555,7 +560,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     const buildPayload = (accId: string, includeParticipant: boolean): Record<string, unknown> => ({
       accountId: accId,
       ...(includeParticipant ? { participantId: cleanPhone } : {}),
-      ...(captionText ? { message: captionText } : {}),
+      ...(captionText && input.type !== "sticker" ? { message: captionText } : {}),
       attachmentUrl,
       attachmentType: zernioAttachmentType,
       ...(input.filename ? { attachmentName: input.filename } : {}),

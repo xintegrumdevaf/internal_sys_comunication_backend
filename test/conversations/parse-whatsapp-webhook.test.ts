@@ -175,6 +175,7 @@ describe("parseWhatsAppWebhookPayload — contacts[].profile.name", () => {
     expect(normalized?.body).toBe("[sticker]");
     expect(normalized?.mediaId).toBe("media-sticker-1");
     expect(normalized?.mimeType).toBe("image/webp");
+    expect(normalized?.filename).toBe("sticker.webp");
   });
 });
 

@@ -36,6 +36,28 @@ describe("ReplyAsHumanUseCase — solo lectura para agentes no asignados (docs/s
     expect(message.author).toBe("agent");
   });
 
+  it("permite enviar un sticker y normaliza body como [sticker] sin caption", async () => {
+    const { conversationRepo, agentRepo, useCase } = build();
+    const conversation = conversationRepo.createOpen();
+    const agent = agentRepo.seed({ name: "Sticker Agent", email: "stk@isp.local", role: "agent" });
+
+    const message = await useCase.execute({
+      conversationId: conversation.id,
+      agentUserId: agent.id,
+      body: "este texto no debe ir al cliente",
+      media: {
+        buffer: Buffer.from("RIFF....WEBPVP8 "),
+        mimeType: "image/webp",
+        filename: "saludo.webp",
+        type: "sticker",
+      },
+    });
+
+    expect(message.type).toBe("sticker");
+    expect(message.body).toBe("[sticker]");
+    expect(message.caption).toBeNull();
+  });
+
   it("permite responder al agente asignado del caso HUMAN_ACTIVE", async () => {
     const { conversationRepo, caseRepo, agentRepo, departmentRepo, useCase } = build();
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });

@@ -12,7 +12,7 @@ export type WhatsAppInteractiveListSection = {
   }>;
 };
 
-export type WhatsAppMediaType = "image" | "video" | "audio" | "document";
+export type WhatsAppMediaType = "image" | "video" | "audio" | "document" | "sticker";
 
 export type SendWhatsAppMediaInput = {
   waPhone: string;

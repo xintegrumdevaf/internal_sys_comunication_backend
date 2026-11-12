@@ -66,7 +66,8 @@ export function resolveWhatsAppMediaType(
     normalizedType === "image" ||
     normalizedType === "video" ||
     normalizedType === "audio" ||
-    normalizedType === "document"
+    normalizedType === "document" ||
+    normalizedType === "sticker"
   ) {
     return normalizedType;
   }
@@ -77,6 +78,9 @@ export function resolveWhatsAppMediaType(
   const mime = (mimeType || "").toLowerCase().trim();
   const fname = (filename || "").toLowerCase().trim();
 
+  if (normalizedType === "sticker" || (mime === "image/webp" && (fname.includes("sticker") || fname.endsWith(".webp")))) {
+    return "sticker";
+  }
   if (mime.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif)$/i.test(fname)) {
     return "image";
   }
@@ -149,7 +153,11 @@ export class ReplyAsHumanUseCase {
       const resolvedFilename =
         input.media.filename?.trim() || `adjunto-${Date.now()}${ext}`;
       const resolvedCaption =
-        resolvedMediaType === "audio" ? null : captionText.length > 0 ? captionText : null;
+        resolvedMediaType === "audio" || resolvedMediaType === "sticker"
+          ? null
+          : captionText.length > 0
+            ? captionText
+            : null;
 
       const localMediaKey = `outbound-${randomUUID()}${ext}`;
       if (mediaStorage && input.media.buffer.length > 0) {

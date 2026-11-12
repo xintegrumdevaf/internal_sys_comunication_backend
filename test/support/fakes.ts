@@ -448,6 +448,14 @@ export class WhatsAppSenderFake implements WhatsAppSenderPort {
     buttonText: string;
     sections: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").WhatsAppInteractiveListSection[];
   }> = [];
+  readonly sentMedia: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").SendWhatsAppMediaInput[] = [];
+
+  async sendMedia(
+    input: import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").SendWhatsAppMediaInput,
+  ): Promise<import("../../src/core/modules/conversations/application/ports/whatsapp-sender.port").SendWhatsAppMediaOutput> {
+    this.sentMedia.push(input);
+    return { externalId: `wamid.media.${randomUUID()}`, remoteMediaId: "remote-media-id" };
+  }
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
     this.sent.push({ waPhone, body });

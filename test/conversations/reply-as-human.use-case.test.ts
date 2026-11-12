@@ -5,7 +5,7 @@ import { env } from "../../src/shared/config/env";
 import { ConversationRepositoryPg } from "../../src/core/modules/conversations/infrastructure/postgres/conversation.repository.pg";
 import { MessageRepositoryPg } from "../../src/core/modules/conversations/infrastructure/postgres/message.repository.pg";
 import { ReplyAsHumanUseCase } from "../../src/core/modules/conversations/application/use-cases/reply-as-human.use-case";
-import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
+import type { SendWhatsAppMediaInput, SendWhatsAppMediaOutput, WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
 import { AuditRepositoryPg } from "../../src/core/modules/audit/infrastructure/postgres/audit.repository.pg";
 import { CaseRepositoryPg } from "../../src/core/modules/cases/infrastructure/postgres/case.repository.pg";
 import { silentLogger } from "../support/silent-logger";
@@ -13,10 +13,16 @@ import { silentLogger } from "../support/silent-logger";
 /** Fake del puerto (docs/skills/testing-strategy.md: fakes, no mocks fragiles). */
 class FakeWhatsAppSender implements WhatsAppSenderPort {
   public sentTo: string[] = [];
+  public sentMedia: SendWhatsAppMediaInput[] = [];
 
   async sendText(waPhone: string): Promise<{ externalId: string }> {
     this.sentTo.push(waPhone);
     return { externalId: `wamid.fake.${randomUUID()}` };
+  }
+
+  async sendMedia(input: SendWhatsAppMediaInput): Promise<SendWhatsAppMediaOutput> {
+    this.sentMedia.push(input);
+    return { externalId: `wamid.fake.media.${randomUUID()}`, remoteMediaId: "remote-sticker-id" };
   }
 
   async sendTemplate(): Promise<{ externalId: string }> {
@@ -116,5 +122,37 @@ describe("ReplyAsHumanUseCase", () => {
     await expect(
       useCase.execute({ conversationId: randomUUID(), agentUserId: randomUUID(), body: "hola" }),
     ).rejects.toMatchObject({ type: "NOT_FOUND" });
+  });
+
+  it("permite enviar un sticker (.webp) como adjunto de agente sin caption", async () => {
+    const waPhone = `+59398${randomUUID().replace(/-/g, "").slice(0, 7)}`;
+    const conversation = await conversationRepo.findOrCreateByWaPhone(waPhone);
+    const whatsappSender = new FakeWhatsAppSender();
+    const useCase = new ReplyAsHumanUseCase({ conversationRepo, messageRepo, whatsappSender, auditRepo, logger: silentLogger });
+    const agentUserId = randomUUID();
+    await pool.query(
+      `INSERT INTO agent (id, name, email, role) VALUES ($1, 'Agent Sticker', $2, 'agent')`,
+      [agentUserId, `agent-${agentUserId.slice(0, 8)}@test.local`],
+    );
+
+    const message = await useCase.execute({
+      conversationId: conversation.id,
+      agentUserId,
+      body: "este texto no debe ir como caption",
+      media: {
+        buffer: Buffer.from("RIFF....WEBPVP8 "),
+        mimeType: "image/webp",
+        filename: "saludo.webp",
+        type: "sticker",
+      },
+    });
+
+    expect(message.direction).toBe("outbound");
+    expect(message.type).toBe("sticker");
+    expect(message.body).toBe("[sticker]");
+    expect(message.caption).toBeNull();
+    expect(whatsappSender.sentMedia).toHaveLength(1);
+    expect(whatsappSender.sentMedia[0]?.type).toBe("sticker");
+    expect(whatsappSender.sentMedia[0]?.caption).toBeUndefined();
   });
 });
