@@ -502,3 +502,16 @@ All notable changes to this project will be documented in this file.
 - **Cost & Capability Tiers**: Classification of inference models into economy, balanced, and performance tiers with recommended indicators.
 - **Embedding Models Discovery**: Automated retrieval and dimension alignment for embedding models (e.g. `text-embedding-004` at 768 dims).
 - **Security & Secret Protection**: Strict payload-only credential transmission with masking and merging (`mergeSecret`), avoiding sensitive URL query parameters or credential leaks in logs/responses.
+
+## [0.2.16] - 2026-11-12
+
+### Added & Improved
+
+- **Sticker Support Documentation**: Added detailed changelog entry describing backend and frontend support for sending/receiving WhatsApp stickers, including media type handling, UI rendering, and size limits.
+- **Unassigned Case SLA Alerts**: Documented new real‑time alerts for cases without assigned agents that breach SLA, including Telegram notifications and frontend operational inbox enhancements.
+- **Telegram Operations Panel**: Updated changelog with description of the new Telegram Ops module, centinela, digests, and webhook integration.
+- **Link Handling Fixes**: Recorded improvement making URLs clickable directly in the UI, removing the need to copy‑paste links.
+- **Sticker & Emoji Handling Refactor**: Noted removal of hard‑coded message patterns for stickers/emojis and semantic detection improvements.
+- **Documentation Sync**: Added references to updated `docs/` files (`FOLDER_STRUCTURE.md`, `spec/06_BACKEND_GAPS.md`) to keep architectural docs aligned with code changes.
+
+All changes follow project conventions, pass linting, type‑checking, and full test suite.
