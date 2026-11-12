@@ -130,7 +130,11 @@ export class ListConversationsUseCase {
       }
 
       if (filter.userId) {
-        if (!filterCase || filterCase.assignedAgentId !== filter.userId) {
+        if (filter.userId === "unassigned") {
+          if (filterCase && filterCase.assignedAgentId !== null) {
+            continue;
+          }
+        } else if (!filterCase || filterCase.assignedAgentId !== filter.userId) {
           continue;
         }
       }

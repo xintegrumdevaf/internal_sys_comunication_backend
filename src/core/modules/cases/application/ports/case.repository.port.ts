@@ -100,8 +100,8 @@ export type UnattendedHumanCaseItem = {
   conversationId: string;
   departmentId: string | null;
   departmentName: string | null;
-  assignedAgentId: string;
-  assignedAgentName: string;
+  assignedAgentId: string | null;
+  assignedAgentName: string | null;
   customerName: string;
   customerPhone: string;
   waitMinutes: number;

@@ -5,6 +5,7 @@ import type { AnalyticsRepositoryPort } from "../../../analytics/application/por
 import type { SendTelegramAlertUseCase } from "./send-telegram-alert.use-case";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
 import type { AlertCooldownCacheService } from "../services/alert-cooldown-cache.service";
+import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
 export interface CheckSystemAlertsDeps {
   caseRepo: CaseRepositoryPort;
@@ -16,6 +17,7 @@ export interface CheckSystemAlertsDeps {
   appPublicUrl: string;
   frontendUrl?: string;
   logger: Logger;
+  broadcaster?: RealtimeBroadcaster;
 }
 
 export interface CheckSystemAlertsResult {
@@ -77,31 +79,52 @@ export class CheckSystemAlertsUseCase {
         );
 
         for (const item of unattendedCases) {
+          const isUnassigned = !item.assignedAgentId;
           const cooldownKey = `sla:case:${item.caseId}`;
           // Cooldown de 30 minutos por caso demorado
           if (!this.deps.cooldownCache.shouldAlert(cooldownKey, 30 * 60 * 1000)) {
             continue;
           }
 
-          const title = `Demora excesiva en atención humana (${item.waitMinutes}m)`;
-          const body = `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando respuesta del asesor.`;
+          const title = isUnassigned
+            ? `⚠️ Caso SIN ASIGNAR con demora excesiva (${item.waitMinutes}m)`
+            : `Demora excesiva en atención humana (${item.waitMinutes}m)`;
+          const body = isUnassigned
+            ? `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando atención en ${item.departmentName || "General / Sin área"}. Ningún asesor ha tomado el caso.`
+            : `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando respuesta del asesor.`;
           const actionUrl = item.conversationId
-            ? `${effectiveFrontendUrl}/bandeja?conversationId=${item.conversationId}&tab=unattended`
-            : `${effectiveFrontendUrl}/bandeja?tab=unattended`;
+            ? `${effectiveFrontendUrl}/bandeja?conversationId=${item.conversationId}&status=open`
+            : `${effectiveFrontendUrl}/bandeja?tab=unassigned`;
 
+          // 1. Notificación a Telegram (con prioridad al departamento si tiene área)
           await this.deps.sendTelegramAlert.execute({
             category: "SLA",
             severity: "CRITICAL",
             title,
             body,
             metadata: {
-              "Asesor": item.assignedAgentName,
+              "Estado": isUnassigned ? "Sin asignar (En cola)" : "Asignado",
+              "Asesor": item.assignedAgentName || "Sin asignar",
               "Departamento": item.departmentName || "General",
               "Tiempo de espera": `${item.waitMinutes} minutos`,
               "Cliente": item.customerName,
             },
-            actions: [{ label: "Abrir caso en Panel", url: actionUrl }],
+            actions: [{ label: isUnassigned ? "Tomar / Atender caso" : "Abrir caso en Panel", url: actionUrl }],
           });
+
+          // 2. Notificación en tiempo real dentro de la app (SSE para agentes del área y managers/admins)
+          if (isUnassigned && this.deps.broadcaster && item.conversationId) {
+            this.deps.broadcaster.publish({
+              type: "UNASSIGNED_SLA_BREACH",
+              caseId: item.caseId,
+              conversationId: item.conversationId,
+              departmentId: item.departmentId,
+              departmentName: item.departmentName,
+              waitMinutes: item.waitMinutes,
+              customerName: item.customerName,
+              customerPhone: item.customerPhone,
+            });
+          }
 
           slaBreachesCount++;
           alerts.push({ category: "SLA", title, targetId: item.caseId });

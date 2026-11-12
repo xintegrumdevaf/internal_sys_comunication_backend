@@ -210,6 +210,77 @@ describe("CheckSystemAlertsUseCase", () => {
     expect(sentAlerts[0]?.body).toContain("Carlos Gómez");
   });
 
+  it("detecta casos humanos sin asignar, emite alerta específica en Telegram y publica evento realtime", async () => {
+    const sentAlerts: TelegramAlertPayload[] = [];
+    const unassignedCases: UnattendedHumanCaseItem[] = [
+      {
+        caseId: "case-unassigned-1",
+        conversationId: "conv-unassigned-1",
+        departmentId: "dept-ventas",
+        departmentName: "Ventas",
+        assignedAgentId: null,
+        assignedAgentName: null,
+        customerName: "Freddy Cliente",
+        customerPhone: "+593995218384",
+        waitMinutes: 45,
+      },
+    ];
+
+    const fakeCaseRepo = {
+      findUnattendedHumanCases: vi.fn().mockResolvedValue(unassignedCases),
+    } as unknown as CaseRepositoryPort;
+    const fakeEscalationRepo = {
+      findPendingDelayedEscalations: vi.fn().mockResolvedValue([]),
+    } as unknown as EscalationRepositoryPort;
+    const fakeAnalyticsRepo = {
+      getInfrastructureAlerts: vi.fn().mockResolvedValue([]),
+    } as unknown as AnalyticsRepositoryPort;
+
+    const fakeSender = {
+      execute: vi.fn().mockImplementation(async (alert: TelegramAlertPayload) => {
+        sentAlerts.push(alert);
+        return { ok: true, messageId: 99, chatId: "-100111", date: Date.now() };
+      }),
+    } as any;
+
+    const fakeBroadcaster = {
+      publish: vi.fn(),
+    } as any;
+
+    const useCase = new CheckSystemAlertsUseCase({
+      caseRepo: fakeCaseRepo,
+      escalationRepo: fakeEscalationRepo,
+      analyticsRepo: fakeAnalyticsRepo,
+      sendTelegramAlert: fakeSender,
+      broadcaster: fakeBroadcaster,
+      getSettings: async () => baseSettings,
+      cooldownCache: new AlertCooldownCacheService(),
+      appPublicUrl: "http://localhost:3000",
+      logger: silentLogger,
+    });
+
+    const result = await useCase.execute();
+    expect(result.dispatchedCount).toBe(1);
+    expect(result.slaBreachesCount).toBe(1);
+    expect(sentAlerts).toHaveLength(1);
+    expect(sentAlerts[0]?.title).toContain("Caso SIN ASIGNAR con demora excesiva");
+    expect(sentAlerts[0]?.body).toContain("Freddy Cliente");
+    expect(sentAlerts[0]?.body).toContain("Ventas");
+    expect(sentAlerts[0]?.metadata?.["Asesor"]).toBe("Sin asignar");
+
+    // Verifica que se publicó el evento SSE en tiempo real para la app
+    expect(fakeBroadcaster.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "UNASSIGNED_SLA_BREACH",
+        caseId: "case-unassigned-1",
+        conversationId: "conv-unassigned-1",
+        departmentId: "dept-ventas",
+        departmentName: "Ventas",
+        waitMinutes: 45,
+      }),
+    );
+  });
+
   it("respeta las reglas dinámicas del Centinela (omitiendo alertas si la regla está deshabilitada)", async () => {
     const fakeCaseRepo = {
       findUnattendedHumanCases: vi.fn(),

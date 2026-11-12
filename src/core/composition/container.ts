@@ -1135,6 +1135,7 @@ export function createContainer(): Container {
     appPublicUrl: env.APP_PUBLIC_URL,
     frontendUrl: effectiveFrontendUrl,
     logger: telegramLogger,
+    broadcaster,
   });
   const telegramAlertWatcher = new TelegramAlertWatcherService({
     checkAlertsUseCase: checkSystemAlerts,

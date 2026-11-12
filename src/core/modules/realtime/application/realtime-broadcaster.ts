@@ -87,6 +87,16 @@ export type RealtimeEvent =
       scheduleTag?: string;
     }
   | {
+      type: "UNASSIGNED_SLA_BREACH";
+      caseId: string;
+      conversationId: string;
+      departmentId: string | null;
+      departmentName?: string | null;
+      waitMinutes: number;
+      customerName: string;
+      customerPhone?: string;
+    }
+  | {
       type: "MESSAGE_TEMPLATE_UPDATED";
       templateId: string;
       metaTemplateId: string | null;
@@ -181,6 +191,13 @@ export class RealtimeBroadcaster {
         return sub.role === "manager";
       }
       // shared: cualquier agente; restricted se afina vía membership cuando exista listMemberships.
+      return sub.departmentIds.has(event.departmentId) || sub.role === "manager";
+    }
+
+    if (event.type === "UNASSIGNED_SLA_BREACH") {
+      if (event.departmentId === null) {
+        return sub.role === "manager";
+      }
       return sub.departmentIds.has(event.departmentId) || sub.role === "manager";
     }
 

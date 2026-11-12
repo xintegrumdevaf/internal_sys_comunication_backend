@@ -77,7 +77,11 @@ export class SearchConversationsUseCase {
       }
 
       if (input.userId) {
-        if (!filterCase || filterCase.assignedAgentId !== input.userId) {
+        if (input.userId === "unassigned") {
+          if (filterCase && filterCase.assignedAgentId !== null) {
+            continue;
+          }
+        } else if (!filterCase || filterCase.assignedAgentId !== input.userId) {
           continue;
         }
       }
