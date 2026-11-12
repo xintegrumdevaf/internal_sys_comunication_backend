@@ -121,6 +121,7 @@ export class SearchConversationsUseCase {
           }
         }
 
+        const scheduling = activeAggregate.context?.schedulingMetadata;
         activeCaseDto = {
           id: activeAggregate.id,
           status: activeAggregate.status,
@@ -134,6 +135,8 @@ export class SearchConversationsUseCase {
             ? autoState.enabled
             : activeAggregate.status !== "HUMAN_ACTIVE" && activeAggregate.status !== "ESCALATED",
           disabledReason: autoState?.disabledReason ?? null,
+          scheduledAt: scheduling?.scheduledAt ?? null,
+          scheduleTag: scheduling?.scheduleTag ?? null,
         };
       }
 

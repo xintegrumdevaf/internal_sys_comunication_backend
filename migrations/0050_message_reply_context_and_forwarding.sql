@@ -13,3 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_message_reply_to_ext
 CREATE INDEX IF NOT EXISTS idx_message_reply_to_id
   ON message (reply_to_message_id)
   WHERE reply_to_message_id IS NOT NULL;
+

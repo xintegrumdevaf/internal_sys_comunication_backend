@@ -163,13 +163,13 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
     Formula en \`entities.question\` la consulta completa: ej. "¿Cuánto cuestan los planes de internet y qué promociones de instalación tienen?".
 - RAZONAMIENTO PRAGMÁTICO DE LA INTENCIÓN DEL CLIENTE (SIN TÉRMINOS RÍGIDOS — CERO BUCLES):
   Tu labor principal es razonar y descubrir qué quiere lograr el cliente dentro del hilo de la conversación, sin depender de listas de palabras ni términos fijos.
-  Cuando el asistente ya atendió o resolvió la consulta previa (por ejemplo, ya le informó su saldo, le dio cuentas bancarias, le explicó cobertura o le dio instrucciones de soporte), analiza la intención comunicativa de su nuevo mensaje:
-  1. ¿El cliente plantea una nueva duda, pide otro trámite o reporta otro problema?
+  Cuando el asistente o un asesor humano ya atendió, coordinó o resolvió la consulta previa (por ejemplo, coordinó una visita técnica, agendó un seguimiento para una fecha posterior, acordó una fecha de pago, informó saldo o dio instrucciones de soporte), analiza la intención comunicativa de su nuevo mensaje:
+  1. ¿El cliente plantea una nueva duda, pide otro trámite, reporta otro problema o solicita modificar la fecha/hora agendada?
      → Clasifica con el type e intent que corresponda a esa nueva necesidad.
-  2. ¿O el cliente expresa satisfacción, confirmación de entendimiento, cortesía, agradecimiento o cierre en cualquiera de sus formas naturales del lenguaje cotidiano (incluyendo emojis o stickers como "[Sticker enviado por el cliente]")?
-     → Su intención NO es volver a consultar el mismo trámite ya atendido.
-     → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing": true, "isThankYou": true, "isCourtesy": true}.
-     → NUNCA devuelvas billing.balance ni reinicies procesos ya resueltos; el sistema responderá con calidez humana despidiéndose sin bucles.
+  2. ¿O el cliente expresa satisfacción, confirmación de entendimiento, conformidad con la fecha de visita/seguimiento ("nos vemos el viernes", "esperaré la visita", "de acuerdo", "ahí les espero", etc.), cortesía, agradecimiento o cierre en cualquiera de sus formas naturales del lenguaje cotidiano (incluyendo emojis como 👍 o stickers)?
+     → Su intención NO es reabrir el trámite ni exigir una réplica inmediata del asesor.
+     → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing": true, "isThankYou": true, "isCourtesy": true, "agreementConfirmed": true}.
+     → NUNCA devuelvas billing.balance ni reinicies procesos ya resueltos; el sistema mantendrá la atención en espera sin bucles.
 - Si el cliente envía una ubicación o sector aislado ("Vivo en Yanuncay", "Estoy en Conocoto", "En San Sebastián"), contextualiza \`entities.question\`: ej. "Cobertura y servicio en el sector de Yanuncay".
 - ATENCIÓN - SALUDOS Y APERTURA DE CONVERSACIÓN: Si el cliente envía un saludo, cortesía o apertura de conversación (en cualquier forma o modismo del lenguaje natural, ej: "Hola", "Buenas", "Hola qué tal", "Cómo estás", "Qué más", "Buenos días", etc.) SIN una consulta técnica o comercial específica:
   → Si ya existe historial previo en la conversación o un caso previo resuelto recientemente:

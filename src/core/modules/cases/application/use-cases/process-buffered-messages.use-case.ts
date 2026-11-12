@@ -83,18 +83,106 @@ export class ProcessBufferedMessagesUseCase {
           null;
       }
 
-      if (targetCase?.context.schedulingMetadata?.scheduledAt) {
-        log.info(
-          {
-            caseId: targetCase.id,
-            scheduledAt: targetCase.context.schedulingMetadata.scheduledAt,
-          },
-          "conversación en espera de retoma humana: silenciando bot",
-        );
-        await this.deps.caseRepo.setAutomationEnabled(targetCase.id, false, {
-          reason: "scheduled_human_followup",
-        });
-        return;
+      const scheduledMetadata = targetCase?.context.schedulingMetadata;
+      if (targetCase && scheduledMetadata?.scheduledAt) {
+        const currentScheduledCase = targetCase;
+        const scheduledAtStr = scheduledMetadata.scheduledAt;
+        const scheduledTime = new Date(scheduledAtStr).getTime();
+        const nowMs = Date.now();
+        const isScheduledInFuture = !Number.isNaN(scheduledTime) && scheduledTime > nowMs;
+
+        if (isScheduledInFuture) {
+          log.info(
+            {
+              caseId: currentScheduledCase.id,
+              scheduledAt: scheduledAtStr,
+            },
+            "conversación en espera de retoma humana agendada: silenciando bot y evaluando intención",
+          );
+          await this.deps.caseRepo.setAutomationEnabled(currentScheduledCase.id, false, {
+            reason: "scheduled_human_followup",
+          });
+
+          // Analizar la intención del mensaje recibido durante la espera agendada
+          const priorMessages = await this.deps.messageRepo.listByConversation(conversationId, {
+            limit: 10,
+          });
+          const inboundIds = new Set(messages.map((m) => m.id));
+          const priorChronological = [...priorMessages]
+            .reverse()
+            .filter((m) => !inboundIds.has(m.id) && m.author !== "system");
+
+          const recentMessagesForNlu = priorChronological
+            .map((m) => ({ author: m.author, body: m.body?.trim() ?? "" }))
+            .filter((m) => m.body.length > 0)
+            .slice(-6);
+
+          const customerText = messages.map((m) => m.body).join(" ").trim();
+          const primaryMessageId = messages[0]?.id ?? "none";
+
+          let scheduleInterpretation = null;
+          try {
+            scheduleInterpretation = await this.deps.interpretationProvider.interpretMessage({
+              correlationId,
+              conversationId,
+              messageId: primaryMessageId,
+              text: customerText,
+              activeCase: {
+                workflowType: currentScheduledCase.workflowType,
+                pendingQuestion: `Seguimiento agendado para: ${scheduledAtStr}. Tag: ${currentScheduledCase.context.schedulingMetadata?.scheduleTag ?? "visita"}`,
+              },
+              recentMessages: recentMessagesForNlu,
+            });
+          } catch (err) {
+            log.warn({ err, caseId: currentScheduledCase.id }, "fallo NLU en mensaje durante espera agendada");
+          }
+
+          const isConfirmationOrThanks = Boolean(
+            scheduleInterpretation?.entities?.isClosing ||
+            scheduleInterpretation?.entities?.isThankYou ||
+            scheduleInterpretation?.entities?.isCourtesy ||
+            scheduleInterpretation?.entities?.agreementConfirmed ||
+            scheduleInterpretation?.type === "CANCEL",
+          );
+
+          if (isConfirmationOrThanks) {
+            log.info(
+              {
+                caseId: currentScheduledCase.id,
+                scheduledAt: scheduledAtStr,
+                customerText: customerText.slice(0, 60),
+                interpretation: scheduleInterpretation,
+              },
+              "Cliente confirmó o agradeció cita agendada: manteniendo conversación en espera y SLA pausado",
+            );
+            await this.deps.conversationRepo.setStatus(conversationId, "pending");
+            await this.deps.conversationRepo.resetUnreadCount(conversationId);
+            return;
+          }
+
+          // Si el cliente plantea dudas, quejas o pide reprogramar la fecha
+          log.info(
+            {
+              caseId: currentScheduledCase.id,
+              scheduledAt: scheduledAtStr,
+              customerText: customerText.slice(0, 60),
+              interpretation: scheduleInterpretation,
+            },
+            "Cliente solicita atención o reprogramación durante caso agendado: reabriendo para asesor humano",
+          );
+          await this.deps.conversationRepo.setStatus(conversationId, "open");
+          await this.escalateToHuman(currentScheduledCase.id, log);
+          return;
+        } else {
+          // La fecha agendada ya llegó o venció: reactivamos para el asesor humano
+          log.info(
+            { caseId: currentScheduledCase.id, scheduledAt: scheduledAtStr },
+            "Fecha agendada cumplida: reactivando caso a HUMAN_ACTIVE y abriendo conversación",
+          );
+          await this.deps.conversationRepo.setStatus(conversationId, "open");
+          await this.escalateToHuman(currentScheduledCase.id, log);
+          return;
+        }
       }
 
       const priorMessages = await this.deps.messageRepo.listByConversation(conversationId, {

@@ -399,7 +399,8 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
     if (input.role === "agent") {
       const query = `
         WITH agent_cases AS (
-          SELECT c.id, c.status, conv.unread_count,
+          SELECT c.id, c.status, conv.status AS conv_status, conv.unread_count,
+                 (c.context->'schedulingMetadata'->>'scheduledAt') AS scheduled_at,
                  EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
           FROM "case" c
           JOIN conversation conv ON conv.id = c.conversation_id
@@ -425,7 +426,12 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
           COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE')), 0)::int AS my_assigned_cases,
           COALESCE((SELECT count FROM dept_escalations), 0)::int AS escalated_pending,
           COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
-          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases
+          COALESCE(COUNT(*) FILTER (
+            WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE')
+              AND conv_status = 'open'
+              AND (scheduled_at IS NULL OR scheduled_at::timestamptz <= now())
+              AND (unread_count > 0 OR NOT has_agent_reply)
+          ), 0)::int AS unattended_cases
         FROM agent_cases;
       `;
       const { rows } = await this.pool.query(query, [input.targetUserId, input.primaryDepartmentId]);
@@ -446,7 +452,8 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
           SELECT unnest($2::uuid[]) AS dept_id
         ),
         dept_cases AS (
-          SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.unread_count,
+          SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.status AS conv_status, conv.unread_count,
+                 (c.context->'schedulingMetadata'->>'scheduledAt') AS scheduled_at,
                  EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
           FROM "case" c
           JOIN conversation conv ON conv.id = c.conversation_id
@@ -511,7 +518,12 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
           COALESCE((SELECT COUNT(conv.id)::int FROM conversation conv JOIN "case" c ON c.id = conv.active_case_id WHERE conv.status = 'open' AND c.assigned_agent_id IS NULL AND ($2::uuid[] IS NULL OR c.department_id IN (SELECT dept_id FROM dept_scope))), (SELECT count FROM dept_escalations), 0)::int AS unassigned_queue,
           COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
           COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE', 'ACTIVE')), 0)::int AS department_cases,
-          COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
+          COALESCE(COUNT(*) FILTER (
+            WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE')
+              AND conv_status = 'open'
+              AND (scheduled_at IS NULL OR scheduled_at::timestamptz <= now())
+              AND (unread_count > 0 OR NOT has_agent_reply)
+          ), 0)::int AS unattended_cases,
           COALESCE((SELECT json_agg(json_build_object('agentId', agent_id, 'agentName', agent_name, 'activeCases', active_cases)) FROM agent_loads), '[]'::json) AS team_load,
           COALESCE((SELECT json_agg(json_build_object(
             'id', department_id,
@@ -549,7 +561,8 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
     // Role === "admin"
     const query = `
       WITH all_active_cases AS (
-        SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.unread_count,
+        SELECT c.id, c.assigned_agent_id, c.status, c.department_id, conv.status AS conv_status, conv.unread_count,
+               (c.context->'schedulingMetadata'->>'scheduledAt') AS scheduled_at,
                EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent') AS has_agent_reply
         FROM "case" c
         JOIN conversation conv ON conv.id = c.conversation_id
@@ -589,7 +602,12 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
         COALESCE((SELECT count FROM all_unassigned_convs), (SELECT count FROM all_escalations), 0)::int AS unassigned_queue,
         COALESCE(COUNT(*) FILTER (WHERE status = 'WAITING_USER'), 0)::int AS waiting_user,
         COALESCE(COUNT(*), 0)::int AS department_cases,
-        COALESCE(COUNT(*) FILTER (WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE') AND (unread_count > 0 OR NOT has_agent_reply)), 0)::int AS unattended_cases,
+        COALESCE(COUNT(*) FILTER (
+          WHERE status IN ('ESCALATED', 'HUMAN_ACTIVE')
+            AND conv_status = 'open'
+            AND (scheduled_at IS NULL OR scheduled_at::timestamptz <= now())
+            AND (unread_count > 0 OR NOT has_agent_reply)
+        ), 0)::int AS unattended_cases,
         COALESCE((SELECT json_agg(json_build_object(
           'id', department_id,
           'departmentId', department_id,
@@ -651,6 +669,8 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
        LEFT JOIN customer cust ON conv.customer_id = cust.id OR (conv.customer_id IS NULL AND conv.wa_phone = cust.wa_phone)
        WHERE c.status = 'HUMAN_ACTIVE'
          AND c.assigned_agent_id IS NOT NULL
+         AND conv.status = 'open'
+         AND (c.context->'schedulingMetadata'->>'scheduledAt' IS NULL OR (c.context->'schedulingMetadata'->>'scheduledAt')::timestamptz <= now())
          AND (
            conv.unread_count > 0
            OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent')

@@ -35,6 +35,8 @@ export type ConversationDto = Conversation & {
     assignedAgentName?: string | null;
     automationEnabled: boolean;
     disabledReason?: string | null;
+    scheduledAt?: string | null;
+    scheduleTag?: string | null;
   } | null;
   /**
    * Solo en conversaciones resueltas o cerradas, cuando ya no hay caso activo.
@@ -180,6 +182,7 @@ export class ListConversationsUseCase {
           ? deptById.get(activeAggregate.departmentId)
           : undefined;
 
+        const scheduling = activeAggregate.context?.schedulingMetadata;
         activeCaseDto = {
           id: activeAggregate.id,
           status: activeAggregate.status,
@@ -193,6 +196,8 @@ export class ListConversationsUseCase {
             ? autoState.enabled
             : activeAggregate.status !== "HUMAN_ACTIVE" && activeAggregate.status !== "ESCALATED",
           disabledReason: autoState?.disabledReason ?? null,
+          scheduledAt: scheduling?.scheduledAt ?? null,
+          scheduleTag: scheduling?.scheduleTag ?? null,
         };
       }
 

@@ -67,6 +67,8 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         (SELECT COUNT(*)::int FROM "case" c_live
          JOIN conversation conv ON conv.id = c_live.conversation_id
          WHERE c_live.status IN ('ESCALATED', 'HUMAN_ACTIVE') AND c_live.assigned_agent_id IS NOT NULL
+           AND conv.status = 'open'
+           AND (c_live.context->'schedulingMetadata'->>'scheduledAt' IS NULL OR (c_live.context->'schedulingMetadata'->>'scheduledAt')::timestamptz <= now())
            AND (conv.unread_count > 0 OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c_live.id AND m.author = 'agent'))
            AND ($3::uuid[] IS NULL OR COALESCE(c_live.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c_live.id LIMIT 1)) = ANY($3::uuid[]))) AS unattended_cases,
         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_cases,
@@ -451,6 +453,8 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         JOIN conversation conv ON conv.id = c.conversation_id
         WHERE c.status IN ('ESCALATED', 'HUMAN_ACTIVE')
           AND c.assigned_agent_id IS NOT NULL
+          AND conv.status = 'open'
+          AND (c.context->'schedulingMetadata'->>'scheduledAt' IS NULL OR (c.context->'schedulingMetadata'->>'scheduledAt')::timestamptz <= now())
           AND (
             conv.unread_count > 0 
             OR NOT EXISTS (SELECT 1 FROM message m WHERE m.case_id = c.id AND m.author = 'agent')

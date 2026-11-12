@@ -143,12 +143,18 @@ export class ReceiveInboundMessageUseCase {
 
       if (!isOutbound) {
         if (conversation.status === "pending") {
-          log.info(
-            { conversationId: conversation.id },
-            "reabriendo conversacion en espera por mensaje del cliente",
-          );
-          await conversationRepo.setStatus(conversation.id, "open");
-          conversation = { ...conversation, status: "open" };
+          // Si la conversación no tiene un caso activo asociado, se reabre a open.
+          // Si tiene caso activo (ej. en espera de visita técnica o retoma humana),
+          // delegamos la reapertura a ProcessBufferedMessages para evaluar la intención NLU
+          // y no quebrar el estado de espera ante confirmaciones o agradecimientos.
+          if (!conversation.activeCaseId) {
+            log.info(
+              { conversationId: conversation.id },
+              "reabriendo conversacion en espera sin caso activo por mensaje del cliente",
+            );
+            await conversationRepo.setStatus(conversation.id, "open");
+            conversation = { ...conversation, status: "open" };
+          }
         } else if (conversation.status === "resolved" || conversation.status === "closed") {
           if (!isPoliteClosingMessage(input.body, input.type)) {
             log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
