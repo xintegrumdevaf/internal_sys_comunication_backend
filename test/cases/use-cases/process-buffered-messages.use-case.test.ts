@@ -1651,4 +1651,107 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     });
     expect(whatsappSender.sent).toHaveLength(1);
   });
+
+  it("cuando el cliente envía 'Gracias' y luego 'Ok Gracias' tras cerrar el caso, la IA despide una sola vez sin repetir plantilla ni bucle", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen({ status: "resolved" });
+
+    const { case: prevCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "BILLING_BALANCE",
+      departmentId: null,
+      context: { workflowType: "BILLING_BALANCE", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: prevCase.id,
+      expectedCaseVersion: prevCase.version,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: { ...prevCase.context, closeReason: "RESOLVED" },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    // Mensaje previo del asesor confirmando el pago y cierre del caso
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "Tu pago ha sido registrado correctamente. ¡Muchas gracias!",
+      status: "sent",
+    });
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "system",
+      body: "🔒 Caso completado por Aracely Novillo • Motivo: Resuelto",
+      status: "sent",
+    });
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isThankYou: true, isClosing: true },
+        confidence: 0.95,
+      },
+      {
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isThankYou: true, isClosing: true },
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    // 1. Cliente envía 'Gracias' -> responde una sola vez de forma cordial y natural
+    const msg1 = messageRepo.seedText(conversation.id, "Gracias");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-gracias-1",
+      messages: [msg1],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
+    expect(whatsappSender.sent[0]!.body).not.toContain("Tu pago quedó registrado correctamente");
+
+    // 2. Cliente envía 'Ok Gracias' -> silencio absoluto, no repite el mensaje ni genera bucle
+    const msg2 = messageRepo.seedText(conversation.id, "Ok Gracias");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-ok-gracias-2",
+      messages: [msg2],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+  });
 });

@@ -257,7 +257,10 @@ export class ProcessBufferedMessagesUseCase {
           : null;
 
       const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 20 });
-      const chronologicalHistory = [...rawHistory].reverse();
+      // listByConversation devuelve mensajes en orden cronológico ASCENDENTE (creados antes -> creados después)
+      const chronologicalHistory = [...rawHistory].sort(
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+      );
       const priorChronological = chronologicalHistory.filter(
         (m) => !messages.some((bm) => bm.id === m.id),
       );
@@ -512,9 +515,11 @@ export class ProcessBufferedMessagesUseCase {
         // Circuit Breaker anti-aturdimiento / anti-bucle:
         // Si el último mensaje del bot hacia el cliente ya fue una aclaración (CLARIFY),
         // no insistir por segunda vez consecutiva: escalar a triage humano.
-        const lastOutbound = rawHistory.find(
-          (m) => m.direction === "outbound" && (m.author === "ai" || m.author === "system"),
-        );
+        const lastOutbound = [...chronologicalHistory]
+          .reverse()
+          .find(
+            (m) => m.direction === "outbound" && (m.author === "ai" || m.author === "system"),
+          );
         const isConsecutiveClarify =
           lastOutbound !== undefined &&
           (lastOutbound.caption?.includes('"action":"CLARIFY"') ||
@@ -1472,8 +1477,7 @@ function hasAlreadySentPostCloseAck(
       (m) =>
         m.direction === "outbound" &&
         m.author === "ai" &&
-        m.createdAt.getTime() >= closedAtMs &&
-        looksLikeClosingAckBody(m.body),
+        m.createdAt.getTime() >= closedAtMs - 5000,
     );
     if (aiAckAfterCaseClose) {
       return true;
@@ -1483,5 +1487,8 @@ function hasAlreadySentPostCloseAck(
   const lastOutbound = [...priorChronological]
     .reverse()
     .find((m) => m.direction === "outbound" && m.author !== "system");
-  return Boolean(lastOutbound?.author === "ai" && looksLikeClosingAckBody(lastOutbound.body));
+  if (lastOutbound && lastOutbound.author === "ai") {
+    return looksLikeClosingAckBody(lastOutbound.body) || lastCompletedCase !== null;
+  }
+  return false;
 }
