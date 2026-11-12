@@ -159,4 +159,44 @@ describe("ZernioSenderHttp", () => {
       }),
     );
   });
+
+  it("lanza error 429 sin llamar a fallbackSender para evitar falsos positivos", async () => {
+    const mockFallback = {
+      sendText: vi.fn(),
+      sendMedia: vi.fn(),
+      sendTemplate: vi.fn(),
+    };
+    const sender = new ZernioSenderHttp(fakeEnv, fakeLogger, mockFallback as any);
+
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/inbox/conversations?platform=whatsapp")) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      return {
+        ok: false,
+        status: 429,
+        text: async () => JSON.stringify({ error: "Rate limit exceeded. Please retry after 17 seconds." }),
+      };
+    });
+
+    await expect(sender.sendText("593987654321", "Mensaje que satura")).rejects.toThrow(/429/);
+    expect(mockFallback.sendText).not.toHaveBeenCalled();
+  });
+
+  it("falla de forma segura cuando fallbackSender es undefined y Zernio rechaza el envío", async () => {
+    const sender = new ZernioSenderHttp(fakeEnv, fakeLogger, undefined);
+
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/inbox/conversations?platform=whatsapp")) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      return {
+        ok: false,
+        status: 400,
+        text: async () => "TEMPLATE_REQUIRED",
+      };
+    });
+
+    await expect(sender.sendText("593987654321", "Mensaje rechazado")).rejects.toThrow(/Zernio sendText fallo \(400\)/);
+  });
 });

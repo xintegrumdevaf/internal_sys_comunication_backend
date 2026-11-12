@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type Redis from "ioredis";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { ZernioHistoryPort } from "../ports/zernio-history.port";
-import type { ZernioHistorySyncWorker } from "../../infrastructure/queue/zernio-history-sync.worker";
 import {
+  type ZernioHistorySyncWorker,
   ZERNIO_HISTORY_QUEUE_KEY,
   ZERNIO_HISTORY_STATUS_KEY,
 } from "../../infrastructure/queue/zernio-history-sync.worker";

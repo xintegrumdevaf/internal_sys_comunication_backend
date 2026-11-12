@@ -4,6 +4,7 @@ import {
   CampaignRepositoryFake,
 } from "../../src/core/modules/campaigns/infrastructure/postgres/campaign.repository.pg";
 import { MessageTemplateRepositoryFake } from "../support/message-template-fakes";
+import { ConversationRepositoryFake, MessageRepositoryFake } from "../support/fakes";
 import { CampaignQueueFake } from "../../src/core/modules/campaigns/infrastructure/queue/campaign-worker.service";
 import { CampaignFileParserService } from "../../src/core/modules/campaigns/application/services/campaign-file-parser.service";
 import { CreateCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/create-campaign.use-case";
@@ -13,6 +14,8 @@ import { ProcessCampaignBatchUseCase } from "../../src/core/modules/campaigns/ap
 import { SuspendCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/suspend-campaign.use-case";
 import { ResumeCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/resume-campaign.use-case";
 import { DeleteCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/delete-campaign.use-case";
+import { ListCampaignsUseCase } from "../../src/core/modules/campaigns/application/use-cases/list-campaigns.use-case";
+import { GetCampaignUseCase } from "../../src/core/modules/campaigns/application/use-cases/get-campaign.use-case";
 import type { WhatsAppSenderPort } from "../../src/core/modules/conversations/application/ports/whatsapp-sender.port";
 import type { Logger } from "../../src/shared/logging/logger";
 import * as XLSX from "xlsx";
@@ -667,5 +670,101 @@ describe("Campaign Use Cases", () => {
 
     const counts = await campaignRepo.findById(campaign.id);
     expect(counts?.failedCount).toBe(1);
+  });
+
+  it("ListCampaignsUseCase y GetCampaignUseCase calculan progreso considerando enviados + fallidos (100% al terminar)", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña Mixta",
+      messageBody: "Hola",
+    });
+    await campaignRepo.updateTotalRecipients(campaign.id, 4);
+    // 1 enviado exitoso, 3 fallidos (como en el caso real)
+    await campaignRepo.incrementCounters(campaign.id, { sent: 1, failed: 3 });
+    await campaignRepo.updateStatus(campaign.id, "COMPLETED");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      { phone: "+593999999901", name: "User 1" },
+      { phone: "+593999999902", name: "User 2" },
+      { phone: "+593999999903", name: "User 3" },
+      { phone: "+593999999904", name: "User 4" },
+    ]);
+
+    const checkMessageStatusMock = vi.fn();
+    const mockSender = {
+      sendText: vi.fn(),
+      checkMessageStatus: checkMessageStatusMock,
+    } as unknown as WhatsAppSenderPort;
+
+    const listUseCase = new ListCampaignsUseCase(campaignRepo);
+    const getUseCase = new GetCampaignUseCase(campaignRepo, recipientRepo, mockSender);
+
+    const listResult = await listUseCase.execute();
+    expect(listResult[0]?.progress).toBe(100);
+
+    const getResult = await getUseCase.execute(campaign.id);
+    expect(getResult?.progress).toBe(100);
+    // Verifica que NO se invocó checkMessageStatus hacia servicios externos
+    expect(checkMessageStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("ProcessCampaignBatchUseCase aplica chatRouting.initialStatus = CLOSED enviando la conversación a cerrados", async () => {
+    const campaignRepo = new CampaignRepositoryFake();
+    const recipientRepo = new CampaignRecipientRepositoryFake();
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+
+    const mockSender: WhatsAppSenderPort = {
+      sendText: vi.fn().mockResolvedValue({ externalId: "wamid-batch-routing-1" }),
+      sendTemplate: vi.fn().mockResolvedValue({ externalId: "wamid-batch-routing-1" }),
+    };
+
+    const campaign = await campaignRepo.create({
+      name: "Campaña con initialStatus CLOSED",
+      messageBody: "Aviso de mantenimiento",
+      chatRouting: {
+        initialStatus: "CLOSED",
+        departmentId: null,
+        assignedAgentId: null,
+        keepAssignedToUser: false,
+        delegateToBot: true,
+        forceChatUpdate: false,
+      },
+    });
+    await campaignRepo.updateStatus(campaign.id, "RUNNING");
+
+    await recipientRepo.bulkInsert(campaign.id, [
+      { phone: "+593991234567", name: "Maria Cliente" },
+    ]);
+    await campaignRepo.updateTotalRecipients(campaign.id, 1);
+
+    const processBatch = new ProcessCampaignBatchUseCase(
+      campaignRepo,
+      recipientRepo,
+      mockSender,
+      nullLogger,
+      undefined,
+      conversationRepo,
+      messageRepo,
+    );
+
+    const result = await processBatch.execute(campaign.id);
+    expect(result.finished).toBe(true);
+    expect(result.processedCount).toBe(1);
+
+    // Verificar que la conversación se creó y su status quedó en 'closed' (bandeja de cerrados)
+    const conv = await conversationRepo.findByWaPhone("+593991234567");
+    expect(conv).toBeDefined();
+    expect(conv?.status).toBe("closed");
+    expect(conv?.waProfileName).toBe("Maria Cliente");
+
+    // Verificar que el mensaje saliente quedó insertado en el historial de la conversación
+    expect(messageRepo.messages).toHaveLength(1);
+    expect(messageRepo.messages[0]?.conversationId).toBe(conv?.id);
+    expect(messageRepo.messages[0]?.direction).toBe("outbound");
+    expect(messageRepo.messages[0]?.body).toBe("Aviso de mantenimiento");
+    expect(messageRepo.messages[0]?.externalId).toBe("wamid-batch-routing-1");
   });
 });

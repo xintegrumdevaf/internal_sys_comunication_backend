@@ -15,6 +15,11 @@ import type { MessageStatus } from "../domain/message.entity";
 
 import type { SystemSettingsService } from "../../settings/application/services/system-settings.service";
 
+import {
+  translateDeliveryError,
+  is24HourWindowError,
+} from "../domain/meta-delivery-error";
+
 export type ZernioWebhookRouterDeps = {
   env: Env;
   receiveInboundMessage: ReceiveInboundMessageUseCase;
@@ -60,28 +65,12 @@ export function parseDeliveryError(
     errDetail = errString;
   }
 
-  const is24hWindow =
-    String(errCode) === "131047" ||
-    errString.toLowerCase().includes("131047") ||
-    errString.toLowerCase().includes("24 hours") ||
-    errString.toLowerCase().includes("24-hour") ||
-    errString.toLowerCase().includes("re-engagement") ||
-    errString.toLowerCase().includes("customer service window") ||
-    errString.toLowerCase().includes("template");
-
-  if (is24hWindow) {
-    return {
-      errorMessage:
-        "Ventana de 24 horas cerrada: Han transcurrido más de 24h desde el último mensaje del cliente. WhatsApp requiere el envío de una plantilla aprobada (Template) para reabrir la conversación.",
-      is24hWindow: true,
-    };
-  }
+  const is24h = is24HourWindowError(errDetail || errString, errCode);
+  const translated = translateDeliveryError(errDetail || errString, errCode);
 
   return {
-    errorMessage:
-      errDetail ||
-      "Error de entrega en WhatsApp / Meta (Fallo registrado en Zernio)",
-    is24hWindow: false,
+    errorMessage: translated,
+    is24hWindow: is24h,
   };
 }
 

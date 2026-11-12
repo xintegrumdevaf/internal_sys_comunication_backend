@@ -4,6 +4,7 @@ import type { CampaignRepositoryPort } from "../ports/campaign.repository.port";
 import type { CampaignRecipientRepositoryPort } from "../ports/campaign-recipient.repository.port";
 import type { WhatsAppSenderPort } from "../../../conversations/application/ports/whatsapp-sender.port";
 import type { MessageTemplateRepositoryPort } from "../../../message-templates/application/ports/message-template.repository.port";
+import { translateDeliveryError } from "../../../conversations/domain/meta-delivery-error";
 
 export type CampaignDetail = Campaign & {
   progress: number;
@@ -72,7 +73,7 @@ export class GetCampaignUseCase {
     const campaign = await this.campaignRepo.findById(id);
     if (!campaign) return null;
 
-    let recipients = await this.recipientRepo.listByCampaignId(id);
+    const recipients = await this.recipientRepo.listByCampaignId(id);
 
     let templateBodyText: string | undefined;
     if (campaign.templateName && this.messageTemplateRepo) {
@@ -82,45 +83,24 @@ export class GetCampaignUseCase {
       }
     }
 
-    if (this.whatsAppSender?.checkMessageStatus) {
-      let stateChanged = false;
-      for (const r of recipients) {
-        const renderedBody = interpolateRecipientBody(campaign, r, templateBodyText);
-        if (r.status === "SENT" && r.externalId) {
-          const check = await this.whatsAppSender.checkMessageStatus(r.phone, r.externalId);
-          if (check && check.status === "failed") {
-            await this.recipientRepo.updateStatus(r.id, "FAILED", {
-              errorMessage: check.errorMessage ?? "Error de entrega en WhatsApp / Meta",
-              customBody: renderedBody || r.customBody,
-            });
-            await this.campaignRepo.incrementCounters(id, { sent: -1, failed: 1 });
-            stateChanged = true;
-          }
-        }
-      }
-      if (stateChanged) {
-        recipients = await this.recipientRepo.listByCampaignId(id);
-      }
-    }
-
-    const updatedCampaign = await this.campaignRepo.findById(id);
-    const finalCampaign = updatedCampaign || campaign;
-
+    const processedCount = campaign.sentCount + campaign.failedCount;
     const progress =
-      finalCampaign.totalRecipients > 0
-        ? Math.round((finalCampaign.sentCount / finalCampaign.totalRecipients) * 100)
+      campaign.totalRecipients > 0
+        ? Math.min(100, Math.round((processedCount / campaign.totalRecipients) * 100))
         : 0;
 
     const enrichedRecipients = recipients.map((r) => {
       const body = r.customBody || interpolateRecipientBody(campaign, r, templateBodyText);
+      const translatedErrorMessage = r.errorMessage ? translateDeliveryError(r.errorMessage) : null;
       return {
         ...r,
         customBody: body,
+        errorMessage: translatedErrorMessage,
       };
     });
 
     return {
-      ...finalCampaign,
+      ...campaign,
       progress,
       recipients: enrichedRecipients,
     };

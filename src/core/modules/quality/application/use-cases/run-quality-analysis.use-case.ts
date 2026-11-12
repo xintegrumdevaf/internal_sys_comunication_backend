@@ -10,8 +10,10 @@ import {
   mergeQualityFindings,
 } from "../../domain/final-quality-review";
 import { extractAgentConversationFragment } from "../../domain/agent-conversation-fragment";
-import type { QualityReviewDetail } from "../ports/quality-review.repository.port";
-import type { QualityReviewRepositoryPort } from "../ports/quality-review.repository.port";
+import type {
+  QualityReviewDetail,
+  QualityReviewRepositoryPort,
+} from "../ports/quality-review.repository.port";
 
 const BODY_TRUNCATE = 800;
 

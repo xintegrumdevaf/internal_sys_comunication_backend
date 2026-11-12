@@ -1,7 +1,6 @@
 import { businessError, notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { Case, CaseStatus } from "../../domain/case.entity";
-import { ACTIVATABLE_CASE_STATUSES } from "../../domain/case.entity";
+import { ACTIVATABLE_CASE_STATUSES, type Case, type CaseStatus } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { EnqueueQualityReviewService } from "../../../quality/application/services/enqueue-quality-review.service";

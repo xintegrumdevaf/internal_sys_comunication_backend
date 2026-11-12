@@ -15,9 +15,10 @@ export class ListCampaignsUseCase {
     const campaigns = await this.campaignRepo.list(filter);
 
     return campaigns.map((campaign) => {
+      const processedCount = campaign.sentCount + campaign.failedCount;
       const progress =
         campaign.totalRecipients > 0
-          ? Math.round((campaign.sentCount / campaign.totalRecipients) * 100)
+          ? Math.min(100, Math.round((processedCount / campaign.totalRecipients) * 100))
           : 0;
 
       return {

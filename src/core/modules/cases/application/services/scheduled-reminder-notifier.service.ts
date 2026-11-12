@@ -1,7 +1,6 @@
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
-import type { CaseSchedulingMetadata } from "../../domain/contexts/case-context";
 
 export class ScheduledReminderNotifierService {
   private timer: NodeJS.Timeout | null = null;

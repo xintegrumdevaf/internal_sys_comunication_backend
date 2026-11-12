@@ -1,4 +1,4 @@
-import { authorizationError, notFound } from "../../../../../shared/errors/domain-errors";
+import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Escalation, EscalationSummary } from "../../domain/escalation.entity";
 import type { EscalationRepositoryPort } from "../ports/escalation.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";

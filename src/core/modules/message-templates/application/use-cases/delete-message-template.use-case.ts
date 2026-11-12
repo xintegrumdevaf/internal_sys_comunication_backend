@@ -19,7 +19,7 @@ export class DeleteMessageTemplateUseCase {
     if (template.metaTemplateId) {
       try {
         await this.deps.metaGateway.deleteTemplate(template.metaTemplateId, template.name);
-      } catch (error) {
+      } catch {
         // Se intenta borrar de Meta; si falla, se procede con el borrado local
       }
     }

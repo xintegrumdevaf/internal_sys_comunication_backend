@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.14] - 2026-11-11
+## [0.2.15] - 2026-11-12
 
 ### Added & Improved
 - **Módulo Telegram Ops & Centinela Ejecutivo (`src/core/modules/telegram`)**: Implementación completa de supervisión operativa por Telegram Bot API con arquitectura hexagonal:
@@ -12,12 +12,68 @@ All notable changes to this project will be documented in this file.
   - **Webhook Bidireccional & Copilot IA (`POST /api/v1/telegram/webhook`, `HandleTelegramWebhookUseCase`, `TelegramAiCopilotAdapter`, `AnswerTelegramCopilotQuestionUseCase`)**: Soporte de comandos (`/resumen`, `/sla`, `/agentes`) y botones interactivos. Clasificación semántica con IA cubriendo métricas comerciales/ventas, facturación, soporte técnico, FCR y desglose por departamentos; grounding determinístico en PostgreSQL (conteo global de atención humana activa y asesores disponibles reales) y sanitización/balanceo de HTML con `sanitizeTelegramHtml`.
   - **Snapshot Ejecutivo Web (`GET /analitica`, `/analitica/snapshot`) y Redirecciones SPA**: Panel HTML oscuro responsivo en tiempo real (con soporte `?format=json`) y redirecciones HTTP `302` desde `/cases/:caseId`, `/bandeja` y `/configuracion` hacia `frontendUrl`.
   - **Endpoints de Administración (`/api/admin/settings/telegram/*`)**: Gestión completa de credenciales, detección de chat, pruebas de conexión/temas/alertas, disparo manual de pulso y registro de webhook.
-- **Calidad y Refactorización SRP**:
-  - Extracción de estilos y renderizado HTML del snapshot en `telegram-snapshot.styles.ts` y `telegram-snapshot.renderer.ts` (cumpliendo regla `max-lines <= 400` y escape HTML con `escapeTelegramHtml`).
-  - Helpers dedicados en `telegram-formatting.helper.ts` (`getStartOfDayInTimeZone`, `sanitizeTelegramHtml`, `formatGroundTruthFallbackHtml`).
+- **Calidad, CI/CD, Documentación y Seguridad**:
+  - Extracción de estilos y renderizado HTML del snapshot en `telegram-snapshot.styles.ts` y `telegram-snapshot.renderer.ts` (cumpliendo regla `max-lines <= 400` y escape HTML con `escapeTelegramHtml`), y helpers dedicados en `telegram-formatting.helper.ts`.
+  - Validación de `pnpm run lint` y `pnpm run build:prod` incorporada al pipeline `.github/workflows/deploy.yml`, sincronización de `docs/FOLDER_STRUCTURE.md`, limpieza de warnings ESLint no destructivos y eliminación del archivo residual `Untitled` del seguimiento de Git.
 
 ### Fixed
 - **Alertas de Infraestructura OLT (`AnalyticsRepositoryPg.getInfrastructureAlerts`)**: Exclusión de registros con sector nulo o vacío para evitar falsas detecciones de corte masivo en reportes y snapshots.
+
+## [0.2.14] - 2026-11-11
+
+- **Eliminación de Falsos Positivos de Envío por Fallback Silencioso a Meta Cloud API (`container.ts`, `zernio-sender.http.ts`, `dynamic-whatsapp-sender.ts`)**:
+  - *Contexto y Problema*:
+    Cuando la API de Zernio rechazaba un mensaje (por ejemplo, por límite de tasa `429 Too Many Requests`), el sistema informaba internamente `"Zernio API rechazó el envío (ej. TEMPLATE_REQUIRED); entregando directamente vía Meta Cloud API..."`, devolviendo un estado HTTP `201 Created` (`"respuesta de agente enviada por whatsapp"`). En la interfaz de usuario el mensaje figuraba como exitosamente enviado al cliente con doble check. Sin embargo, en el entorno de producción la funcionalidad de Meta Cloud API se encuentra bloqueada / no enlazada a la línea real, por lo que el cliente final jamás recibía el mensaje de WhatsApp, generando un falso positivo operativo crítico.
+  - *Causa Raíz*:
+    1. En el composition root (`container.ts`), la instancia de `metaSender` se inyectaba incondicionalmente como `fallbackSender` dentro del constructor de `ZernioSenderHttp`.
+    2. Ante cualquier fallo de Zernio (incluso saturación temporal `429 Rate Limit`), `ZernioSenderHttp` desviaba el tráfico de forma encubierta a la API Graph de Meta (`https://graph.facebook.com/v20.0/...`).
+    3. Al existir credenciales de prueba en el entorno, Meta Cloud API respondía con un identificador de mensaje (`wamid`), haciendo creer al backend que el mensaje había salido con éxito.
+  - *Resolución y Justificación*:
+    1. En `container.ts`, se deshabilitó la inyección de `fallbackSender` en `ZernioSenderHttp` (`fallbackSender = undefined`), estableciendo a Zernio como la única fuente autoritativa de despacho configurada.
+    2. En `zernio-sender.http.ts`, se protegió la ruta de Rate Limit: ante una respuesta `429`, el sistema aborta de inmediato y lanza un `EXTERNAL_SERVICE_ERROR` estructurado con la indicación de reintento, sin intentar ningún desvío a otros canales.
+    3. En `dynamic-whatsapp-sender.ts`, se eliminó el fallback residual hacia Meta en el método `sendMedia`.
+    4. Con esto, si Zernio no puede despachar un mensaje, el sistema propaga el fallo de inmediato al operador en el chat para que esté al tanto y reintente cuando expire la ventana de Rate Limit, erradicando los falsos positivos.
+
+- **Traducción y Clarificación de Errores de Meta/WhatsApp Cloud API al Español (`meta-delivery-error.ts`, `zernio-webhook.router.ts`, `get-campaign.use-case.ts`, `process-campaign-batch.use-case.ts`)**:
+  - *Contexto y Problema*:
+    Al exportar los destinatarios fallidos en el modal de campañas o visualizarlos en pantalla, los mensajes de error aparecían en inglés crudo devuelto por la API de Meta (ej. `"In order to maintain a healthy ecosystem engagement, the message failed to be delivered. (Meta Error 131049)"`). Los operadores y administradores no comprendían con claridad la razón por la cual WhatsApp no entregó los mensajes ni qué acción tomar.
+  - *Causa Raíz*:
+    Los webhooks y respuestas de entrega de Zernio/Meta almacenaban directamente las cadenas en inglés provistas por los servidores de Cloud API sin traducción ni normalización orientada al negocio.
+  - *Resolución y Justificación*:
+    1. Se creó el módulo `meta-delivery-error.ts` que mapea y traduce los códigos oficiales de Meta Cloud API (`131049`, `131047`, `131026`, `131051`, `131056`, `132000`, `130429`, etc.) a descripciones amigables en español.
+    2. En el caso del error `131049`, se explica con exactitud el motivo comercial: *"Límite de protección de Meta: Meta bloqueó la entrega para evitar saturar al destinatario con mensajes de marketing/campaña (Error Meta 131049)"*.
+    3. `GetCampaignUseCase` aplica automáticamente la traducción sobre los destinatarios al consultar la campaña, garantizando que tanto los registros históricos como los nuevos muestren la causa en español.
+    4. En el frontend, se incorporó la descarga directa en formato Microsoft Excel nativo (`.xlsx`) y CSV con columnas separadas (`Teléfono`, `Nombre`, `Motivo del Fallo`, `Fecha de Envío`) y textos en español.
+
+- **Optimización de Desempeño en Consulta de Campañas y Eliminación del Cuello de Botella HTTP contra Zernio (`get-campaign.use-case.ts`, `container.ts`)**:
+  - *Contexto y Problema*:
+    Al acceder a la vista o métricas de una campaña desde el panel de administración (`GET /api/campaigns/:id`), las peticiones HTTP tardaban entre 68 y 73 segundos (`durationMs: 70300`), provocando bloqueos y timeouts en el frontend. Simultáneamente, la API de Zernio quedaba saturada con errores `429 Too Many Requests (currentCount: 61, limit: 60)`, impidiendo que los asesores humanos y el bot de IA pudieran despachar mensajes normales de WhatsApp en las conversaciones activas.
+  - *Causa Raíz*:
+    En `GetCampaignUseCase`, la consulta ejecutaba un bucle síncrono `for (const r of recipients)` invocando `checkMessageStatus(r.phone, r.externalId)` vía peticiones HTTP secuenciales a Zernio por cada destinatario con estado `SENT`. En campañas de 50 a 100 contactos, esto disparaba decenas de llamadas consecutivas en una sola solicitud web, consumiendo de forma instantánea la cuota por minuto de Zernio (límite: 60 peticiones/min) y reteniendo el hilo de ejecución durante más de un minuto.
+  - *Resolución y Justificación*:
+    1. Se eliminó la verificación síncrona por polling HTTP en `GetCampaignUseCase`.
+    2. La arquitectura del sistema delega el seguimiento de entrega de mensajes a los Webhooks asíncronos (`message.delivered`, `message.failed` procesados en `zernio-webhook.router.ts`), los cuales ya persisten los cambios directamente en la base de datos sin llamadas de salida activas.
+    3. Gracias a este cambio, el tiempo de respuesta del endpoint `GET /api/campaigns/:id` pasó de 70.000 ms a menos de 10 ms, eliminando por completo los bloqueos por Rate Limit 429 para toda la empresa.
+
+- **Cálculo Preciso del Avance de Campaña ante Destinatarios Fallidos (`list-campaigns.use-case.ts`, `get-campaign.use-case.ts`)**:
+  - *Contexto y Problema*:
+    En campañas donde varios contactos fallaban (por ejemplo, debido a políticas de Meta como el error `131049 - Marketing Frequency Capping`), la tabla general de campañas mostraba un avance inconsistente de `1 / 4 (25%)` a pesar de que el estado de la campaña figuraba como `TERMINADO` y la totalidad de los 4 contactos habían sido procesados.
+  - *Causa Raíz*:
+    El cálculo de progreso en `ListCampaignsUseCase` y `GetCampaignUseCase` utilizaba la fórmula `(sentCount / totalRecipients) * 100`. Al completarse 1 envío exitoso y 3 fallidos, `sentCount` tenía valor 1, reflejando erróneamente un 25% de progreso en una campaña ya finalizada.
+  - *Resolución y Justificación*:
+    Se modificó la fórmula para basarse en el total de destinatarios procesados: `progress = Math.min(100, Math.round(((sentCount + failedCount) / totalRecipients) * 100))`. De este modo, la tabla y los modales muestran correctamente `4 / 4 (100%) TERMINADO`, mientras que el desglose interno detalla los enviados y fallidos con su causa exacta.
+
+- **Enrutamiento de Campañas a la Bandeja de "Cerrados" y Prevención de Inundación de la Bandeja de "Abiertos" (`process-campaign-batch.use-case.ts`, `container.ts`, `campaign-use-cases.test.ts`)**:
+  - *Contexto y Problema*:
+    Tras despachar una campaña masiva, todas las conversaciones creadas se volcaban automáticamente a la "Bandeja de abiertos" de los asesores, llenando la bandeja operativa con chats donde el cliente aún no había respondido nada.
+  - *Causa Raíz*:
+    `ProcessCampaignBatchUseCase` enviaba el mensaje a través de WhatsApp pero no administraba la entidad `conversation` en la base de datos local. Al recibir Zernio el mensaje saliente, el webhook devolvía un eco que invocaba `findOrCreateByWaPhone`, creando la conversación con el valor por defecto de PostgreSQL (`status = 'open'`) y omitiendo la configuración de comportamiento de la campaña (`chatRouting.initialStatus = 'CLOSED'`).
+  - *Resolución y Justificación*:
+    1. Se inyectaron `conversationRepo` y `messageRepo` en `ProcessCampaignBatchUseCase`.
+    2. Al enviar cada mensaje del lote, el caso de uso registra de inmediato la conversación y persiste el mensaje saliente con su `externalId`.
+    3. Se aplica el estado definido en `chatRouting.initialStatus`: si la campaña está configurada como cerrada (`initialStatus: "CLOSED"`), la conversación se establece inmediatamente en `status: "closed"`, manteniéndola en la bandeja de Cerrados.
+    4. Al registrarse previamente el mensaje con su `externalId`, el webhook de eco saliente de Zernio es reconocido como mensaje local existente (`findRecentOutbound`), evitando que se reabra indebidamente.
+    5. Si el cliente contesta en WhatsApp con una consulta real, `ReceiveInboundMessageUseCase` detecta el mensaje entrante, lo reabre automáticamente a `status: "open"` y la IA (Gemini) toma el caso con el historial del mensaje de la campaña para clasificarlo y atenderlo. Si el cliente responde únicamente una cortesía ("gracias", "ok"), permanece en `closed`.
 
 ## [0.2.13] - 2026-11-09
 

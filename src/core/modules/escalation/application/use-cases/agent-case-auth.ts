@@ -1,12 +1,12 @@
 import {
   authorizationError,
   notFound,
+  validationError,
 } from "../../../../../shared/errors/domain-errors";
 import type { Agent } from "../../../departments/domain/agent.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { Case } from "../../../cases/domain/case.entity";
-import { validationError } from "../../../../../shared/errors/domain-errors";
 
 export async function resolveActingAgent(
   agentRepo: AgentRepositoryPort,

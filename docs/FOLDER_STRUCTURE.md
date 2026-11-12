@@ -256,6 +256,9 @@ isp-platform/
 │                   ├── telegram-snapshot.renderer.ts
 │                   └── telegram-snapshot.styles.ts
 │
+│           ── Módulos operativos y administrativos adicionales (misma estructura hexagonal domain/application/infrastructure/presentation):
+│              analytics, auth, campaigns, coverage, customers, internal_chat, message-templates, quick-replies, settings, tags
+│
 ├── n8n/                               ← Etapa 4, exportables .json de los workflows de acción de 04_N8N_WORKFLOW_SPEC.md
 │   ├── validate-client.json
 │   ├── check-balance.json
@@ -265,12 +268,29 @@ isp-platform/
 │   └── apply-bank-account.json
 │
 └── test/
-    ├── conversations/
-    ├── ingestion/
-    ├── cases/
     ├── ai/
+    ├── analytics/
+    ├── audit/
+    ├── auth/
+    ├── campaigns/
+    ├── cases/
+    ├── conversations/
+    ├── coverage/
+    ├── customers/
+    ├── departments/
     ├── escalation/
+    ├── hardening/
+    ├── ingestion/
+    ├── internal-chat/
+    ├── message-templates/
+    ├── monitoring/
     ├── quality/
+    ├── quick-replies/
+    ├── realtime/
+    ├── settings/
+    ├── shared/
+    ├── support/
+    ├── tags/
     ├── telegram/
     └── e2e/
         └── support-internet-flow.e2e.test.ts   ← caso A del brief original: no tengo internet → resolver

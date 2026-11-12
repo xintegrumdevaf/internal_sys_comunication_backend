@@ -68,7 +68,6 @@ import { MessageRepositoryPg } from "../modules/conversations/infrastructure/pos
 import { WhatsAppSenderHttp } from "../modules/conversations/infrastructure/whatsapp/whatsapp-sender.http";
 import { ZernioSenderHttp } from "../modules/conversations/infrastructure/zernio/zernio-sender.http";
 import { DynamicWhatsAppSender } from "../modules/conversations/infrastructure/dynamic-whatsapp-sender";
-import type { WhatsAppSenderPort } from "../modules/conversations/application/ports/whatsapp-sender.port";
 import { ReceiveInboundMessageUseCase } from "../modules/conversations/application/use-cases/receive-inbound-message.use-case";
 import { ReceiveInboundEditUseCase } from "../modules/conversations/application/use-cases/receive-inbound-edit.use-case";
 import { ListConversationsUseCase } from "../modules/conversations/application/use-cases/list-conversations.use-case";
@@ -130,7 +129,6 @@ import { OllamaAdapter } from "../modules/ai/infrastructure/ollama/ollama-adapte
 import { GeminiAdapter } from "../modules/ai/infrastructure/gemini/gemini-adapter";
 import { DynamicAiProvider } from "../modules/ai/infrastructure/dynamic/dynamic-ai-provider";
 import { DynamicEmbeddingProvider } from "../modules/ai/infrastructure/dynamic/dynamic-embedding-provider";
-import { AIProviderPort } from "../modules/ai/application/ports/ai-provider.port";
 import { ComposeCustomerReplyUseCase } from "../modules/ai/application/use-cases/compose-customer-reply.use-case";
 import { TranscribeAudioUseCase } from "../modules/ai/application/use-cases/transcribe-audio.use-case";
 import { ExtractReceiptDataUseCase } from "../modules/ai/application/use-cases/extract-receipt-data.use-case";
@@ -340,7 +338,9 @@ export function createContainer(): Container {
   );
 
   const metaSender = new WhatsAppSenderHttp(env, conversationsLogger, systemSettingsService);
-  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, metaSender, systemSettingsService);
+  // No inyectamos fallbackSender (metaSender) para evitar falsos positivos cuando
+  // la API de Meta está bloqueada o inactiva y Zernio es el proveedor configurado.
+  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, undefined, systemSettingsService);
   const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
   const mediaStorage: MediaStoragePort = new LocalMediaStorageAdapter({
     env,
@@ -946,6 +946,8 @@ export function createContainer(): Container {
     whatsappSender,
     campaignsLogger,
     messageTemplateRepo,
+    conversationRepo,
+    messageRepo,
   );
   const campaignWorker = new CampaignWorkerService(redisClient, processCampaignBatch, campaignsLogger);
   campaignWorker.startWorker();
@@ -963,7 +965,7 @@ export function createContainer(): Container {
   const getCampaign = new GetCampaignUseCase(
     campaignRepo,
     campaignRecipientRepo,
-    whatsappSender,
+    undefined,
     messageTemplateRepo,
   );
   const deleteCampaign = new DeleteCampaignUseCase(campaignRepo);
@@ -1024,7 +1026,7 @@ export function createContainer(): Container {
 
   app.use(createMetricsRouter({ pgPool }));
   app.use(createHealthRouter({ pgPool, redisClient }));
-  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, redisClient, syncTemplateStatus, settingsService: systemSettingsService }));
+  app.use(createWhatsAppWebhookRouter({ env, receiveInboundMessage, receiveInboundEdit, redisClient, syncTemplateStatus, settingsService: systemSettingsService }));
   app.use(
     createZernioWebhookRouter({
       env,

@@ -1,7 +1,9 @@
 import type { Agent } from "../../../departments/domain/agent.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
-import type { AgentQualityStats } from "../ports/quality-review.repository.port";
-import type { QualityReviewRepositoryPort } from "../ports/quality-review.repository.port";
+import type {
+  AgentQualityStats,
+  QualityReviewRepositoryPort,
+} from "../ports/quality-review.repository.port";
 import { resolveQualityDepartmentScope } from "../quality-auth";
 
 export class GetAgentQualityStatsUseCase {

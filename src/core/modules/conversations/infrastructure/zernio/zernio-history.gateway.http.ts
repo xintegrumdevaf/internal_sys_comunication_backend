@@ -1,5 +1,6 @@
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
+import { translateDeliveryError } from "../../domain/meta-delivery-error";
 import type { MessageStatus } from "../../domain/message.entity";
 import type {
   ZernioHistoricalConversation,
@@ -267,15 +268,14 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
         if (rawStatus.includes("fail") || rawStatus.includes("undeliver") || rawStatus.includes("reject") || hasError) {
           status = "failed";
           const errObj = item.deliveryError;
-          const errDetail =
+          const rawDetail =
             errObj?.details ||
             errObj?.message ||
             errObj?.title ||
             (typeof item.error === "string" ? item.error : item.error?.message) ||
             item.errorMessage ||
             "Error de entrega en Meta / WhatsApp (Zernio)";
-          const errCode = errObj?.code ? ` (Meta Error ${errObj.code})` : "";
-          errorMessage = `${errDetail}${errCode}`;
+          errorMessage = translateDeliveryError(rawDetail, errObj?.code);
         } else if (rawStatus.includes("read")) {
           status = "read";
         } else if (rawStatus.includes("deliver")) {

@@ -1,8 +1,10 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Agent } from "../../../departments/domain/agent.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
-import type { QualityReviewDetail } from "../ports/quality-review.repository.port";
-import type { QualityReviewRepositoryPort } from "../ports/quality-review.repository.port";
+import type {
+  QualityReviewDetail,
+  QualityReviewRepositoryPort,
+} from "../ports/quality-review.repository.port";
 import { assertCanAccessQualityDepartment } from "../quality-auth";
 
 export class GetQualityReviewUseCase {
