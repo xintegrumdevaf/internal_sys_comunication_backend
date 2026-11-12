@@ -1,8 +1,7 @@
 import type { Pool } from "pg";
 import { withTransaction } from "../../../../../shared/db/pool";
 import { DomainError } from "../../../../../shared/errors/domain-errors";
-import type { Case, CaseStatus } from "../../domain/case.entity";
-import { TERMINAL_CASE_STATUSES } from "../../domain/case.entity";
+import { type Case, type CaseStatus, TERMINAL_CASE_STATUSES } from "../../domain/case.entity";
 import type { CaseContext } from "../../domain/contexts/case-context";
 import type { WorkflowInstance } from "../../domain/workflow-instance.entity";
 import type { AutomationState } from "../../domain/automation-state.entity";

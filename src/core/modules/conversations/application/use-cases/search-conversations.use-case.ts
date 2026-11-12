@@ -1,9 +1,7 @@
-import type { Conversation } from "../../domain/conversation.entity";
 import type { MessageAuthor } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../ports/message.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
-import type { Case } from "../../../cases/domain/case.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { ConversationDto } from "./list-conversations.use-case";
