@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveReplyTemplate } from "../../../src/core/modules/cases/application/services/resolve-reply-template";
 import { supportInternetWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/support-internet.workflow";
+import { billingBalanceWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
 import type { CaseContext } from "../../../src/core/modules/cases/domain/contexts/case-context";
 
 describe("resolveReplyTemplate — WAITING_USER_DISAMBIGUATE", () => {
@@ -78,5 +79,31 @@ describe("resolveReplyTemplate — WAITING_USER_DISAMBIGUATE", () => {
     expect(resolved.status).toBe("ESCALATED");
     expect(resolved.templateHint).toContain("retirados o anulados");
     expect(resolved.templateHint).toContain("no registras un servicio de internet activo");
+  });
+
+  it("prioriza la plantilla RESPOND_PAYMENT_METHODS cuando el propósito es payment_methods en lugar de pedir comprobante a ciegas", () => {
+    const context: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: {
+        purpose: "payment_methods",
+        receiptAttempts: 0,
+      },
+    };
+
+    const resolved = resolveReplyTemplate({
+      definition: billingBalanceWorkflow,
+      outcome: {
+        type: "WAITING_USER",
+        nextState: "WAITING_USER_RECEIPT",
+        context,
+      },
+      context,
+    });
+
+    expect(resolved.action).toBe("WAITING_USER_RECEIPT");
+    expect(resolved.status).toBe("WAITING_USER");
+    expect(resolved.templateHint).toContain("Banco Pichincha");
+    expect(resolved.templateHint).toContain("Banco Guayaquil");
+    expect(resolved.templateHint).toContain("Produbanco");
   });
 });

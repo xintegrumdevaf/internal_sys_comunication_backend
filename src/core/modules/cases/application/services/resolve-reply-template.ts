@@ -87,6 +87,12 @@ export function resolveReplyTemplate(input: {
     });
 
     if (
+      contextData.purpose === "payment_methods" &&
+      templates.RESPOND_PAYMENT_METHODS &&
+      (!contextData.receiptAttempts || contextData.receiptAttempts === 0)
+    ) {
+      templateHint = templates.RESPOND_PAYMENT_METHODS;
+    } else if (
       outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
       Array.isArray(contextData.pendingContracts) &&
       contextData.pendingContracts.length > 0
