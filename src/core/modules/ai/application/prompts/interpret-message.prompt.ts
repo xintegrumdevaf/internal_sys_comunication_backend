@@ -228,7 +228,10 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
    → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}
 
 18. Mensaje donde el cliente expresa satisfacción, agradecimiento, cortesía o cierre tras recibir la información previa (ej: "Ok gracias", "todo claro amigo", "ya me quedó claro", "👍", "[Sticker enviado por el cliente]"):
-   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true,"isCourtesy":true},"confidence":0.95}`;
+   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true,"isCourtesy":true},"confidence":0.95}
+
+19. Mensaje: "necesito información sobre el pago" (o "¿cómo puedo pagar?", "información de pagos", "quiero saber de mi pago") SIN adjuntar comprobante ni afirmar haber pagado ya:
+   → {"type":"NEW_INTENT","intent":"billing.balance","entities":{"question":"Información de pago y saldo de la cuenta"},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

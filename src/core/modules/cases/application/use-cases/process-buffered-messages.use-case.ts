@@ -319,6 +319,9 @@ export class ProcessBufferedMessagesUseCase {
         ((interpretation.intent === "support.internet" ||
           interpretation.intent === "support.slow_internet") &&
           customerText.length > 0);
+      const nowMs = Date.now();
+      const RECENT_ATTACHMENT_WINDOW_MS = 30 * 60 * 1000; // 30 minutos de correlación temporal
+
       const hasAttachedImageOrDoc =
         messages.some(
           (m) =>
@@ -334,24 +337,20 @@ export class ProcessBufferedMessagesUseCase {
           m.author === "customer" &&
           (m.type.toLowerCase() === "image" ||
             m.type.toLowerCase() === "document" ||
-            Boolean(m.mediaId && m.type.toLowerCase() !== "audio" && m.type.toLowerCase() !== "voice" && m.type.toLowerCase() !== "video")),
+            Boolean(m.mediaId && m.type.toLowerCase() !== "audio" && m.type.toLowerCase() !== "voice" && m.type.toLowerCase() !== "video")) &&
+          (nowMs - m.createdAt.getTime()) <= RECENT_ATTACHMENT_WINDOW_MS,
       );
 
-      const textMentionsPayment =
-        /comprobante|transferencia|dep[oó]sito|pago|pagado|pague|pagu[eé]|recibo|factura|banco|voucher|produbanco|pichincha|guayaquil|pacifico|bolivariano|cooperativa/i.test(
-          customerText,
-        );
+      const isPaymentRelated =
+        interpretation.intent === "billing.record_payment" ||
+        activeAggregate?.case.workflowType === "BILLING_BALANCE";
 
-      const describedAsReceipt =
-        receiptEntities.isReceipt !== false &&
-        (hasAttachedImageOrDoc || (hasRecentInboundAttachment && textMentionsPayment)) &&
-        (textMentionsPayment || interpretation.intent === "billing.record_payment");
+      const hasAnyAttachment = hasAttachedImageOrDoc || hasRecentInboundAttachment;
 
       const visualReceipt =
         receiptEntities.isReceipt === true ||
         hasCompleteReceipt(receiptEntities) ||
-        describedAsReceipt ||
-        (hasAttachedImageOrDoc && receiptEntities.isReceipt !== false && interpretation.intent === "billing.record_payment");
+        (receiptEntities.isReceipt !== false && hasAnyAttachment && isPaymentRelated);
 
       if (visualReceipt && !reportsOutage) {
         interpretation = {
