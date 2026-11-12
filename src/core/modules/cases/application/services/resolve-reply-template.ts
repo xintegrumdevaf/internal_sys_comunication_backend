@@ -88,10 +88,13 @@ export function resolveReplyTemplate(input: {
 
     if (
       contextData.purpose === "payment_methods" &&
-      templates.RESPOND_PAYMENT_METHODS &&
       (!contextData.receiptAttempts || contextData.receiptAttempts === 0)
     ) {
-      templateHint = templates.RESPOND_PAYMENT_METHODS;
+      if (typeof contextData.paymentMethodsInfo === "string" && contextData.paymentMethodsInfo.trim().length > 0) {
+        templateHint = `${contextData.paymentMethodsInfo.trim()}\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.`;
+      } else if (templates.RESPOND_PAYMENT_METHODS) {
+        templateHint = templates.RESPOND_PAYMENT_METHODS;
+      }
     } else if (
       outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
       Array.isArray(contextData.pendingContracts) &&

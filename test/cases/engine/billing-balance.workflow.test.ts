@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
-import { billingBalanceWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
+import {
+  billingBalanceWorkflow,
+  createBillingBalanceWorkflow,
+} from "../../../src/core/modules/cases/application/engine/definitions/billing-balance.workflow";
+import type { RagService } from "../../../src/core/modules/ai/application/services/rag.service";
 import type { CaseContext } from "../../../src/core/modules/cases/domain/contexts/case-context";
 import { N8nGatewayFake } from "../fakes";
 
@@ -200,5 +204,32 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
     );
     expect(step2).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT" });
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
+  });
+
+  it("payment_methods con RAG: consulta RagService dinámicamente y guarda paymentMethodsInfo en context", async () => {
+    const ragServiceMock = {
+      query: async () => ({
+        found: true,
+        answer: "Cuentas RAG: Banco Internacional Cta. 555666",
+        confidenceScore: 0.9,
+        sources: ["cuentas.pdf"],
+        retrievedChunks: [],
+        executionTimeMs: 10,
+      }),
+    } as unknown as RagService;
+
+    const dynamicWorkflow = createBillingBalanceWorkflow(ragServiceMock);
+    const engine = new WorkflowEngine([dynamicWorkflow]);
+    const gateway = new N8nGatewayFake({});
+
+    const ctx: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: { purpose: "payment_methods" },
+    };
+
+    const step1 = await engine.step("BILLING_BALANCE", baseInput("RESPOND_PAYMENT_METHODS", ctx, gateway));
+    expect(step1).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT" });
+    if (step1.type !== "WAITING_USER" || step1.context.workflowType !== "BILLING_BALANCE") throw new Error("unreachable");
+    expect(step1.context.data.paymentMethodsInfo).toBe("Cuentas RAG: Banco Internacional Cta. 555666");
   });
 });

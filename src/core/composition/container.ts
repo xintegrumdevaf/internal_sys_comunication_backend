@@ -146,7 +146,7 @@ import { MikrotikDiagnosticAdapter } from "../modules/cases/infrastructure/diagn
 import { CompositeActionGateway } from "../modules/cases/infrastructure/gateways/composite-action-gateway";
 import { WorkflowEngine } from "../modules/cases/application/engine/workflow-engine";
 import { supportInternetWorkflow } from "../modules/cases/application/engine/definitions/support-internet.workflow";
-import { billingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
+import { createBillingBalanceWorkflow } from "../modules/cases/application/engine/definitions/billing-balance.workflow";
 import { createGeneralInquiryWorkflow } from "../modules/cases/application/engine/definitions/general-inquiry.workflow";
 import { createHomeRelocationWorkflow } from "../modules/cases/application/engine/definitions/home-relocation.workflow";
 import {
@@ -508,6 +508,7 @@ export function createContainer(): Container {
   const generalInquiryWorkflow = createGeneralInquiryWorkflow(ragService);
   const homeRelocationWorkflow = createHomeRelocationWorkflow(ragService);
   const salesWorkflow = createSalesWorkflow(ragService, coverageService);
+  const billingBalanceWorkflow = createBillingBalanceWorkflow(ragService);
   const workflowEngine = new WorkflowEngine([
     supportInternetWorkflow,
     billingBalanceWorkflow,

@@ -106,4 +106,31 @@ describe("resolveReplyTemplate — WAITING_USER_DISAMBIGUATE", () => {
     expect(resolved.templateHint).toContain("Banco Guayaquil");
     expect(resolved.templateHint).toContain("Produbanco");
   });
+
+  it("utiliza paymentMethodsInfo dinámico de RAG cuando está presente en lugar de la plantilla estática", () => {
+    const context: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: {
+        purpose: "payment_methods",
+        receiptAttempts: 0,
+        paymentMethodsInfo: "Banco Bolivariano: Cta Cte 999888\nBanco Pacífico: Cta Ahorros 111222",
+      },
+    };
+
+    const resolved = resolveReplyTemplate({
+      definition: billingBalanceWorkflow,
+      outcome: {
+        type: "WAITING_USER",
+        nextState: "WAITING_USER_RECEIPT",
+        context,
+      },
+      context,
+    });
+
+    expect(resolved.action).toBe("WAITING_USER_RECEIPT");
+    expect(resolved.status).toBe("WAITING_USER");
+    expect(resolved.templateHint).toContain("Banco Bolivariano");
+    expect(resolved.templateHint).toContain("Banco Pacífico");
+    expect(resolved.templateHint).toContain("envíanos la foto o comprobante");
+  });
 });

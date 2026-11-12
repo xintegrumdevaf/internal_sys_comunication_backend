@@ -4,6 +4,7 @@ import { bumpWaitingAttempts, resetWaitingAttempts } from "../../../domain/conte
 import { normalizeNationalId } from "../../../../customers/domain/national-id";
 import type { WorkflowDefinition, WorkflowStateHandler } from "../workflow-definition";
 import { filterAndPrioritizeContracts } from "../../helpers/contract-status-filter.helper";
+import type { RagService } from "../../../../ai/application/services/rag.service";
 
 /**
  * BILLING_BALANCE (docs/spec/02_STATE_MACHINE.md §15 + §13 WaitingSteps).
@@ -94,7 +95,8 @@ function resolvePurpose(
   return "balance";
 }
 
-const validateClient: WorkflowStateHandler = async ({
+export function createBillingBalanceWorkflow(ragService?: RagService): WorkflowDefinition {
+  const validateClient: WorkflowStateHandler = async ({
   caseId,
   conversationId,
   correlationId,
@@ -356,44 +358,62 @@ const recordPayment: WorkflowStateHandler = async ({
   return { type: "COMPLETED", context: withContext(nextData, context) };
 };
 
-const respondPaymentMethods: WorkflowStateHandler = async ({ context }) => {
-  return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context };
-};
+  const respondPaymentMethods: WorkflowStateHandler = async ({ context, text }) => {
+    let data = requireBillingContext(context);
+    if (ragService) {
+      try {
+        const queryQuestion =
+          text && text.trim().length > 5
+            ? text.trim()
+            : "cuentas bancarias autorizadas formas de pago para transferir o depositar";
+        const ragRes = await ragService.query(queryQuestion, 3);
+        if (ragRes.found && ragRes.answer && ragRes.answer.trim().length > 0) {
+          data = { ...data, paymentMethodsInfo: ragRes.answer.trim() };
+        }
+      } catch {
+        // Fallback silencioso a la plantilla base si RAG no está disponible
+      }
+    }
+    return { type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT", context: withContext(data, context) };
+  };
 
-export const billingBalanceWorkflow: WorkflowDefinition = {
-  workflowType: "BILLING_BALANCE",
-  initialState: "VALIDATE_CLIENT",
-  expirationHours: 24,
-  waitingSteps: {
-    WAITING_USER_CLIENT: {
-      pendingQuestion: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
-      requireAll: ["nationalId"],
-      maxAttempts: 3,
+  return {
+    workflowType: "BILLING_BALANCE",
+    initialState: "VALIDATE_CLIENT",
+    expirationHours: 24,
+    waitingSteps: {
+      WAITING_USER_CLIENT: {
+        pendingQuestion: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
+        requireAll: ["nationalId"],
+        maxAttempts: 3,
+      },
+      WAITING_USER_RECEIPT: {
+        pendingQuestion: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+        requireAll: ["amount", "reference"],
+        maxAttempts: 2,
+      },
     },
-    WAITING_USER_RECEIPT: {
-      pendingQuestion: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
-      requireAll: ["amount", "reference"],
-      maxAttempts: 2,
+    replyTemplates: {
+      WAITING_USER_CLIENT: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
+      WAITING_USER_RECEIPT: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
+      RESPOND_NO_DEBT: "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
+      RESPOND_DEBT_WITH_OPTIONS: "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
+      COMPLETED: "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
+      RESPOND_PAYMENT_METHODS: "Puedes realizar tu pago mediante depósito o transferencia en nuestras cuentas corrientes autorizadas:\n\n🏦 Banco Pichincha: Cta. Cte. 2200998877\n🏦 Banco Guayaquil: Cta. Cte. 004455667788\n🏦 Produbanco: Cta. Cte. 1234567890\nTitular: XGO Telecomunicaciones S.A. (RUC 1799999999001)\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.",
+      ESCALATED: "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para ayudarte con tu solicitud.",
+      ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
     },
-  },
-  replyTemplates: {
-    WAITING_USER_CLIENT: "Para consultar el saldo o registrar tu pago, ¿me confirmas el número de cédula del titular del servicio?",
-    WAITING_USER_RECEIPT: "Envíame la foto de tu comprobante de pago (necesitamos el monto y el número de referencia).",
-    RESPOND_NO_DEBT: "Revisé tu cuenta y no tienes ningún saldo pendiente en este momento.",
-    RESPOND_DEBT_WITH_OPTIONS: "Revisé tu cuenta y encontré un saldo pendiente de ${{debt}}. Si ya realizaste el pago, envíame la foto del comprobante y lo registro; si no, cuéntame si necesitas ayuda con las formas de pago disponibles.",
-    COMPLETED: "Listo. {{paymentMessage}} Si necesitas algo más de facturación, escríbenos.",
-    RESPOND_PAYMENT_METHODS: "Puedes realizar tu pago mediante depósito o transferencia en nuestras cuentas corrientes autorizadas:\n\n🏦 Banco Pichincha: Cta. Cte. 2200998877\n🏦 Banco Guayaquil: Cta. Cte. 004455667788\n🏦 Produbanco: Cta. Cte. 1234567890\nTitular: XGO Telecomunicaciones S.A. (RUC 1799999999001)\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.",
-    ESCALATED: "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para ayudarte con tu solicitud.",
-    ACTIVE: "Estamos revisando tu cuenta. Un momento por favor.",
-  },
-  states: {
-    VALIDATE_CLIENT: validateClient,
-    WAITING_USER_CLIENT: validateClient,
-    CHECK_BALANCE: checkBalance,
-    RESPOND_NO_DEBT: respondNoDebt,
-    RESPOND_DEBT_WITH_OPTIONS: respondDebtWithOptions,
-    RESPOND_PAYMENT_METHODS: respondPaymentMethods,
-    WAITING_USER_RECEIPT: waitingReceipt,
-    RECORD_PAYMENT: recordPayment,
-  },
-};
+    states: {
+      VALIDATE_CLIENT: validateClient,
+      WAITING_USER_CLIENT: validateClient,
+      CHECK_BALANCE: checkBalance,
+      RESPOND_NO_DEBT: respondNoDebt,
+      RESPOND_DEBT_WITH_OPTIONS: respondDebtWithOptions,
+      RESPOND_PAYMENT_METHODS: respondPaymentMethods,
+      WAITING_USER_RECEIPT: waitingReceipt,
+      RECORD_PAYMENT: recordPayment,
+    },
+  };
+}
+
+export const billingBalanceWorkflow: WorkflowDefinition = createBillingBalanceWorkflow();

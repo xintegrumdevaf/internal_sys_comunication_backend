@@ -15,4 +15,6 @@ export type BillingBalanceContext = {
     date?: string;
     status?: "PENDING" | "RECORDED" | "REJECTED";
   };
+  receiptAttempts?: number;
+  paymentMethodsInfo?: string;
 };
