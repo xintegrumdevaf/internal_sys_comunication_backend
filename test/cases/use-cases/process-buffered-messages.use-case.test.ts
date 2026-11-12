@@ -1754,4 +1754,147 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     });
     expect(whatsappSender.sent).toHaveLength(1);
   });
+
+  it("reconoce foto de comprobante con texto 'Me ayuda registrando el pago por favor' aunque el OCR falle, derivando a cartera", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+
+    // extractReceiptData falla o devuelve vacío (simulando timeout u OCR no disponible)
+    const extractReceiptData = {
+      execute: async () => ({}),
+    } as any;
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "billing.record_payment",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const imgMsg = messageRepo.seedText(
+      conversation.id,
+      "Bertha Mercedes Espin Buce\n1705193025\nMe ayuda registrando el pago por favor!",
+      { type: "image", mediaId: "media-produbanco-receipt" }
+    );
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-produbanco-receipt",
+      messages: [imgMsg],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Recibido, gracias!");
+    expect(whatsappSender.sent[0]!.body).not.toContain("por favor envíanos una foto");
+
+    const convCases = await caseRepo.listByConversation(conversation.id);
+    expect(convCases).toHaveLength(1);
+    expect(convCases[0]!.status).toBe("NEW");
+  });
+
+  it("activa el circuit breaker y no repite la solicitud de comprobante si el cliente responde sin adjuntar imagen", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+
+    // Caso previo en WAITING_USER_RECEIPT y el bot ya le había solicitado la foto
+    const { case: activeCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "BILLING_BALANCE",
+      departmentId: null,
+      context: { workflowType: "BILLING_BALANCE", data: {} },
+      initialState: "WAITING_USER_RECEIPT",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, activeCase.id);
+
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "ai",
+      body: "Para poder verificar y registrar tu pago en el sistema, por favor envíanos una foto o captura del comprobante de transferencia o depósito bancario.",
+      status: "sent",
+    });
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "CONTINUE",
+        intent: "billing.record_payment",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const clientMsg = messageRepo.seedText(conversation.id, "Aquí tiene el comprobante..");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-circuit-breaker-receipt",
+      messages: [clientMsg],
+    });
+
+    // Verificaciones:
+    // 1. Debe responder derivando a un asesor humano, NUNCA repitiendo la misma plantilla
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("asesor");
+    expect(whatsappSender.sent[0]!.body).not.toContain("por favor envíanos una foto o captura");
+  });
 });

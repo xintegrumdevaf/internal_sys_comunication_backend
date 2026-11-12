@@ -319,14 +319,39 @@ export class ProcessBufferedMessagesUseCase {
         ((interpretation.intent === "support.internet" ||
           interpretation.intent === "support.slow_internet") &&
           customerText.length > 0);
+      const hasAttachedImageOrDoc =
+        messages.some(
+          (m) =>
+            m.type.toLowerCase() === "image" ||
+            m.type.toLowerCase() === "document" ||
+            Boolean(m.mediaId && m.type.toLowerCase() !== "audio" && m.type.toLowerCase() !== "voice" && m.type.toLowerCase() !== "video"),
+        ) ||
+        /\[Adjunto[^\]]*(imagen|foto|documento)/i.test(text);
+
+      const hasRecentInboundAttachment = priorChronological.some(
+        (m) =>
+          m.direction === "inbound" &&
+          m.author === "customer" &&
+          (m.type.toLowerCase() === "image" ||
+            m.type.toLowerCase() === "document" ||
+            Boolean(m.mediaId && m.type.toLowerCase() !== "audio" && m.type.toLowerCase() !== "voice" && m.type.toLowerCase() !== "video")),
+      );
+
+      const textMentionsPayment =
+        /comprobante|transferencia|dep[oó]sito|pago|pagado|pague|pagu[eé]|recibo|factura|banco|voucher|produbanco|pichincha|guayaquil|pacifico|bolivariano|cooperativa/i.test(
+          customerText,
+        );
+
       const describedAsReceipt =
         receiptEntities.isReceipt !== false &&
-        /\[Adjunto[^\]]*\]/i.test(text) &&
-        /comprobante|transferencia bancaria|transferencia exitosa|dep[oó]sito bancario/i.test(text);
+        (hasAttachedImageOrDoc || (hasRecentInboundAttachment && textMentionsPayment)) &&
+        (textMentionsPayment || interpretation.intent === "billing.record_payment");
+
       const visualReceipt =
         receiptEntities.isReceipt === true ||
         hasCompleteReceipt(receiptEntities) ||
-        describedAsReceipt;
+        describedAsReceipt ||
+        (hasAttachedImageOrDoc && receiptEntities.isReceipt !== false && interpretation.intent === "billing.record_payment");
 
       if (visualReceipt && !reportsOutage) {
         interpretation = {
@@ -457,21 +482,31 @@ export class ProcessBufferedMessagesUseCase {
             }
           }
         }
-        // 3. Fallback: extraer desde historial de mensajes
+        // 3. Fallback: extraer desde el texto del lote actual o historial de mensajes
         if (!interpretation.entities?.nationalId) {
-          const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 15 });
-          const customerMessages = history.filter((m) => m.author === "customer");
-          for (const msg of customerMessages) {
-            const body = msg.body.trim();
-            const match = body.match(/\b\d{9,13}\b/);
-            if (match) {
-              const normalized = normalizeNationalId(match[0]);
-              interpretation.entities = {
-                ...interpretation.entities,
-                nationalId: normalized,
-              };
-              log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
-              break;
+          const directMatch = text.match(/\b\d{9,13}\b/);
+          if (directMatch) {
+            const normalized = normalizeNationalId(directMatch[0]);
+            interpretation.entities = {
+              ...interpretation.entities,
+              nationalId: normalized,
+            };
+            log.info({ nationalId: normalized, raw: directMatch[0] }, "cédula extraída automáticamente del texto actual");
+          } else {
+            const history = await this.deps.messageRepo.listByConversation(conversationId, { limit: 15 });
+            const customerMessages = history.filter((m) => m.author === "customer");
+            for (const msg of customerMessages) {
+              const body = msg.body.trim();
+              const match = body.match(/\b\d{9,13}\b/);
+              if (match) {
+                const normalized = normalizeNationalId(match[0]);
+                interpretation.entities = {
+                  ...interpretation.entities,
+                  nationalId: normalized,
+                };
+                log.info({ nationalId: normalized, raw: match[0] }, "cédula extraída automáticamente del historial de la conversación");
+                break;
+              }
             }
           }
         }
@@ -787,6 +822,42 @@ export class ProcessBufferedMessagesUseCase {
           });
           return;
         } else {
+          // Circuit breaker: si el bot ya había solicitado foto/comprobante de pago en el turno anterior,
+          // no insistir por segunda vez consecutiva con la misma plantilla: derivar a cartera para atención personalizada
+          const lastOutbound = [...chronologicalHistory]
+            .reverse()
+            .find((m) => m.direction === "outbound" && (m.author === "ai" || m.author === "system"));
+          const alreadyRequestedReceipt =
+            lastOutbound !== undefined &&
+            lastOutbound.body.includes("comprobante de transferencia o depósito");
+
+          if (alreadyRequestedReceipt) {
+            log.warn(
+              { conversationId, customerText: text.slice(0, 60) },
+              "Circuit breaker: cliente respondió tras solicitud de comprobante sin adjuntarlo; escalando a asesor de cartera",
+            );
+            await this.deps.caseRepo.setAutomationEnabled(targetCaseId, false, {
+              reason: "PAYMENT_RECEIPT_ASSISTANCE_REQUIRED",
+            });
+            let customerMessage =
+              "Entendido. Te comunico con un asesor de nuestro equipo de cartera para ayudarte a validar y registrar tu pago directamente.";
+            if (this.deps.escalationService) {
+              const res = await this.deps.escalationService.escalateExistingCase({
+                caseId: targetCaseId,
+                reason: "Cliente requiere asistencia para validar comprobante/pago",
+                correlationId,
+              });
+              if (res.customerMessage) customerMessage = res.customerMessage;
+            }
+            await this.deliverFixedReply({
+              conversationId,
+              correlationId,
+              body: customerMessage,
+              log,
+            });
+            return;
+          }
+
           // NO hay comprobante visual adjunto: no mentir diciendo que se recibió el comprobante
           await this.deps.caseRepo.appendEvent(targetCaseId, "WAITING_USER", {
             nextState: "WAITING_USER_RECEIPT",
