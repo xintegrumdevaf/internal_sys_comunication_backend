@@ -9,6 +9,9 @@ export type InsertInboundMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  replyToExternalId?: string | null;
+  replyToMessageId?: string | null;
+  isForwarded?: boolean;
   status?: MessageStatus;
   errorMessage?: string | null;
   direction?: "inbound" | "outbound";
@@ -21,6 +24,8 @@ export type InsertOutboundMessageInput = {
   author: MessageAuthor;
   body: string;
   externalId?: string | null;
+  replyToExternalId?: string | null;
+  replyToMessageId?: string | null;
   /** Reply humano: agente de la sesion (07_QUALITY_SUPERVISION.md §6). */
   agentId?: string | null;
   /** Caso activo de la conversacion al momento del reply, si existe. */

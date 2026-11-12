@@ -935,6 +935,91 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(escalatedReason).toContain("Comprobante de pago adjunto");
   });
 
+  it("cuando el cliente envía un punto citando un comprobante previo (replyTo), enriquece el texto y deriva a cartera", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let escalatedReason: string | null = null;
+    const escalationService = {
+      escalateExistingCase: async (input: { caseId: string; reason: string }) => {
+        escalatedReason = input.reason;
+        return { customerMessage: "" };
+      },
+      sendToTriage: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const fakeAi = new FakeAIProvider();
+    let capturedAiText = "";
+    const interpretationProvider = {
+      interpretMessage: async (input: { text: string }) => {
+        capturedAiText = input.text;
+        return {
+          type: "NEW_INTENT" as const,
+          intent: "billing.record_payment",
+          entities: { isReceipt: true },
+          confidence: 0.95,
+        };
+      },
+    };
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const priorImg = messageRepo.seedText(conversation.id, "", {
+      type: "image",
+      externalId: "ext-photo-1",
+      mediaId: "prior-media-1",
+    });
+
+    const replyMsg = messageRepo.seedText(conversation.id, ".", {
+      replyToExternalId: "ext-photo-1",
+      replyToMessageId: priorImg.id,
+      replyTo: {
+        id: priorImg.id,
+        author: "customer",
+        body: "",
+        type: "image",
+      },
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-quoted-receipt",
+      messages: [replyMsg],
+    });
+
+    expect(capturedAiText).toContain("[En respuesta a mensaje de cliente: \"foto/comprobante\"]");
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toContain("Estamos verificando tu comprobante de pago");
+    expect(escalatedReason).toContain("Comprobante de pago adjunto");
+  });
+
   it("prioriza soporte técnico (support.internet) cuando el cliente reporta que no tiene internet aunque adjunte comprobante de pago", async () => {
     const scenario = buildScenario();
     const {

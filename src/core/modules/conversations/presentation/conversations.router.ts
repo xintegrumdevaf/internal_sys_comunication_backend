@@ -499,6 +499,10 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         (typeof rawBodyObj.contentType === "string" ? rawBodyObj.contentType : undefined);
 
       const voiceNote = rawBodyObj.voiceNote === true || rawBodyObj.voiceNote === "true";
+      const replyToMessageId =
+        typeof rawBodyObj.replyToMessageId === "string" ? rawBodyObj.replyToMessageId : undefined;
+      const replyToExternalId =
+        typeof rawBodyObj.replyToExternalId === "string" ? rawBodyObj.replyToExternalId : undefined;
 
       // 1. Archivos subidos vía multipart/form-data
       if (uploadedFiles.length > 0) {
@@ -517,6 +521,8 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
             agentUserId: agent.id,
             body: captionForThisFile,
             caption: captionForThisFile,
+            replyToMessageId,
+            replyToExternalId,
             media: {
               buffer: file.buffer,
               mimeType,
@@ -552,6 +558,8 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
             agentUserId: agent.id,
             body: item.caption,
             caption: item.caption,
+            replyToMessageId,
+            replyToExternalId,
             media: item.media,
           });
           deps.broadcaster?.publish({
@@ -582,6 +590,8 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         conversationId,
         agentUserId: agent.id,
         body: parsed.data.body,
+        replyToMessageId,
+        replyToExternalId,
       });
       deps.broadcaster?.publish({
         type: "MESSAGE_SENT",

@@ -20,6 +20,9 @@ export type ReceiveInboundMessageInput = {
   mimeType?: string | null;
   caption?: string | null;
   filename?: string | null;
+  replyToExternalId?: string | null;
+  replyToMessageId?: string | null;
+  isForwarded?: boolean;
   /** `contacts[].profile.name` del webhook de Meta — ver conversation.entity.ts. */
   waProfileName?: string | null;
   /** correlationId de la request HTTP que origino el mensaje (trazabilidad, AGENTS.md). */
@@ -87,6 +90,9 @@ export class ReceiveInboundMessageUseCase {
       mimeType: input.mimeType ?? null,
       caption: input.caption ?? null,
       filename: input.filename ?? null,
+      replyToExternalId: input.replyToExternalId ?? null,
+      replyToMessageId: input.replyToMessageId ?? null,
+      isForwarded: Boolean(input.isForwarded),
       direction: input.direction,
       author: input.author,
       createdAt: input.createdAt,

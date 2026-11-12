@@ -50,6 +50,12 @@ type WhatsAppInboundMessage = {
   interactive?: WhatsAppInteractiveReply;
   location?: WhatsAppLocationObject;
   edit?: WhatsAppEditObject;
+  context?: {
+    id?: string;
+    from?: string;
+    forwarded?: boolean;
+    frequently_forwarded?: boolean;
+  };
 };
 
 type WhatsAppContact = {
@@ -98,6 +104,8 @@ export type NormalizedInboundMessage = {
    * pasar en producción, pero el parser nunca asume que siempre está).
    */
   waProfileName: string | null;
+  replyToExternalId?: string | null;
+  isForwarded?: boolean;
   direction?: "inbound" | "outbound";
   author?: import("../../domain/message.entity").MessageAuthor;
   createdAt?: Date;
@@ -136,7 +144,17 @@ export function parseWhatsAppWebhookPayload(payload: unknown): NormalizedInbound
 
 function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | null): NormalizedInboundMessage {
   const createdAt = raw.timestamp ? new Date(Number(raw.timestamp) * 1000) : undefined;
-  const base = { waPhone: raw.from, externalId: raw.id, type: raw.type, waProfileName, createdAt };
+  const replyToExternalId = raw.context?.id ?? null;
+  const isForwarded = Boolean(raw.context?.forwarded || raw.context?.frequently_forwarded);
+  const base = {
+    waPhone: raw.from,
+    externalId: raw.id,
+    type: raw.type,
+    waProfileName,
+    createdAt,
+    replyToExternalId,
+    isForwarded,
+  };
 
   switch (raw.type) {
     case "text":

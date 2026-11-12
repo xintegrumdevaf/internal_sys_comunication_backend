@@ -32,6 +32,8 @@ export type ReplyAsHumanInput = {
   body?: string;
   caption?: string;
   media?: ReplyAsHumanMediaInput;
+  replyToMessageId?: string | null;
+  replyToExternalId?: string | null;
 };
 
 export type ReplyAsHumanDeps = {
@@ -272,6 +274,8 @@ export class ReplyAsHumanUseCase {
       mimeType,
       caption,
       filename,
+      replyToMessageId: input.replyToMessageId ?? null,
+      replyToExternalId: input.replyToExternalId ?? null,
     });
 
     await conversationRepo.touchLastActivity(conversation.id);

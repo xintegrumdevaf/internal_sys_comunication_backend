@@ -321,4 +321,69 @@ describe("parseWhatsAppWebhookPayload — interactive messages", () => {
   });
 });
 
+describe("parseWhatsAppWebhookPayload — context (quoted message & forwarded)", () => {
+  it("extrae replyToExternalId y marca isForwarded=false cuando el cliente cita un mensaje previo", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "59399887766",
+                    id: "wamid.REPLY123",
+                    type: "text",
+                    text: { body: "." },
+                    context: {
+                      id: "wamid.ORIGINAL_PHOTO",
+                      forwarded: false,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized?.body).toBe(".");
+    expect(normalized?.replyToExternalId).toBe("wamid.ORIGINAL_PHOTO");
+    expect(normalized?.isForwarded).toBe(false);
+  });
+
+  it("detecta isForwarded=true cuando el mensaje es reenviado", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "59399887766",
+                    id: "wamid.FWD123",
+                    type: "image",
+                    image: { id: "media-fwd", mime_type: "image/jpeg" },
+                    context: {
+                      forwarded: true,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized?.type).toBe("image");
+    expect(normalized?.isForwarded).toBe(true);
+  });
+});
+
+
 

@@ -183,6 +183,16 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       }
       return { message: existing, isDuplicate: true, isEdited: false };
     }
+    const quoted =
+      input.replyToMessageId || input.replyToExternalId
+        ? this.messages.find(
+            (m) =>
+              m.conversationId === input.conversationId &&
+              (m.id === input.replyToMessageId ||
+                (Boolean(input.replyToExternalId) && m.externalId === input.replyToExternalId)),
+          )
+        : null;
+
     const message = this.seedText(input.conversationId, input.body, {
       externalId: input.externalId,
       type: input.type,
@@ -190,6 +200,22 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       mimeType: input.mimeType ?? null,
       caption: input.caption ?? null,
       filename: input.filename ?? null,
+      replyToExternalId: input.replyToExternalId ?? null,
+      replyToMessageId: quoted?.id ?? input.replyToMessageId ?? null,
+      isForwarded: Boolean(input.isForwarded),
+      replyTo: quoted
+        ? {
+            id: quoted.id,
+            externalId: quoted.externalId ?? null,
+            author: quoted.author,
+            body: quoted.body,
+            type: quoted.type,
+            mediaId: quoted.mediaId ?? null,
+            caption: quoted.caption ?? null,
+            filename: quoted.filename ?? null,
+            agentName: quoted.agentName ?? null,
+          }
+        : null,
       status: input.status ?? "delivered",
       errorMessage: input.errorMessage ?? null,
       createdAt: input.createdAt ?? new Date(),
@@ -198,6 +224,16 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
   }
 
   async insertOutbound(input: InsertOutboundMessageInput): Promise<Message> {
+    const quoted =
+      input.replyToMessageId || input.replyToExternalId
+        ? this.messages.find(
+            (m) =>
+              m.conversationId === input.conversationId &&
+              (m.id === input.replyToMessageId ||
+                (Boolean(input.replyToExternalId) && m.externalId === input.replyToExternalId)),
+          )
+        : null;
+
     const message: Message = {
       id: randomUUID(),
       conversationId: input.conversationId,
@@ -208,11 +244,27 @@ export class MessageRepositoryFake implements MessageRepositoryPort {
       agentName: null,
       externalId: input.externalId ?? null,
       body: input.body,
-      type: "text",
-      mediaId: null,
-      mimeType: null,
-      caption: null,
-      filename: null,
+      type: input.type ?? "text",
+      mediaId: input.mediaId ?? null,
+      mimeType: input.mimeType ?? null,
+      caption: input.caption ?? null,
+      filename: input.filename ?? null,
+      replyToExternalId: input.replyToExternalId ?? null,
+      replyToMessageId: quoted?.id ?? input.replyToMessageId ?? null,
+      replyTo: quoted
+        ? {
+            id: quoted.id,
+            externalId: quoted.externalId ?? null,
+            author: quoted.author,
+            body: quoted.body,
+            type: quoted.type,
+            mediaId: quoted.mediaId ?? null,
+            caption: quoted.caption ?? null,
+            filename: quoted.filename ?? null,
+            agentName: quoted.agentName ?? null,
+          }
+        : null,
+      isForwarded: false,
       status: input.status ?? "sent",
       errorMessage: input.errorMessage ?? null,
       createdAt: new Date(),

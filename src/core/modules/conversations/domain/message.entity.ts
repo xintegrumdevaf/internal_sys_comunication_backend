@@ -7,6 +7,18 @@ export interface MessageEditHistoryEntry {
   editedAt: string;
 }
 
+export interface QuotedMessagePreview {
+  id: string;
+  externalId?: string | null;
+  author: MessageAuthor;
+  body: string;
+  type: string;
+  mediaId?: string | null;
+  caption?: string | null;
+  filename?: string | null;
+  agentName?: string | null;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -26,6 +38,12 @@ export interface Message {
   filename: string | null;
   status: MessageStatus;
   errorMessage: string | null;
+  replyToExternalId?: string | null;
+  replyToMessageId?: string | null;
+  /** Vista previa del mensaje citado para renderizar en la UI tipo WhatsApp. */
+  replyTo?: QuotedMessagePreview | null;
+  /** Indica si el mensaje fue marcado como reenviado en WhatsApp. */
+  isForwarded?: boolean;
   editedAt?: Date | null;
   editHistory?: MessageEditHistoryEntry[];
   createdAt: Date;

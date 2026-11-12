@@ -314,6 +314,18 @@ export async function parseZernioWebhookPayload(
     if (!Number.isNaN(d.getTime())) createdAt = d;
   }
 
+  const rawMetaObj = typeof msg.metadata === "object" && msg.metadata !== null ? (msg.metadata as Record<string, unknown>) : undefined;
+  const replyToExternalId =
+    ((msg as Record<string, unknown>).replyToId as string) ||
+    ((msg as Record<string, unknown>).replyTo as { id?: string })?.id ||
+    ((rawMetaObj?.context as { id?: string })?.id) ||
+    null;
+  const isForwarded = Boolean(
+    (msg as Record<string, unknown>).forwarded ||
+    rawMetaObj?.forwarded ||
+    (rawMetaObj?.context as { forwarded?: boolean })?.forwarded
+  );
+
   return [
     {
       waPhone,
@@ -325,6 +337,8 @@ export async function parseZernioWebhookPayload(
       caption,
       filename,
       waProfileName,
+      replyToExternalId,
+      isForwarded,
       direction: isOutbound ? "outbound" : "inbound",
       author: isOutbound ? "agent" : "customer",
       createdAt,

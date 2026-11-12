@@ -24,6 +24,18 @@ type MessageRow = {
   filename: string | null;
   status: MessageStatus;
   error_message: string | null;
+  reply_to_external_id?: string | null;
+  reply_to_message_id?: string | null;
+  is_forwarded?: boolean | null;
+  quoted_id?: string | null;
+  quoted_external_id?: string | null;
+  quoted_author?: MessageAuthor | null;
+  quoted_body?: string | null;
+  quoted_type?: string | null;
+  quoted_media_id?: string | null;
+  quoted_caption?: string | null;
+  quoted_filename?: string | null;
+  quoted_agent_name?: string | null;
   edited_at?: Date | null;
   edit_history?: import("../../domain/message.entity").MessageEditHistoryEntry[] | string;
   created_at: Date;
@@ -58,6 +70,22 @@ function mapRow(row: MessageRow): Message {
     filename: row.filename,
     status: row.status ?? "sent",
     errorMessage: row.error_message ?? null,
+    replyToExternalId: row.reply_to_external_id ?? null,
+    replyToMessageId: row.reply_to_message_id ?? null,
+    isForwarded: Boolean(row.is_forwarded),
+    replyTo: row.quoted_id
+      ? {
+          id: row.quoted_id,
+          externalId: row.quoted_external_id ?? null,
+          author: row.quoted_author ?? "customer",
+          body: row.quoted_body ?? "",
+          type: row.quoted_type ?? "text",
+          mediaId: row.quoted_media_id ?? null,
+          caption: row.quoted_caption ?? null,
+          filename: row.quoted_filename ?? null,
+          agentName: row.quoted_agent_name ?? null,
+        }
+      : null,
     editedAt: row.edited_at ?? null,
     editHistory,
     createdAt: row.created_at,
@@ -74,13 +102,42 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
     const author = input.author ?? (direction === "outbound" ? "agent" : "customer");
 
     const inserted = await this.pool.query<MessageRow & { was_updated?: boolean }>(
-      `INSERT INTO message (conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename, status, error_message, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()))
-       ON CONFLICT (conversation_id, external_id) DO UPDATE SET
-         body = EXCLUDED.body,
-         caption = COALESCE(EXCLUDED.caption, message.caption)
-       WHERE message.body IS DISTINCT FROM EXCLUDED.body OR message.caption IS DISTINCT FROM EXCLUDED.caption
-       RETURNING *, (xmax != 0) AS was_updated`,
+      `WITH ins AS (
+         INSERT INTO message (
+           conversation_id, direction, author, external_id, body, type, media_id, mime_type, caption, filename, status, error_message, created_at,
+           reply_to_external_id, reply_to_message_id, is_forwarded
+         )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()),
+           $14,
+           COALESCE($15, (SELECT id FROM message WHERE conversation_id = $1 AND external_id = $14 LIMIT 1)),
+           $16
+         )
+         ON CONFLICT (conversation_id, external_id) DO UPDATE SET
+           body = EXCLUDED.body,
+           caption = COALESCE(EXCLUDED.caption, message.caption),
+           reply_to_external_id = COALESCE(EXCLUDED.reply_to_external_id, message.reply_to_external_id),
+           reply_to_message_id = COALESCE(EXCLUDED.reply_to_message_id, message.reply_to_message_id),
+           is_forwarded = COALESCE(EXCLUDED.is_forwarded, message.is_forwarded)
+         WHERE message.body IS DISTINCT FROM EXCLUDED.body OR message.caption IS DISTINCT FROM EXCLUDED.caption
+         RETURNING *, (xmax != 0) AS was_updated
+       )
+       SELECT
+         ins.*,
+         a.name AS agent_name,
+         q.id AS quoted_id,
+         q.external_id AS quoted_external_id,
+         q.author AS quoted_author,
+         q.body AS quoted_body,
+         q.type AS quoted_type,
+         q.media_id AS quoted_media_id,
+         q.caption AS quoted_caption,
+         q.filename AS quoted_filename,
+         qa.name AS quoted_agent_name
+       FROM ins
+       LEFT JOIN agent a ON a.id = ins.agent_id
+       LEFT JOIN message q ON (q.id = ins.reply_to_message_id OR (ins.reply_to_message_id IS NULL AND ins.reply_to_external_id IS NOT NULL AND q.conversation_id = ins.conversation_id AND q.external_id = ins.reply_to_external_id))
+       LEFT JOIN agent qa ON qa.id = q.agent_id`,
       [
         input.conversationId,
         direction,
@@ -95,6 +152,9 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.status ?? (direction === "outbound" ? "sent" : "delivered"),
         input.errorMessage ?? null,
         input.createdAt ?? null,
+        input.replyToExternalId ?? null,
+        input.replyToMessageId ?? null,
+        Boolean(input.isForwarded),
       ],
     );
 
@@ -105,7 +165,23 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
 
     // UNIQUE(conversation_id, external_id) — el mensaje ya existia con exactamente el mismo contenido (reintento o duplicado sin edicion).
     const existing = await this.pool.query<MessageRow>(
-      `SELECT * FROM message WHERE conversation_id = $1 AND external_id = $2`,
+      `SELECT
+         m.*,
+         a.name AS agent_name,
+         q.id AS quoted_id,
+         q.external_id AS quoted_external_id,
+         q.author AS quoted_author,
+         q.body AS quoted_body,
+         q.type AS quoted_type,
+         q.media_id AS quoted_media_id,
+         q.caption AS quoted_caption,
+         q.filename AS quoted_filename,
+         qa.name AS quoted_agent_name
+       FROM message m
+       LEFT JOIN agent a ON a.id = m.agent_id
+       LEFT JOIN message q ON (q.id = m.reply_to_message_id OR (m.reply_to_message_id IS NULL AND m.reply_to_external_id IS NOT NULL AND q.conversation_id = m.conversation_id AND q.external_id = m.reply_to_external_id))
+       LEFT JOIN agent qa ON qa.id = q.agent_id
+       WHERE m.conversation_id = $1 AND m.external_id = $2`,
       [input.conversationId, input.externalId],
     );
     return { message: mapRow(existing.rows[0]!), isDuplicate: true, isEdited: false };
@@ -117,14 +193,33 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
          INSERT INTO message (
            conversation_id, direction, author, external_id, body,
            type, media_id, mime_type, caption, filename,
-           agent_id, case_id, status, error_message
+           agent_id, case_id, status, error_message,
+           reply_to_external_id, reply_to_message_id, is_forwarded
          )
-         VALUES ($1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         VALUES (
+           $1, 'outbound', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+           $14,
+           COALESCE($15, (SELECT id FROM message WHERE conversation_id = $1 AND external_id = $14 LIMIT 1)),
+           false
+         )
          RETURNING *
        )
-       SELECT ins.*, a.name AS agent_name
+       SELECT
+         ins.*,
+         a.name AS agent_name,
+         q.id AS quoted_id,
+         q.external_id AS quoted_external_id,
+         q.author AS quoted_author,
+         q.body AS quoted_body,
+         q.type AS quoted_type,
+         q.media_id AS quoted_media_id,
+         q.caption AS quoted_caption,
+         q.filename AS quoted_filename,
+         qa.name AS quoted_agent_name
        FROM ins
-       LEFT JOIN agent a ON a.id = ins.agent_id`,
+       LEFT JOIN agent a ON a.id = ins.agent_id
+       LEFT JOIN message q ON (q.id = ins.reply_to_message_id OR (ins.reply_to_message_id IS NULL AND ins.reply_to_external_id IS NOT NULL AND q.conversation_id = ins.conversation_id AND q.external_id = ins.reply_to_external_id))
+       LEFT JOIN agent qa ON qa.id = q.agent_id`,
       [
         input.conversationId,
         input.author,
@@ -139,6 +234,8 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
         input.caseId ?? null,
         input.status ?? "sent",
         input.errorMessage ?? null,
+        input.replyToExternalId ?? null,
+        input.replyToMessageId ?? null,
       ],
     );
     return mapRow(rows[0]!);
@@ -222,17 +319,36 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       params.push(new Date(options.cursor));
       clauses.push(`m.created_at < $${params.length}`);
     }
-    let sql = `SELECT m.*, a.name AS agent_name
+    const selectQuoted = `
+      m.*,
+      a.name AS agent_name,
+      q.id AS quoted_id,
+      q.external_id AS quoted_external_id,
+      q.author AS quoted_author,
+      q.body AS quoted_body,
+      q.type AS quoted_type,
+      q.media_id AS quoted_media_id,
+      q.caption AS quoted_caption,
+      q.filename AS quoted_filename,
+      qa.name AS quoted_agent_name
+    `;
+    const joinsQuoted = `
+      LEFT JOIN agent a ON a.id = m.agent_id
+      LEFT JOIN message q ON (q.id = m.reply_to_message_id OR (m.reply_to_message_id IS NULL AND m.reply_to_external_id IS NOT NULL AND q.conversation_id = m.conversation_id AND q.external_id = m.reply_to_external_id))
+      LEFT JOIN agent qa ON qa.id = q.agent_id
+    `;
+
+    let sql = `SELECT ${selectQuoted}
                FROM message m
-               LEFT JOIN agent a ON a.id = m.agent_id
+               ${joinsQuoted}
                WHERE ${clauses.join(" AND ")}
                ORDER BY m.created_at ASC`;
     if (options.limit && options.limit > 0) {
       // Pedimos los últimos N: orden DESC + limit + reverse.
       sql = `SELECT * FROM (
-               SELECT m.*, a.name AS agent_name
+               SELECT ${selectQuoted}
                FROM message m
-               LEFT JOIN agent a ON a.id = m.agent_id
+               ${joinsQuoted}
                WHERE ${clauses.join(" AND ")}
                ORDER BY m.created_at DESC LIMIT $${params.length + 1}
              ) sub ORDER BY sub.created_at ASC`;
@@ -247,9 +363,22 @@ export class MessageRepositoryPg implements MessageRepositoryPort {
       return [];
     }
     const { rows } = await this.pool.query<MessageRow>(
-      `SELECT m.*, a.name AS agent_name
+      `SELECT
+         m.*,
+         a.name AS agent_name,
+         q.id AS quoted_id,
+         q.external_id AS quoted_external_id,
+         q.author AS quoted_author,
+         q.body AS quoted_body,
+         q.type AS quoted_type,
+         q.media_id AS quoted_media_id,
+         q.caption AS quoted_caption,
+         q.filename AS quoted_filename,
+         qa.name AS quoted_agent_name
        FROM message m
        LEFT JOIN agent a ON a.id = m.agent_id
+       LEFT JOIN message q ON (q.id = m.reply_to_message_id OR (m.reply_to_message_id IS NULL AND m.reply_to_external_id IS NOT NULL AND q.conversation_id = m.conversation_id AND q.external_id = m.reply_to_external_id))
+       LEFT JOIN agent qa ON qa.id = q.agent_id
        WHERE m.id = ANY($1::uuid[])
        ORDER BY m.created_at ASC`,
       [ids],

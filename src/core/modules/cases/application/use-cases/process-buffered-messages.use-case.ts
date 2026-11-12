@@ -1020,6 +1020,22 @@ export class ProcessBufferedMessagesUseCase {
     const primaryMessageId = messages[0]?.id ?? "unknown";
 
     for (const message of messages) {
+      if (message.replyTo) {
+        const quotedAuthor = message.replyTo.author === "customer" ? "cliente" : "asistente/asesor";
+        const quotedText =
+          message.replyTo.body ||
+          message.replyTo.caption ||
+          message.replyTo.filename ||
+          (message.replyTo.type === "image" ? "foto/comprobante" : message.replyTo.type);
+        parts.push(`[En respuesta a mensaje de ${quotedAuthor}: "${quotedText}"]`);
+        if (message.replyTo.type === "image" || message.replyTo.type === "document") {
+          receiptEntities.isReceipt = true;
+        }
+      }
+      if (message.isForwarded) {
+        parts.push(`[Mensaje reenviado]`);
+      }
+
       const type = message.type.toLowerCase();
       if (type === "audio" || type === "voice") {
         try {
