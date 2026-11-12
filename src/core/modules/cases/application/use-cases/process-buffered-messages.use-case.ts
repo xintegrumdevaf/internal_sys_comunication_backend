@@ -589,6 +589,28 @@ export class ProcessBufferedMessagesUseCase {
           return;
         }
 
+        if (activeAggregate && waitingStep?.pendingQuestion) {
+          log.info(
+            { conversationId, caseId: activeAggregate.case.id, currentState: activeAggregate.workflowInstance.currentState },
+            "Mensaje no claro o no verbal recibido en caso activo: recordando pregunta pendiente en vez de saludo inicial",
+          );
+          await this.sendCustomerReply({
+            conversationId,
+            correlationId,
+            caseId: activeAggregate.case.id,
+            workflowType: activeAggregate.case.workflowType,
+            outcome: {
+              type: "WAITING_USER",
+              nextState: activeAggregate.workflowInstance.currentState,
+              context: activeAggregate.case.context,
+            },
+            context: activeAggregate.case.context,
+            customerText: text,
+            log,
+          });
+          return;
+        }
+
         await this.sendCustomerReply({
           conversationId,
           correlationId,
@@ -1467,7 +1489,12 @@ function seedInitialContext(workflowType: string, intent: string): CaseContext {
       ...base,
       data: {
         ...base.data,
-        purpose: intent === "billing.record_payment" ? "record_payment" : "balance",
+        purpose:
+          intent === "billing.record_payment"
+            ? "record_payment"
+            : intent === "billing.payment_methods"
+              ? "payment_methods"
+              : "balance",
       },
     };
   }

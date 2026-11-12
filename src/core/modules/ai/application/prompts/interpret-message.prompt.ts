@@ -32,8 +32,9 @@ export function buildInterpretMessagePrompt(
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
 - support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio, O TAMBIÉN asistencia técnica de equipos, cambio de clave/contraseña de Wi-Fi, nombre de red (SSID), reseteo o configuración de router/módem (ej: "Me pueden ayudar cambiando la clave x favor", "cambiar la clave de mi wifi", "contraseña del router", "no me entra el wifi") (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio, falla técnica o pide cambio de clave/configuración de router, prima soporte técnico).
 - billing.balance: consulta de saldo a pagar, valor de factura o fecha límite de pago.
-- billing.payment_methods: consulta sobre números de cuenta, cuentas bancarias para depósito o transferencia, formas de pago autorizadas o a dónde/cómo pagar (ej: "número para depositar", "el número para de positarle", "a qué cuenta deposito", "dónde pago", "cuentas para transferir").
-- billing.record_payment: envío o reporte de comprobante, constancia, depósito o transferencia de pago YA realizado (en cualquier expresión del lenguaje natural: cuando el objetivo del cliente es registrar, reportar o confirmar su pago sin reportar fallas técnicas activas).`;
+- billing.payment_methods: consulta sobre números de cuenta, cuentas bancarias para depósito o transferencia, formas de pago autorizadas o a dónde/cómo pagar (ej: "número para depositar", "el número para de positarle", "a qué cuenta deposito", "dónde pago", "cuentas para transferir", "la cuenta para el depósito muy amable", "por favor a cuál de las dos cuentas hay que depositar", "a qué cuenta hay que depositar").
+- billing.record_payment: envío o reporte de comprobante, constancia, depósito o transferencia de pago YA realizado (en cualquier expresión del lenguaje natural: cuando el objetivo del cliente es registrar, reportar o confirmar su pago sin reportar fallas técnicas activas).
+- billing.payment_agreement: solicitud de prórroga, plazo de espera, promesa de pago, o acuerdo para pagar en una fecha futura (ej: "ayúdeme para cancelar hasta el 15 cobrando la quincena", "les cancelo por favor el 15", "puedo pagar a fin de mes", "dame plazo hasta el viernes", "esperen el pago hasta la quincena", "acuerdo de pago"). NUNCA clasificar como billing.record_payment porque el cliente NO ha pagado aún (en Ecuador 'cancelar' significa pagar).`;
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
     ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
@@ -115,12 +116,25 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
 - RECLAMOS DE FACTURACIÓN O DISPUTAS DE COBRO:
   Si el cliente reclama por valores cobrados incorrectamente, disputas de facturas o cobros indebidos:
   → Clasifica SIEMPRE como intent="billing.dispute".
+- SOLICITUD DE CUENTAS BANCARIAS O DÓNDE PAGAR:
+  Si el cliente pide la cuenta para pagar o depositar (ej: "La cuenta para el depósito muy amable", "Por favor a cual de las dos cuentas hay que depositar", "¿A qué cuenta deposito?"):
+  → Clasifica SIEMPRE como intent="billing.payment_methods" con type="NEW_INTENT" o type="CONTINUE" (entities: { billingPurpose: "payment_methods" }).
+  → NUNCA clasificar como billing.balance ni solicitarle cédula: el cliente solo necesita los números de cuenta para pagar.
+- ACUERDOS DE PAGO, PRÓRROGAS O PROMESAS DE PAGO FUTURO:
+  Si el cliente pide plazo, prórroga, acuerdo o promete pagar en una fecha posterior (ej: "ayúdeme para cancelar hasta el 15 cobrando la quincena", "les cancelo por favor el 15", "puedo pagar el viernes", "acuerdo de pago", "espérenme hasta fin de mes") (en Ecuador 'cancelar' significa pagar):
+  → Clasifica SIEMPRE como intent="billing.payment_agreement" con type="REQUEST_HUMAN", entities: { agreementRequested: true }.
+  → NUNCA clasificar como billing.record_payment. El cliente NO ha pagado todavía; pide plazo y requiere atención humana de Facturación.
+- PUNTUACIÓN AISLADA O CARACTERES NO VERBALES DURANTE CASO ACTIVO (".", "..", "?", "-"):
+  Si hay un caso activo esperando respuesta del cliente (cédula, comprobante, etc.) y el cliente envía únicamente un punto, signo de puntuación o carácter aislado:
+  → Clasifica SIEMPRE como type="CONTINUE" con el intent del caso activo y entities: {}.
+  → NUNCA clasificar como general.inquiry, sales.* ni UNCLEAR que reinicie el saludo inicial.
 
 ## Catálogo de "intent" y reglas de clasificación
 ${dynamicCatalogSection}
 - support.service_cancellation: solicitud de cancelación, baja definitiva o rescisión de contrato.
 - support.equipment_return: entrega o retiro de equipos/módem.
 - billing.dispute: reclamo o disputa por factura errónea o cobro indebido.
+- billing.payment_agreement: solicitud de prórroga, plazo de espera, promesa de pago, o acuerdo para pagar en una fecha futura.
 - general.complaint: queja formal o reclamo por mala atención o servicio deficiente.
 - unknown: no se puede determinar.
 
@@ -227,11 +241,17 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 17. Mensaje: "voy a cambiarme de domicilio, como puedo hacer con el servicio" (o "quiero cambiar la dirección de mi internet")
    → {"type":"NEW_INTENT","intent":"support.home_relocation","entities":{},"confidence":0.95}
 
-18. Mensaje donde el cliente expresa satisfacción, agradecimiento, cortesía o cierre tras recibir la información previa (ej: "Ok gracias", "todo claro amigo", "ya me quedó claro", "👍", "[Sticker enviado por el cliente]"):
-   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true,"isCourtesy":true},"confidence":0.95}
+18. Mensaje donde el cliente expresa satisfacción, confirmación de estar al día, agradecimiento, cortesía o cierre tras recibir la información previa (ej: "Ok gracias", "todo claro amigo", "ya me quedó claro", "Estamos al día tonces con el internet", "estoy al día entonces", "al día entonces gracias", "👍", "[Sticker enviado por el cliente]"):
+   → {"type":"CANCEL","intent":"general.inquiry","entities":{"isClosing":true,"isThankYou":true,"isCourtesy":true,"serviceConfirmed":true},"confidence":0.95}
 
-19. Mensaje: "necesito información sobre el pago" (o "¿cómo puedo pagar?", "información de pagos", "quiero saber de mi pago") SIN adjuntar comprobante ni afirmar haber pagado ya:
-   → {"type":"NEW_INTENT","intent":"billing.balance","entities":{"question":"Información de pago y saldo de la cuenta"},"confidence":0.95}`;
+19. Mensaje: "necesito información sobre el pago" (o "información de pagos", "quiero saber de mi pago") SIN adjuntar comprobante ni afirmar haber pagado ya:
+   → {"type":"NEW_INTENT","intent":"billing.balance","entities":{"question":"Información de pago y saldo de la cuenta"},"confidence":0.95}
+
+20. Mensaje: "ayúdeme para cancelar hasta el 15 cobrando la quincena" (o "les cancelo por favor el 15", "puedo pagar el viernes", "acuerdo de pago", "dame plazo hasta fin de mes") solicitando prórroga o plazo para pagar:
+   → {"type":"REQUEST_HUMAN","intent":"billing.payment_agreement","entities":{"agreementRequested":true},"confidence":0.95}
+
+21. Mensaje: "La cuenta para el depósito muy amable" (o "Por favor a cual de las dos cuentas hay que depositar", "¿A qué cuenta hay que depositar?"):
+   → {"type":"NEW_INTENT","intent":"billing.payment_methods","entities":{"billingPurpose":"payment_methods","question":"Cuentas bancarias para depósito"},"confidence":0.95}`;
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,

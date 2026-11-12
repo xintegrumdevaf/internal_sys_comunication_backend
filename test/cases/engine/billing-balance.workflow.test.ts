@@ -235,4 +235,33 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
     if (step1.type !== "WAITING_USER" || step1.context.workflowType !== "BILLING_BALANCE") throw new Error("unreachable");
     expect(step1.context.data.paymentMethodsInfo).toBe("Cuentas RAG: Banco Internacional Cta. 555666");
   });
+
+  it("si el cliente estaba en WAITING_USER_CLIENT (esperando cédula para saldo) y luego pide payment_methods, conmuta a RESPOND_PAYMENT_METHODS", async () => {
+    const ragServiceMock = {
+      query: async () => ({
+        found: true,
+        answer: "Cuentas RAG: Banco Pichincha 12345",
+        confidenceScore: 0.9,
+        sources: ["cuentas.pdf"],
+        retrievedChunks: [],
+        executionTimeMs: 10,
+      }),
+    } as unknown as RagService;
+
+    const dynamicWorkflow = createBillingBalanceWorkflow(ragServiceMock);
+    const engine = new WorkflowEngine([dynamicWorkflow]);
+    const gateway = new N8nGatewayFake({});
+
+    const ctx: CaseContext = {
+      workflowType: "BILLING_BALANCE",
+      data: { purpose: "balance" },
+    };
+
+    const step = await engine.step("BILLING_BALANCE", {
+      ...baseInput("WAITING_USER_CLIENT", ctx, gateway),
+      entities: { billingPurpose: "payment_methods" },
+    });
+
+    expect(step).toMatchObject({ type: "CONTINUE", nextState: "RESPOND_PAYMENT_METHODS" });
+  });
 });

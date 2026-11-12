@@ -180,6 +180,7 @@ export class ConversationRepositoryPg implements ConversationRepositoryPort {
         SELECT m1.id, m1.body, m1.author, m1.created_at
         FROM message m1
         WHERE m1.conversation_id = c.id
+          AND m1.author != 'system'
           AND m1.body ILIKE ('%' || $1 || '%')
         ORDER BY m1.created_at DESC
         LIMIT 1

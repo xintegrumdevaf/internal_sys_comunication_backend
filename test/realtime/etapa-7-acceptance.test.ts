@@ -205,7 +205,7 @@ describe("Etapa 7 aceptacion (docs/spec/05_BUILD_PLAN.md)", () => {
     });
     const listConversations = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
     const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
-    const markAsRead = new MarkConversationAsReadUseCase(conversationRepo);
+    const markAsRead = new MarkConversationAsReadUseCase(conversationRepo, broadcaster);
     const replyAsHuman = new ReplyAsHumanUseCase({
       conversationRepo,
       messageRepo,

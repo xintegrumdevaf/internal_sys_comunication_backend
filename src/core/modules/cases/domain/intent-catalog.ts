@@ -69,6 +69,11 @@ export const INTENT_CATALOG = [
     description: "reclamo o disputa por cobros indebidos o facturas erróneas",
   },
   {
+    intent: "billing.payment_agreement",
+    workflowType: null,
+    description: "solicitud de prórroga, acuerdo de pago, espera o promesa de pago para una fecha posterior",
+  },
+  {
     intent: "general.complaint",
     workflowType: null,
     description: "queja formal por mala atención o inconformidad grave",

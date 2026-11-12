@@ -88,11 +88,11 @@ function resolvePurpose(
   data: BillingBalanceContext,
   entities?: Record<string, unknown>,
 ): "balance" | "record_payment" | "payment_methods" {
-  if (data.purpose === "record_payment" || data.purpose === "balance" || data.purpose === "payment_methods") return data.purpose;
   if (entities?.billingPurpose === "payment_methods") return "payment_methods";
   if (entities?.billingPurpose === "record_payment") return "record_payment";
   if (hasCompletePayment(mergePaymentFromEntities(data, entities))) return "record_payment";
-  return "balance";
+  if (data.purpose === "record_payment" || data.purpose === "payment_methods") return data.purpose;
+  return data.purpose ?? "balance";
 }
 
 export function createBillingBalanceWorkflow(ragService?: RagService): WorkflowDefinition {

@@ -856,7 +856,7 @@ export function createContainer(): Container {
     departmentRepo,
   );
   const listMessages = new ListMessagesUseCase(conversationRepo, messageRepo);
-  const markAsRead = new MarkConversationAsReadUseCase(conversationRepo);
+  const markAsRead = new MarkConversationAsReadUseCase(conversationRepo, broadcaster);
   const replyAsHuman = new ReplyAsHumanUseCase({
     conversationRepo,
     messageRepo,

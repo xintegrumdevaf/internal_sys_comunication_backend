@@ -413,6 +413,7 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         limit: Number.isFinite(limit) ? limit : undefined,
         cursor,
       });
+      void markAsRead.execute(req.params.id).catch(() => {});
       res.json({ data: messages });
     } catch (error) {
       next(error);
