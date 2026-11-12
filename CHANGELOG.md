@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Alertas de Infraestructura OLT (`AnalyticsRepositoryPg.getInfrastructureAlerts`)**: Exclusión de registros con sector nulo o vacío para evitar falsas detecciones de corte masivo en reportes y snapshots.
+- **Saturación de pool PostgreSQL y N+1 en bandeja (`list-conversations.use-case.ts`, `case.repository.pg.ts`, `pool.ts`)**: Carga en lote de casos activos y estado de automatización mediante `ANY($1::uuid[])` (`listByConversationIds`, `getAutomationStatesByCaseIds`) e índices `Map` para agentes y departamentos (eliminando consultas secuenciales N+1 por conversación) y ampliación de pool a `PG_POOL_MAX || 20` con `idleTimeoutMillis: 30000`.
+- **Control de memoria en caché multimedia y limpieza SSE (`conversations.router.ts`, `realtime.router.ts`)**: Límite de memoria en `mediaMemoryCache` (máximo 64 entradas, 32 MB totales y 4 MB por archivo con expulsión FIFO) y limpieza idempotente de suscriptores SSE ante cierre de `req`/`res` o fallo de escritura.
 
 ## [0.2.14] - 2026-11-11
 

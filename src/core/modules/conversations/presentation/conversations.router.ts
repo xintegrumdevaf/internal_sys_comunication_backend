@@ -57,29 +57,49 @@ interface CachedMediaItem {
 }
 
 const mediaMemoryCache = new Map<string, CachedMediaItem>();
-const MAX_CACHE_ENTRIES = 300;
+let mediaMemoryCacheBytes = 0;
+const MAX_CACHE_ENTRIES = 64;
+const MAX_CACHE_BYTES = 32 * 1024 * 1024;
+const MAX_SINGLE_CACHE_BYTES = 4 * 1024 * 1024;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function evictCachedMediaKey(key: string): void {
+  const existing = mediaMemoryCache.get(key);
+  if (!existing) return;
+  mediaMemoryCache.delete(key);
+  mediaMemoryCacheBytes = Math.max(0, mediaMemoryCacheBytes - existing.buffer.byteLength);
+}
 
 function getCachedMedia(key: string): CachedMediaItem | null {
   const cached = mediaMemoryCache.get(key);
   if (!cached) return null;
   if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
-    mediaMemoryCache.delete(key);
+    evictCachedMediaKey(key);
     return null;
   }
   return cached;
 }
 
 function setCachedMedia(key: string, buffer: Buffer, contentType: string | null) {
-  if (mediaMemoryCache.size >= MAX_CACHE_ENTRIES) {
+  if (buffer.byteLength > MAX_SINGLE_CACHE_BYTES) {
+    return;
+  }
+  evictCachedMediaKey(key);
+  while (
+    mediaMemoryCache.size >= MAX_CACHE_ENTRIES ||
+    mediaMemoryCacheBytes + buffer.byteLength > MAX_CACHE_BYTES
+  ) {
     const oldestKey = mediaMemoryCache.keys().next().value;
-    if (oldestKey) mediaMemoryCache.delete(oldestKey);
+    if (!oldestKey) break;
+    evictCachedMediaKey(oldestKey);
   }
   mediaMemoryCache.set(key, { buffer, contentType, timestamp: Date.now() });
+  mediaMemoryCacheBytes += buffer.byteLength;
 }
 
 export function _clearMediaCacheForTesting(): void {
   mediaMemoryCache.clear();
+  mediaMemoryCacheBytes = 0;
 }
 
 function sendMediaResponse(

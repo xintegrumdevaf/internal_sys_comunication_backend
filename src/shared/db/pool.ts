@@ -2,7 +2,12 @@ import { Pool, type PoolClient } from "pg";
 import type { Env } from "../config/env";
 
 export function createPostgresPool(env: Env): Pool {
-  const pool = new Pool({ connectionString: env.DATABASE_URL });
+  const maxConnections = Number(process.env.PG_POOL_MAX) || 20;
+  const pool = new Pool({
+    connectionString: env.DATABASE_URL,
+    max: maxConnections,
+    idleTimeoutMillis: 30_000,
+  });
 
   pool.on("error", (error) => {
     // Conexiones ociosas del pool pueden fallar de forma asincrona;

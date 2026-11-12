@@ -50,6 +50,9 @@ export interface CaseRepositoryPort {
 
   listByConversation(conversationId: string): Promise<Case[]>;
 
+  /** Carga casos de múltiples conversaciones en una sola consulta batch (opcional en fakes). */
+  listByConversationIds?(conversationIds: string[]): Promise<Map<string, Case[]>>;
+
   listAutomatableExpiring(now: Date): Promise<Case[]>;
 
   applyTransition(input: ApplyCaseTransitionInput): Promise<CaseAggregate>;
@@ -57,6 +60,9 @@ export interface CaseRepositoryPort {
   setAssignedAgent(caseId: string, agentId: string | null): Promise<void>;
 
   getAutomationState(caseId: string): Promise<AutomationState | null>;
+
+  /** Carga estados de automatización de múltiples casos en una sola consulta batch (opcional en fakes). */
+  getAutomationStatesByCaseIds?(caseIds: string[]): Promise<Map<string, AutomationState>>;
 
   setAutomationEnabled(
     caseId: string,

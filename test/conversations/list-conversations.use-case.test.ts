@@ -210,4 +210,80 @@ describe("ListConversationsUseCase - filtrado por caso activo", () => {
     expect(byDept).toHaveLength(1);
     expect(byDept[0]!.id).toBe(conv.id);
   });
+
+  it("usa carga en lote (sin N+1 secuencial) cuando el repositorio expone listByConversationIds y getAutomationStatesByCaseIds", async () => {
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+    const baseCaseRepo = new CaseRepositoryFake();
+    const departmentRepo = new DepartmentRepositoryFake();
+
+    const deptSoporte = departmentRepo.seed({ slug: "soporte", name: "Soporte" });
+    const conv1 = conversationRepo.createOpen({ id: "conv-b1", waPhone: "+593980000001", status: "open" });
+    const conv2 = conversationRepo.createOpen({ id: "conv-b2", waPhone: "+593980000002", status: "open" });
+    messageRepo.seedText(conv1.id, "Hola 1");
+    messageRepo.seedText(conv2.id, "Hola 2");
+
+    const { case: c1 } = await baseCaseRepo.create({
+      conversationId: conv1.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: deptSoporte.id,
+      context: emptyContextFor("SUPPORT_INTERNET"),
+      initialState: "START",
+      expiresAt: null,
+    });
+    const { case: c2 } = await baseCaseRepo.create({
+      conversationId: conv2.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: deptSoporte.id,
+      context: emptyContextFor("SUPPORT_INTERNET"),
+      initialState: "START",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conv1.id, c1.id);
+    await conversationRepo.setActiveCaseId(conv2.id, c2.id);
+
+    let singleCalls = 0;
+    let batchCasesCalls = 0;
+    let batchAutomationCalls = 0;
+
+    const batchCaseRepo = Object.create(baseCaseRepo) as CaseRepositoryFake & {
+      listByConversationIds: (ids: string[]) => Promise<Map<string, Awaited<ReturnType<CaseRepositoryFake["listByConversation"]>>>>;
+      getAutomationStatesByCaseIds: (ids: string[]) => Promise<Map<string, NonNullable<Awaited<ReturnType<CaseRepositoryFake["getAutomationState"]>>>>>;
+    };
+    batchCaseRepo.listByConversation = async (id: string) => {
+      singleCalls += 1;
+      return baseCaseRepo.listByConversation(id);
+    };
+    batchCaseRepo.listByConversationIds = async (ids: string[]) => {
+      batchCasesCalls += 1;
+      const map = new Map<string, Awaited<ReturnType<CaseRepositoryFake["listByConversation"]>>>();
+      for (const id of ids) {
+        map.set(id, await baseCaseRepo.listByConversation(id));
+      }
+      return map;
+    };
+    batchCaseRepo.getAutomationStatesByCaseIds = async (ids: string[]) => {
+      batchAutomationCalls += 1;
+      const map = new Map<string, NonNullable<Awaited<ReturnType<CaseRepositoryFake["getAutomationState"]>>>>();
+      for (const id of ids) {
+        const st = await baseCaseRepo.getAutomationState(id);
+        if (st) map.set(id, st);
+      }
+      return map;
+    };
+
+    const listUseCase = new ListConversationsUseCase(
+      conversationRepo,
+      messageRepo,
+      batchCaseRepo,
+      undefined,
+      departmentRepo,
+    );
+
+    const items = await listUseCase.execute({});
+    expect(items).toHaveLength(2);
+    expect(batchCasesCalls).toBe(1);
+    expect(batchAutomationCalls).toBe(1);
+    expect(singleCalls).toBe(0);
+  });
 });

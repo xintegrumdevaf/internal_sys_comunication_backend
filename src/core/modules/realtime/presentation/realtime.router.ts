@@ -51,14 +51,28 @@ export function createRealtimeRouter(deps: RealtimeRouterDeps): Router {
         void deps.drainQueue.drainQueueForAgent(agent.id).catch(() => {});
       }
 
+      let cleanedUp = false;
       const keepAlive = setInterval(() => {
-        res.write(`: ping\n\n`);
+        if (res.writableEnded || res.destroyed) {
+          cleanup();
+          return;
+        }
+        try {
+          res.write(`: ping\n\n`);
+        } catch {
+          cleanup();
+        }
       }, 25000);
 
-      req.on("close", () => {
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
         clearInterval(keepAlive);
         unsubscribe();
-      });
+      };
+
+      req.on("close", cleanup);
+      res.on("close", cleanup);
     } catch (error) {
       next(error);
     }

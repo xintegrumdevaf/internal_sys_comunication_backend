@@ -62,10 +62,39 @@ export class ListConversationsUseCase {
     private readonly departmentRepo?: DepartmentRepositoryPort,
   ) {}
 
+  private async loadCasesMap(conversationIds: string[]): Promise<Map<string, Case[]>> {
+    if (!this.caseRepo || conversationIds.length === 0) {
+      return new Map();
+    }
+    if (this.caseRepo.listByConversationIds) {
+      return this.caseRepo.listByConversationIds(conversationIds);
+    }
+    const entries = await Promise.all(
+      conversationIds.map(async (id) => [id, await this.caseRepo!.listByConversation(id)] as const),
+    );
+    return new Map(entries);
+  }
+
+  private async loadAutomationMap(caseIds: string[]) {
+    if (!this.caseRepo || caseIds.length === 0) {
+      return new Map();
+    }
+    if (this.caseRepo.getAutomationStatesByCaseIds) {
+      return this.caseRepo.getAutomationStatesByCaseIds(caseIds);
+    }
+    const entries = await Promise.all(
+      caseIds.map(async (id) => [id, await this.caseRepo!.getAutomationState(id)] as const),
+    );
+    return new Map(entries.flatMap(([id, state]) => (state ? [[id, state] as const] : [])));
+  }
+
   async execute(filter: ListConversationsQuery): Promise<ConversationDto[]> {
     const rawConversations = await this.conversationRepo.list({ status: filter.status });
+    if (rawConversations.length === 0) return [];
 
-    // Resolver el caso activo para cada conversación en una sola pasada
+    // Cargar casos por conversación en lote (evita N+1 por cada chat)
+    const casesByConversation = await this.loadCasesMap(rawConversations.map((c) => c.id));
+
     type ResolvedItem = {
       conv: Conversation;
       activeAggregate: Case | null;
@@ -75,7 +104,7 @@ export class ListConversationsUseCase {
     const resolvedItems: ResolvedItem[] = [];
 
     for (const conv of rawConversations) {
-      const cases = this.caseRepo ? await this.caseRepo.listByConversation(conv.id) : [];
+      const cases = casesByConversation.get(conv.id) ?? [];
       const activeAggregate =
         (conv.activeCaseId ? cases.find((item) => item.id === conv.activeCaseId) : null) ??
         cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
@@ -85,7 +114,7 @@ export class ListConversationsUseCase {
       const isClosedRecord = conv.status === "resolved" || conv.status === "closed";
       const recordCase =
         !activeAggregate && isClosedRecord
-          ? [...cases].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+          ? ([...cases].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null)
           : null;
 
       // Con caso vivo se filtra por ese caso. En resueltas/cerradas, por quien atendió el último.
@@ -106,8 +135,21 @@ export class ListConversationsUseCase {
       resolvedItems.push({ conv, activeAggregate, recordCase });
     }
 
-    const conversations = resolvedItems.map((item) => item.conv);
-    const lastMap = await this.messageRepo.findLastByConversationIds(conversations.map((c) => c.id));
+    if (resolvedItems.length === 0) return [];
+
+    const activeCaseIds = resolvedItems
+      .map((item) => item.activeAggregate?.id)
+      .filter((id): id is string => Boolean(id));
+
+    const [lastMap, automationMap, agentsList, departmentsList] = await Promise.all([
+      this.messageRepo.findLastByConversationIds(resolvedItems.map((item) => item.conv.id)),
+      this.loadAutomationMap(activeCaseIds),
+      this.agentRepo ? this.agentRepo.list() : Promise.resolve([]),
+      this.departmentRepo ? this.departmentRepo.list() : Promise.resolve([]),
+    ]);
+
+    const agentById = new Map(agentsList.map((a) => [a.id, a]));
+    const deptById = new Map(departmentsList.map((d) => [d.id, d]));
     const dtos: ConversationDto[] = [];
 
     for (const { conv, activeAggregate, recordCase } of resolvedItems) {
@@ -116,13 +158,9 @@ export class ListConversationsUseCase {
       let lastAttendedBy: ConversationDto["lastAttendedBy"] = null;
 
       if (recordCase) {
-        let agentName: string | null = null;
         const caseCtx = recordCase.context as Record<string, unknown> | undefined;
         const effectiveAgentId = (caseCtx?.closedByAgentId as string | undefined) || recordCase.assignedAgentId;
-        if (effectiveAgentId && this.agentRepo) {
-          const ag = await this.agentRepo.findById(effectiveAgentId);
-          if (ag) agentName = ag.name;
-        }
+        let agentName: string | null = effectiveAgentId ? (agentById.get(effectiveAgentId)?.name ?? null) : null;
         if (!agentName && caseCtx?.closedByAgentName) {
           agentName = String(caseCtx.closedByAgentName);
         }
@@ -132,31 +170,22 @@ export class ListConversationsUseCase {
         };
       }
 
-      if (activeAggregate && this.caseRepo) {
-        const autoState = await this.caseRepo.getAutomationState(activeAggregate.id);
-        let assignedAgentName: string | null = null;
-        let departmentName: string | null = null;
-        let departmentSlug: string | null = null;
-
-        if (activeAggregate.assignedAgentId && this.agentRepo) {
-          const ag = await this.agentRepo.findById(activeAggregate.assignedAgentId);
-          if (ag) assignedAgentName = ag.name;
-        }
-        if (activeAggregate.departmentId && this.departmentRepo) {
-          const dept = await this.departmentRepo.findById(activeAggregate.departmentId);
-          if (dept) {
-            departmentName = dept.name;
-            departmentSlug = dept.slug;
-          }
-        }
+      if (activeAggregate) {
+        const autoState = automationMap.get(activeAggregate.id) ?? null;
+        const assignedAgentName = activeAggregate.assignedAgentId
+          ? (agentById.get(activeAggregate.assignedAgentId)?.name ?? null)
+          : null;
+        const dept = activeAggregate.departmentId
+          ? deptById.get(activeAggregate.departmentId)
+          : undefined;
 
         activeCaseDto = {
           id: activeAggregate.id,
           status: activeAggregate.status,
           workflowType: activeAggregate.workflowType,
           departmentId: activeAggregate.departmentId,
-          departmentName,
-          departmentSlug,
+          departmentName: dept?.name ?? null,
+          departmentSlug: dept?.slug ?? null,
           assignedAgentId: activeAggregate.assignedAgentId,
           assignedAgentName,
           automationEnabled: autoState

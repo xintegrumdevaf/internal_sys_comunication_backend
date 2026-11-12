@@ -218,6 +218,26 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
     return rows.map(mapCaseRow);
   }
 
+  async listByConversationIds(conversationIds: string[]): Promise<Map<string, Case[]>> {
+    const result = new Map<string, Case[]>();
+    if (conversationIds.length === 0) return result;
+
+    const { rows } = await this.pool.query<CaseRow>(
+      `SELECT * FROM "case" WHERE conversation_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
+      [conversationIds],
+    );
+    for (const row of rows) {
+      const entity = mapCaseRow(row);
+      const list = result.get(entity.conversationId);
+      if (list) {
+        list.push(entity);
+      } else {
+        result.set(entity.conversationId, [entity]);
+      }
+    }
+    return result;
+  }
+
   async listAutomatableExpiring(now: Date): Promise<Case[]> {
     const cutoff24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const { rows } = await this.pool.query<CaseRow>(
@@ -289,6 +309,21 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
       [caseId],
     );
     return rows[0] ? mapAutomationStateRow(rows[0]) : null;
+  }
+
+  async getAutomationStatesByCaseIds(caseIds: string[]): Promise<Map<string, AutomationState>> {
+    const result = new Map<string, AutomationState>();
+    if (caseIds.length === 0) return result;
+
+    const { rows } = await this.pool.query<AutomationStateRow>(
+      `SELECT * FROM automation_state WHERE case_id = ANY($1::uuid[])`,
+      [caseIds],
+    );
+    for (const row of rows) {
+      const state = mapAutomationStateRow(row);
+      result.set(state.caseId, state);
+    }
+    return result;
   }
 
   async setAutomationEnabled(
