@@ -92,8 +92,6 @@ export function resolveReplyTemplate(input: {
     ) {
       if (typeof contextData.paymentMethodsInfo === "string" && contextData.paymentMethodsInfo.trim().length > 0) {
         templateHint = `${contextData.paymentMethodsInfo.trim()}\n\nUna vez realizado tu pago, envíanos la foto o comprobante por aquí mismo para registrarlo.`;
-      } else if (templates.RESPOND_PAYMENT_METHODS) {
-        templateHint = templates.RESPOND_PAYMENT_METHODS;
       }
     } else if (
       outcome.nextState === "WAITING_USER_DISAMBIGUATE" &&
@@ -159,7 +157,10 @@ export function resolveReplyTemplate(input: {
 
   if (outcome.type === "ESCALATED") {
     let hint = templates.ESCALATED ?? REQUEST_HUMAN_TEMPLATE;
-    if (contextData.allContractsInactive) {
+    if (outcome.reason === "UNANSWERED_PAYMENT_METHODS") {
+      hint =
+        "Con mucho gusto, te comunico con un asesor de nuestro equipo de Facturación para que te proporcione los canales y números de cuenta bancaria autorizados vigentes.";
+    } else if (contextData.allContractsInactive) {
       hint = `Identificamos tu número de cédula, pero tus contratos anteriores figuran como retirados o anulados y actualmente no registras un servicio de internet activo. Te comunicamos con un asesor para asistirte.`;
     }
     return {

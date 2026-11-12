@@ -81,30 +81,27 @@ describe("resolveReplyTemplate — WAITING_USER_DISAMBIGUATE", () => {
     expect(resolved.templateHint).toContain("no registras un servicio de internet activo");
   });
 
-  it("prioriza la plantilla RESPOND_PAYMENT_METHODS cuando el propósito es payment_methods en lugar de pedir comprobante a ciegas", () => {
+  it("emite mensaje de derivación a Facturación cuando outcome.reason es UNANSWERED_PAYMENT_METHODS", () => {
     const context: CaseContext = {
       workflowType: "BILLING_BALANCE",
       data: {
         purpose: "payment_methods",
-        receiptAttempts: 0,
       },
     };
 
     const resolved = resolveReplyTemplate({
       definition: billingBalanceWorkflow,
       outcome: {
-        type: "WAITING_USER",
-        nextState: "WAITING_USER_RECEIPT",
+        type: "ESCALATED",
+        reason: "UNANSWERED_PAYMENT_METHODS",
         context,
       },
       context,
     });
 
-    expect(resolved.action).toBe("WAITING_USER_RECEIPT");
-    expect(resolved.status).toBe("WAITING_USER");
-    expect(resolved.templateHint).toContain("Banco Pichincha");
-    expect(resolved.templateHint).toContain("Banco Guayaquil");
-    expect(resolved.templateHint).toContain("Produbanco");
+    expect(resolved.action).toBe("ESCALATED");
+    expect(resolved.status).toBe("ESCALATED");
+    expect(resolved.templateHint).toContain("cuenta bancaria autorizados vigentes");
   });
 
   it("utiliza paymentMethodsInfo dinámico de RAG cuando está presente en lugar de la plantilla estática", () => {

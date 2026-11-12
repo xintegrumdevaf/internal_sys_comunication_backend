@@ -185,7 +185,7 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
     expect(gateway.actionsCalledFor("RECORD_PAYMENT")).toBe(0);
   });
 
-  it("payment_methods: VALIDATE_CLIENT → RESPOND_PAYMENT_METHODS → WAITING_USER_RECEIPT sin requerir cédula", async () => {
+  it("payment_methods sin RAG o sin respuesta: escala a Facturación en lugar de entregar datos quemados", async () => {
     const engine = new WorkflowEngine([billingBalanceWorkflow]);
     const gateway = new N8nGatewayFake({});
 
@@ -202,7 +202,10 @@ describe("billingBalanceWorkflow (Etapa 8)", () => {
       "BILLING_BALANCE",
       baseInput("RESPOND_PAYMENT_METHODS", step1.context, gateway),
     );
-    expect(step2).toMatchObject({ type: "WAITING_USER", nextState: "WAITING_USER_RECEIPT" });
+    expect(step2).toMatchObject({
+      type: "ESCALATED",
+      reason: "UNANSWERED_PAYMENT_METHODS",
+    });
     expect(gateway.actionsCalledFor("VALIDATE_CLIENT")).toBe(0);
   });
 
