@@ -174,4 +174,30 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
     expect(escalated.assignedAgentId).toBe(beto.id);
     expect(escalated.status).toBe("HUMAN_ACTIVE");
   });
+
+  it("enruta casos sin clasificar (sendToTriage) al departamento General cuando existe y permite auto-asignación", async () => {
+    const { escalationService, agentRepo, departmentRepo } = buildStack();
+    const general = departmentRepo.seed({ slug: "general", name: "General" });
+    const carlos = agentRepo.seed({
+      name: "Carlos",
+      email: "carlos@isp.local",
+      role: "agent",
+      primaryDepartmentId: general.id,
+      autoAssignEnabled: true,
+    });
+
+    const { case: routedCase, escalation } = await escalationService.sendToTriage({
+      conversationId: "conv-general-fallback",
+      reason: "MAX_CLARIFY_ATTEMPTS_EXCEEDED",
+      correlationId: "corr-general-fallback",
+    });
+
+    expect(routedCase.departmentId).toBe(general.id);
+    expect(routedCase.workflowType).toBe("GENERAL_INQUIRY");
+    expect(routedCase.assignedAgentId).toBe(carlos.id);
+    expect(routedCase.status).toBe("HUMAN_ACTIVE");
+    expect(escalation.departmentId).toBe(general.id);
+    expect(escalation.assignedAgentId).toBe(carlos.id);
+    expect(escalation.status).toBe("ASSIGNED");
+  });
 });

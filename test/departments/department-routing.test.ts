@@ -158,10 +158,26 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
       expect(createdCase.workflowType).toBe("BILLING_BALANCE");
     });
 
-    it("retorna null en lugar de asignar a ciegas el primer departamento cuando no hay coincidencia", async () => {
+    it("retorna null en lugar de asignar a ciegas el primer departamento cuando no hay coincidencia y no existe General", async () => {
       const resolver = new DepartmentResolverService(departmentRepo, routingService);
       const resolved = await resolver.resolveDepartmentId("UNKNOWN_OR_UNCLASSIFIED");
       expect(resolved).toBeNull();
+    });
+
+    it("enruta automáticamente a General cuando existe un departamento general y el caso no pudo clasificarse", async () => {
+      const generalDept = departmentRepo.seed({
+        slug: "general",
+        name: "General",
+        description: "Atención general y recepción",
+      });
+      await routingService.invalidateCache();
+
+      const resolver = new DepartmentResolverService(departmentRepo, routingService);
+      const byUnknownWorkflow = await resolver.resolveDepartmentId("UNKNOWN_OR_UNCLASSIFIED");
+      const byUnknownIntent = await resolver.resolveDepartmentId("UNKNOWN_WORKFLOW", "algo.desconocido");
+
+      expect(byUnknownWorkflow).toBe(generalDept.id);
+      expect(byUnknownIntent).toBe(generalDept.id);
     });
   });
 

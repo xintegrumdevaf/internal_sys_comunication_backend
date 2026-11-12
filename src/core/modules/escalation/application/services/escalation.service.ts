@@ -13,6 +13,7 @@ import { type CaseSummaryBuilderService } from "./case-summary-builder.service";
 import { businessReplyForReason } from "./business-reply-catalog";
 import type { AutoAssignAgentService } from "./auto-assign-agent.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
+import { resolveGeneralDepartment } from "../../../departments/application/services/general-department.helper";
 
 export type EscalationServiceDeps = {
   caseRepo: CaseRepositoryPort;
@@ -150,8 +151,9 @@ export class EscalationService {
   }
 
   /**
-   * Pool de triage: caso UNCLASSIFIED + department_id (opcional o null) + escalation
-   * (02_STATE_MACHINE.md §10).
+   * Enruta casos no clasificados o de fallback al departamento General (cuando existe)
+   * como `GENERAL_INQUIRY` con auto-asignación habilitada; solo cae al pool sin
+   * departamento (`UNCLASSIFIED`) si no existe ningún departamento General activo.
    */
   async sendToTriage(input: {
     conversationId: string;
@@ -159,17 +161,24 @@ export class EscalationService {
     correlationId: string;
     departmentId?: string | null;
   }): Promise<{ case: Case; escalation: Escalation; customerMessage: string }> {
-    const { caseRepo, conversationRepo } = this.deps;
+    const { caseRepo, conversationRepo, departmentRepo } = this.deps;
     const log = this.deps.logger.child({
       correlationId: input.correlationId,
       conversationId: input.conversationId,
     });
 
+    const resolvedGeneral = !input.departmentId
+      ? await resolveGeneralDepartment(departmentRepo)
+      : null;
+    const targetDepartmentId = input.departmentId ?? resolvedGeneral?.id ?? null;
+    const routedToGeneralFallback = !input.departmentId && Boolean(resolvedGeneral);
+    const workflowType = routedToGeneralFallback ? "GENERAL_INQUIRY" : "UNCLASSIFIED";
+
     const aggregate = await caseRepo.create({
       conversationId: input.conversationId,
-      workflowType: "UNCLASSIFIED",
-      departmentId: input.departmentId ?? null,
-      context: emptyContextFor("UNCLASSIFIED"),
+      workflowType,
+      departmentId: targetDepartmentId,
+      context: emptyContextFor(workflowType),
       initialState: "TRIAGE",
       expiresAt: null,
     });
@@ -188,23 +197,37 @@ export class EscalationService {
     await caseRepo.appendEvent(transitioned.case.id, "CASE_ESCALATED", {
       reason: input.reason,
       triage: true,
+      routedToGeneral: routedToGeneralFallback,
       correlationId: input.correlationId,
     });
     await conversationRepo.setActiveCaseId(input.conversationId, null);
 
-    const { escalation, caseEntity } = await this.persistEscalation(transitioned.case, input.reason, "normal");
-    const customerMessage = businessReplyForReason("TRIAGE");
+    const { escalation, caseEntity } = await this.persistEscalation(
+      transitioned.case,
+      input.reason,
+      "normal",
+    );
+    const customerMessage = routedToGeneralFallback
+      ? businessReplyForReason(input.reason, resolvedGeneral?.slug ?? null)
+      : businessReplyForReason("TRIAGE");
 
     log.info(
-      { caseId: transitioned.case.id, escalationId: escalation.id, departmentId: input.departmentId ?? null },
-      "caso enviado al pool de triage / cola de departamento",
+      {
+        caseId: transitioned.case.id,
+        escalationId: escalation.id,
+        departmentId: targetDepartmentId,
+        workflowType,
+      },
+      routedToGeneralFallback
+        ? "caso no clasificado derivado automáticamente a departamento General"
+        : "caso enviado al pool de triage / cola de departamento",
     );
     const conv = await conversationRepo.findById(input.conversationId);
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: transitioned.case.id,
       conversationId: input.conversationId,
-      departmentId: input.departmentId ?? null,
+      departmentId: targetDepartmentId,
       at: new Date().toISOString(),
       customerName: conv?.waProfileName ?? null,
       customerPhone: conv?.waPhone ?? null,
@@ -226,7 +249,8 @@ export class EscalationService {
     const events = await this.deps.caseRepo.listEvents(caseEntity.id);
     const department = caseEntity.departmentId
       ? await this.deps.departmentRepo.findById(caseEntity.departmentId)
-      : null;
+      : await resolveGeneralDepartment(this.deps.departmentRepo);
+    const effectiveDepartmentId = caseEntity.departmentId ?? department?.id ?? null;
 
     const summary = this.deps.summaryBuilder.build({
       caseEntity,
@@ -238,7 +262,7 @@ export class EscalationService {
 
     const escalation = await this.deps.escalationRepo.create({
       caseId: caseEntity.id,
-      departmentId: caseEntity.departmentId,
+      departmentId: effectiveDepartmentId,
       priority,
       reason,
       summary,

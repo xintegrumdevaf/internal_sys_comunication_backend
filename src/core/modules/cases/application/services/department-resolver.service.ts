@@ -1,5 +1,6 @@
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { DepartmentRoutingService } from "../../../departments/application/services/department-routing.service";
+import { resolveGeneralDepartment } from "../../../departments/application/services/general-department.helper";
 
 /**
  * docs/spec/02_STATE_MACHINE.md §9 — resolución de departamento para casos.
@@ -50,10 +51,9 @@ export class DepartmentResolverService {
       }
     }
 
-    // Si no coincide con ningún departamento específico, no asignar departamento a ciegas.
-    // Debe quedar en null (pool general de triage) para que los supervisores/admin lo enruten,
-    // en lugar de enviarlo erróneamente al primer departamento de la lista (ej. Facturación).
-    return null;
+    // Fallback universal a General: ningún caso sin coincidencia debe quedar sin departamento si existe General.
+    const generalDept = await resolveGeneralDepartment(this.departmentRepo);
+    return generalDept?.id ?? null;
   }
 
   getDepartmentSlug(departmentId: string): string | null {

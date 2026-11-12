@@ -2,6 +2,7 @@ import type { DepartmentRepositoryPort } from "../ports/department.repository.po
 import type { DepartmentCaseRouting } from "../../domain/department-case-routing.entity";
 import type { Logger } from "../../../../../shared/logging/logger";
 import { mapIntentToWorkflowType } from "../../../cases/domain/intent-catalog";
+import { resolveGeneralDepartment } from "./general-department.helper";
 
 export interface DynamicPromptIntent {
   intent: string;
@@ -158,14 +159,15 @@ export class DepartmentRoutingService {
         }
       }
 
-      // Si no coincide con ninguna palabra clave, retornar null (pool general de triage)
-      // para evitar forzar el caso al primer departamento de la lista (ej. Facturación).
-      return null;
+      // 4. Fallback universal a General: los casos no clasificados caen a General cuando exista.
+      const generalDept = await resolveGeneralDepartment(this.departmentRepo);
+      return generalDept?.id ?? null;
     } catch {
       // Ignorar error de lista si ocurre en fakes incompletos
     }
 
-    return null;
+    const generalDept = await resolveGeneralDepartment(this.departmentRepo);
+    return generalDept?.id ?? null;
   }
 
   getDepartmentSlug(departmentId: string): string | null {
