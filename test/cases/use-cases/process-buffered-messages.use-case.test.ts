@@ -869,6 +869,72 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(autoState?.enabled).toBe(false);
   });
 
+  it("si el cliente envió una foto en los últimos 30 min y luego manda un punto (.) como bump, reconoce el comprobante y deriva a cartera", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      advanceCase,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let escalatedReason: string | null = null;
+    const escalationService = {
+      escalateExistingCase: async (input: { caseId: string; reason: string }) => {
+        escalatedReason = input.reason;
+        return { customerMessage: "" };
+      },
+      sendToTriage: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const fakeAi = new FakeAIProvider();
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: new QueuedInterpretationProvider([
+        { type: "UNCLEAR", intent: "general.inquiry", entities: {}, confidence: 0.3 },
+      ]),
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      escalationService,
+      logger: silentLogger,
+    });
+
+    // Simulamos que el cliente envió una imagen previamente (hace 2 minutos)
+    messageRepo.seedText(conversation.id, "", {
+      type: "image",
+      mediaId: "prior-media-1",
+      createdAt: new Date(Date.now() - 2 * 60 * 1000),
+    });
+
+    // Y ahora el cliente envía un punto (.) como toque de atención
+    const dotMsg = messageRepo.seedText(conversation.id, ".");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-dot-bump",
+      messages: [dotMsg],
+    });
+
+    const lastSent = whatsappSender.sent[whatsappSender.sent.length - 1];
+    expect(lastSent?.body).toContain("Estamos verificando tu comprobante de pago");
+    expect(lastSent?.body).not.toContain("¡Hola! Buenos días");
+    expect(escalatedReason).toContain("Comprobante de pago adjunto");
+  });
+
   it("prioriza soporte técnico (support.internet) cuando el cliente reporta que no tiene internet aunque adjunte comprobante de pago", async () => {
     const scenario = buildScenario();
     const {

@@ -149,6 +149,11 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
 - COMPROBANTE SOLO EN IMAGEN, VIDEO O DOCUMENTO: Si el mensaje es únicamente un adjunto (o su descripción) de comprobante, transferencia bancaria, depósito o constancia de pago (ej: "[Adjunto imagen: comprobante de transferencia Banco Pichincha por $21.55]", "[Adjunto: foto de comprobante de pago/transferencia bancaria]") y NO hay reporte de falla de internet:
   → Clasifica SIEMPRE como type="NEW_INTENT", intent="billing.record_payment", con confianza alta.
   → NUNCA como UNCLEAR, saludo ni general.inquiry. Aunque el cliente no haya escrito una frase, la imagen del pago ya es el caso.
+- REFERENCIA A COMPROBANTE PREVIO, BUMP O MENSAJE REENVIADO (billing.record_payment):
+  Si en el historial reciente ya consta que el cliente envió una foto o comprobante (marcado como [Foto/comprobante enviado por el cliente], [Adjunto...]), o si el bot le solicitó una foto del comprobante, y el cliente responde con un toque de atención, signo de puntuación (ej: '.', '..', '?', '-'), confirmación breve (ej: 'aquí está', 'ya envié', 'ahí tiene el comprobante', 'ahí está', 'ya mandé', 'ya le pasé') o reenvía la imagen sin texto:
+  → Su intención es referirse y hacer valer el comprobante ya entregado.
+  → Clasifícalo SIEMPRE como type="CONTINUE" (si hay caso activo) o type="NEW_INTENT", intent="billing.record_payment", con confianza alta (0.95).
+  → NUNCA lo clasifiques como UNCLEAR, saludo ni general.inquiry.
 
 ## Uso del "historial reciente" para mantener el hilo de la conversación y reformular preguntas:
 - REFORMULACIÓN CONTEXTUAL DE PREGUNTAS (CRÍTICO): Usa el historial de mensajes recientes para resolver referencias implícitas, elipsis y anáforas, generando siempre una pregunta completa, autónoma y rica en \`entities.question\`.

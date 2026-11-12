@@ -280,12 +280,31 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       const recentMessages = priorChronological
-        .filter((m) => m.body?.trim().length > 0)
-        .slice(-10)
-        .map((m) => ({
-          author: m.author,
-          body: m.body,
-        }));
+        .map((m) => {
+          let bodyText = m.body?.trim() ?? "";
+          if (!bodyText) {
+            const mType = m.type.toLowerCase();
+            if (mType === "image") {
+              bodyText = m.caption?.trim()
+                ? `[Foto adjunta: ${m.caption.trim()}]`
+                : "[Foto/comprobante enviado por el cliente]";
+            } else if (mType === "document") {
+              bodyText = m.caption?.trim() || m.filename?.trim()
+                ? `[Documento adjunto: ${m.filename || m.caption}]`
+                : "[Documento adjunto enviado por el cliente]";
+            } else if (mType === "sticker") {
+              bodyText = "[Sticker enviado por el cliente]";
+            } else if (mType === "audio" || mType === "voice") {
+              bodyText = "[Audio de voz enviado por el cliente]";
+            }
+          }
+          return {
+            author: m.author,
+            body: bodyText,
+          };
+        })
+        .filter((m) => m.body.trim().length > 0)
+        .slice(-10);
 
       let interpretation = await this.deps.interpretationProvider.interpretMessage({
         correlationId,
@@ -341,9 +360,16 @@ export class ProcessBufferedMessagesUseCase {
           (nowMs - m.createdAt.getTime()) <= RECENT_ATTACHMENT_WINDOW_MS,
       );
 
+      const isMinimalTokenOrBump =
+        /^[\.\?!,\-_·\s]+$/.test(text) ||
+        /^(aqu[ií]\s*(est[aá]|tiene|va)|ya\s*(lo\s*)?(envi[eé]|mand[eé]|pagan?|qued[oó])|listo|ah[ií]\s*est[aá]|revisen?)$/i.test(
+          customerText,
+        );
+
       const isPaymentRelated =
         interpretation.intent === "billing.record_payment" ||
-        activeAggregate?.case.workflowType === "BILLING_BALANCE";
+        activeAggregate?.case.workflowType === "BILLING_BALANCE" ||
+        (hasRecentInboundAttachment && (isMinimalTokenOrBump || interpretation.intent === "general.inquiry"));
 
       const hasAnyAttachment = hasAttachedImageOrDoc || hasRecentInboundAttachment;
 
