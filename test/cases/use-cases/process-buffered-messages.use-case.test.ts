@@ -1439,4 +1439,109 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(allCases).toHaveLength(1);
     expect(allCases[0]!.status).toBe("COMPLETED");
   });
+
+  it("evita bucle post-cierre cuando el cliente envía varios emojis 👍 o confirmaciones repetidas tras cerrar el caso", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen({ status: "resolved" });
+
+    const { case: prevCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "BILLING_BALANCE",
+      departmentId: null,
+      context: { workflowType: "BILLING_BALANCE", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: prevCase.id,
+      expectedCaseVersion: prevCase.version,
+      expectedWorkflowVersion: 1,
+      status: "COMPLETED",
+      context: { ...prevCase.context, closeReason: "RESOLVED" },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+    await conversationRepo.setActiveCaseId(conversation.id, null);
+
+    // Agente humano confirmó pago y cerró caso
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "Tu pago ha sido registrado correctamente. ¡Muchas gracias!",
+      status: "sent",
+    });
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "system",
+      body: "🔒 Caso completado por Aracely Novillo • Motivo: Resuelto",
+      status: "sent",
+    });
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isThankYou: true, isClosing: true },
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    // 1. Cliente envía primer 👍 -> responde una sola vez con acuse breve y cordial
+    const thumb1 = messageRepo.seedText(conversation.id, "👍");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-thumb-1",
+      messages: [thumb1],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).toContain("¡Con mucho gusto!");
+
+    // 2. Cliente envía segundo 👍 -> NO debe responder de nuevo
+    const thumb2 = messageRepo.seedText(conversation.id, "👍");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-thumb-2",
+      messages: [thumb2],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+
+    // 3. Cliente envía "ok gracias" -> tampoco debe repetir la despedida en bucle
+    const ackText = messageRepo.seedText(conversation.id, "ok gracias");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-ack-3",
+      messages: [ackText],
+    });
+    expect(whatsappSender.sent).toHaveLength(1);
+  });
 });

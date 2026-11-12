@@ -257,9 +257,34 @@ export class ProcessBufferedMessagesUseCase {
           : null;
 
       const rawHistory = await this.deps.messageRepo.listByConversation(conversationId, { limit: 20 });
-      const recentMessages = rawHistory
-        .reverse()
-        .filter((m) => !messages.some((bm) => bm.id === m.id) && m.body?.trim().length > 0)
+      const chronologicalHistory = [...rawHistory].reverse();
+      const priorChronological = chronologicalHistory.filter(
+        (m) => !messages.some((bm) => bm.id === m.id),
+      );
+
+      if (!activeAggregate && isPureAcknowledgmentEmoji(text)) {
+        if (hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase)) {
+          log.info(
+            { conversationId, text },
+            "Reacción/emoji post-cierre ya acusada previamente; omitiendo respuesta duplicada para evitar bucle",
+          );
+          return;
+        }
+        log.info(
+          { conversationId, text, lastWorkflowType: lastCompletedCase?.workflowType },
+          "Primera reacción/emoji post-cierre recibida: respondiendo acuse breve único sin reabrir caso",
+        );
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: "¡Con mucho gusto! Estamos a tus órdenes por este medio cuando lo necesites. ¡Excelente día! 🙌",
+          log,
+        });
+        return;
+      }
+
+      const recentMessages = priorChronological
+        .filter((m) => m.body?.trim().length > 0)
         .slice(-10)
         .map((m) => ({
           author: m.author,
@@ -340,8 +365,16 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       // Si no hay un caso activo y el cliente está agradeciendo o confirmando satisfacción/cierre post-atención previa:
-      // Redactar respuesta natural con composeReply adaptada a lo que el cliente escribió y NO abrir casos nuevos
+      // Redactar respuesta natural con composeReply adaptada a lo que el cliente escribió y NO abrir casos nuevos.
+      // Si ya se envió un acuse/despedida previa tras el cierre, guardar silencio para evitar bucles.
       if (!activeAggregate && isClosingOrThankYou) {
+        if (hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase)) {
+          log.info(
+            { conversationId, customerText: text.slice(0, 60) },
+            "Agradecimiento/confirmación post-cierre ya respondido anteriormente; omitiendo para evitar bucle",
+          );
+          return;
+        }
         log.info(
           { interpretation, lastWorkflowType: lastCompletedCase?.workflowType },
           "Agradecimiento / confirmación de servicio post-cierre recibido: redactando respuesta natural sin abrir casos nuevos",
@@ -1377,4 +1410,98 @@ function seedInitialContext(workflowType: string, intent: string): CaseContext {
     };
   }
   return base;
+}
+
+function isClosingSystemMessage(body: string): boolean {
+  const lower = body.toLowerCase();
+  return body.includes("🔒") || lower.includes("caso completado") || lower.includes("caso cerrado");
+}
+
+function looksLikeClosingAckBody(body: string): boolean {
+  const lower = body.toLowerCase();
+  return (
+    lower.includes("con mucho gusto") ||
+    lower.includes("excelente día") ||
+    lower.includes("excelente dia") ||
+    lower.includes("a las órdenes") ||
+    lower.includes("a las ordenes") ||
+    lower.includes("a tus órdenes") ||
+    lower.includes("a tu disposición") ||
+    lower.includes("para servirte") ||
+    lower.includes("quedó registrado correctamente")
+  );
+}
+
+const ACKNOWLEDGMENT_EMOJIS = new Set([
+  "👍",
+  "👌",
+  "🙏",
+  "🤝",
+  "👏",
+  "🙌",
+  "❤",
+  "💚",
+  "💙",
+  "💜",
+  "🧡",
+  "💛",
+  "♥",
+  "😊",
+  "😁",
+  "😄",
+  "🙂",
+  "🎉",
+  "✨",
+  "✅",
+  "💯",
+]);
+
+function isPureAcknowledgmentEmoji(text: string): boolean {
+  const cleaned = text
+    .replace(/\uFE0F|\u200D/gu, "")
+    .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
+    .replace(/\s+/g, "");
+  if (!cleaned || cleaned.length > 16) return false;
+  const chars = Array.from(cleaned);
+  return chars.length > 0 && chars.every((ch) => ACKNOWLEDGMENT_EMOJIS.has(ch));
+}
+
+function hasAlreadySentPostCloseAck(
+  priorChronological: Message[],
+  lastCompletedCase: { updatedAt: Date } | null,
+): boolean {
+  let lastCloseMarkerIdx = -1;
+  for (let i = priorChronological.length - 1; i >= 0; i -= 1) {
+    const msg = priorChronological[i]!;
+    if (msg.author === "system" && isClosingSystemMessage(msg.body)) {
+      lastCloseMarkerIdx = i;
+      break;
+    }
+  }
+
+  if (lastCloseMarkerIdx >= 0) {
+    const afterClose = priorChronological.slice(lastCloseMarkerIdx + 1);
+    if (afterClose.some((m) => m.direction === "outbound" && m.author === "ai")) {
+      return true;
+    }
+  }
+
+  if (lastCompletedCase) {
+    const closedAtMs = lastCompletedCase.updatedAt.getTime();
+    const aiAckAfterCaseClose = priorChronological.some(
+      (m) =>
+        m.direction === "outbound" &&
+        m.author === "ai" &&
+        m.createdAt.getTime() >= closedAtMs &&
+        looksLikeClosingAckBody(m.body),
+    );
+    if (aiAckAfterCaseClose) {
+      return true;
+    }
+  }
+
+  const lastOutbound = [...priorChronological]
+    .reverse()
+    .find((m) => m.direction === "outbound" && m.author !== "system");
+  return Boolean(lastOutbound?.author === "ai" && looksLikeClosingAckBody(lastOutbound.body));
 }

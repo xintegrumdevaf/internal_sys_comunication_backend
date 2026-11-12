@@ -161,7 +161,7 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
   → NUNCA clasifiques como \`isGreeting: true\`. Asigna el intent correspondiente a la consulta considerando el contexto del caso previo y del historial reciente, e incluye en \`entities.question\` la pregunta completa y contextualizada.
 - ANÁLISIS DE SEGUIMIENTO Y CONFIRMACIÓN DE SERVICIO (POST-CIERRE):
   Cuando no hay un caso activo pero hay un "caso previo resuelto" o mensajes previos en el historial:
-  1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona o despidiéndose (incluso si escribe minutos u horas después, o con errores ortográficos, pausas o modismos coloquiales ecuatorianos como "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias"):
+  1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona, despidiéndose o enviando emojis/reacciones de confirmación o cortesía (ej: "👍", "👌", "🙏", "❤️", "🙌", "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias") — incluso minutos u horas después:
      → Clasifícalo SIEMPRE como:
        {"type": "CANCEL", "intent": "general.inquiry", "entities": {"isClosing": true, "isThankYou": true, "serviceConfirmed": true}, "confidence": 0.95}
      → NUNCA abras un nuevo caso técnico ni envíes menús de bienvenida si el cliente confirma satisfacción y cierre.
