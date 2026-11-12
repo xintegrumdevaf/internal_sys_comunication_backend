@@ -286,4 +286,35 @@ describe("ListConversationsUseCase - filtrado por caso activo", () => {
     expect(batchAutomationCalls).toBe(1);
     expect(singleCalls).toBe(0);
   });
+
+  it("expone automation.disabledReason dentro de activeCase para distinguir motivos de escalación en UI", async () => {
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+    const caseRepo = new CaseRepositoryFake();
+
+    const conv = conversationRepo.createOpen({
+      id: "conv-reason-1",
+      waPhone: "+593987654321",
+      status: "open",
+    });
+    messageRepo.seedText(conv.id, "Necesito ayuda");
+
+    const { case: escalatedCase } = await caseRepo.create({
+      conversationId: conv.id,
+      workflowType: "GENERAL_INQUIRY",
+      departmentId: "dept-general",
+      context: emptyContextFor("GENERAL_INQUIRY"),
+      initialState: "TRIAGE",
+      expiresAt: null,
+    });
+    await caseRepo.setAutomationEnabled(escalatedCase.id, false, { reason: "AI_ERROR" });
+    await conversationRepo.setActiveCaseId(conv.id, escalatedCase.id);
+
+    const listUseCase = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
+    const items = await listUseCase.execute({});
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.activeCase?.automationEnabled).toBe(false);
+    expect(items[0]!.activeCase?.disabledReason).toBe("AI_ERROR");
+  });
 });

@@ -48,3 +48,4 @@ BEGIN
     WHERE department_id IS NULL;
   END IF;
 END $$;
+

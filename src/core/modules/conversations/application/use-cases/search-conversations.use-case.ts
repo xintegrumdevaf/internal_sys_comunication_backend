@@ -133,6 +133,7 @@ export class SearchConversationsUseCase {
           automationEnabled: autoState
             ? autoState.enabled
             : activeAggregate.status !== "HUMAN_ACTIVE" && activeAggregate.status !== "ESCALATED",
+          disabledReason: autoState?.disabledReason ?? null,
         };
       }
 

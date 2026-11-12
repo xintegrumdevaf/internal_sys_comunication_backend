@@ -43,3 +43,4 @@ export async function resolveGeneralDepartment(
     return null;
   }
 }
+

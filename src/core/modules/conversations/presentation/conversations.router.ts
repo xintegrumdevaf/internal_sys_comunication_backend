@@ -364,6 +364,7 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
               automationEnabled: autoState
                 ? autoState.enabled
                 : active.status !== "HUMAN_ACTIVE" && active.status !== "ESCALATED",
+              disabledReason: autoState?.disabledReason ?? null,
             };
           }
         }

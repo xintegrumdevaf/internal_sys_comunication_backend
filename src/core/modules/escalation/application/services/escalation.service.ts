@@ -322,11 +322,18 @@ export class EscalationService {
       status: "ASSIGNED",
     });
 
+    const existingAutoState = await this.deps.caseRepo.getAutomationState(caseEntity.id);
+    const preservedReason =
+      existingAutoState?.disabledReason &&
+      existingAutoState.disabledReason !== "AUTO_ASSIGNED"
+        ? existingAutoState.disabledReason
+        : "AUTO_ASSIGNED";
+
     await this.deps.caseRepo.setAutomationEnabled(caseEntity.id, false, {
-      reason: "AUTO_ASSIGNED",
+      reason: preservedReason,
     });
     await this.deps.caseRepo.appendEvent(caseEntity.id, "AUTOMATION_DISABLED", {
-      reason: "AUTO_ASSIGNED",
+      reason: preservedReason,
     });
     await this.deps.conversationRepo.setActiveCaseId(caseEntity.conversationId, caseEntity.id);
     this.deps.broadcaster?.publish({

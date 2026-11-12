@@ -34,6 +34,7 @@ export type ConversationDto = Conversation & {
     assignedAgentId: string | null;
     assignedAgentName?: string | null;
     automationEnabled: boolean;
+    disabledReason?: string | null;
   } | null;
   /**
    * Solo en conversaciones resueltas o cerradas, cuando ya no hay caso activo.
@@ -191,6 +192,7 @@ export class ListConversationsUseCase {
           automationEnabled: autoState
             ? autoState.enabled
             : activeAggregate.status !== "HUMAN_ACTIVE" && activeAggregate.status !== "ESCALATED",
+          disabledReason: autoState?.disabledReason ?? null,
         };
       }
 
