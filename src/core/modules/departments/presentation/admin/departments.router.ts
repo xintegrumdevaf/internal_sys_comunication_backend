@@ -20,13 +20,18 @@ export type DepartmentsAdminRouterDeps = {
   listCases?: ListDepartmentCasesUseCase;
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const visibilitySchema = z.enum(["shared", "restricted"]);
 const handlingModeSchema = z.enum(["ai_assisted", "human_direct"]);
 
 const caseItemSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z
+    .string()
+    .nullish()
+    .transform((val) => (val && UUID_REGEX.test(val.trim()) ? val.trim() : undefined)),
   label: z.string().trim().min(2),
-  description: z.string().trim().min(3),
+  description: z.string().trim().min(1).default("Sin descripción"),
   intentKey: z.string().trim().optional(),
   handlingMode: handlingModeSchema.optional(),
   workflowType: z.string().trim().optional(),

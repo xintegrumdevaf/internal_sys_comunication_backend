@@ -667,15 +667,15 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         }
       }
 
-      // Desacople de plantillas: el envío de plantilla saliente no debe forzar un caso
-      // HUMAN_ACTIVE ni asignarse como interacción humana de chat 1:1 (agentId: null).
-      // Si el cliente responde, la IA debe poder retomar el control de inmediato.
+      // Registrar la plantilla saliente asociada al agente autenticado que la despachó
+      // (para que se muestre su nombre real en la conversación) pero identificada con caption template:
+      // para que cuando el cliente responda, la IA pueda retomar el control sin silenciarse.
       const message = await deps.messageRepo.insertOutbound({
         conversationId: conversation.id,
         author: "agent",
         body: templateBodyText,
         externalId,
-        agentId: null,
+        agentId: agent.id,
         caption: `template:${parsed.data.templateName}`,
         caseId: effectiveCaseId ?? undefined,
       });

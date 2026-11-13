@@ -381,5 +381,41 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
       cases = await listCases.execute(supportDeptId);
       expect(cases.some((c) => c.id === newCase.id)).toBe(false);
     });
+
+    it("permite actualizar un departamento y sincronizar sus casos resolviendo IDs por intentKey", async () => {
+      const updateUseCase = new UpdateDepartmentUseCase({
+        departmentRepo,
+        auditRepo: auditRepoFake,
+        routingService,
+        logger: silentLogger,
+      });
+
+      const updated = await updateUseCase.execute({
+        departmentId: supportDeptId,
+        patch: {
+          name: "Soporte Técnico Especializado",
+          cases: [
+            {
+              label: "Sin Servicio de Internet",
+              description: "nueva descripción del caso",
+              intentKey: "support.internet",
+              handlingMode: "ai_assisted",
+            },
+            {
+              label: "Nuevo Caso Especial",
+              description: "descripción de caso adicional",
+              handlingMode: "human_direct",
+            },
+          ],
+        },
+        actorId: "admin-1",
+      });
+
+      expect(updated.name).toBe("Soporte Técnico Especializado");
+      expect(updated.cases).toHaveLength(2);
+      const existingUpdated = updated.cases?.find((c) => c.intentKey === "support.internet");
+      expect(existingUpdated).toBeDefined();
+      expect(existingUpdated?.description).toBe("nueva descripción del caso");
+    });
   });
 });

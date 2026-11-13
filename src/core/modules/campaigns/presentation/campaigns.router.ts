@@ -30,14 +30,26 @@ export type CampaignsRouterDeps = {
 const createCampaignBodySchema = z.object({
   name: z.string().min(1).max(50),
   messageBody: z.string().optional(),
+  messageText: z.string().optional(),
   quickMode: z.boolean().optional(),
   quickModeIntervalSeconds: z.number().int().positive().optional(),
+  intervalSeconds: z.number().int().positive().optional(),
   chatRouting: z
     .object({
       initialStatus: z.enum(["OPEN", "PENDING", "CLOSED"]).optional(),
       departmentId: z.string().nullable().optional(),
       assignedAgentId: z.string().nullable().optional(),
       keepAssignedToUser: z.boolean().optional(),
+      delegateToBot: z.boolean().optional(),
+      forceChatUpdate: z.boolean().optional(),
+    })
+    .optional(),
+  routingConfig: z
+    .object({
+      chatStatus: z.enum(["open", "pending", "closed"]).optional(),
+      departmentName: z.string().optional(),
+      assignedUserName: z.string().optional(),
+      keepAssigned: z.boolean().optional(),
       delegateToBot: z.boolean().optional(),
       forceChatUpdate: z.boolean().optional(),
     })
@@ -86,7 +98,27 @@ export function createCampaignsRouter(deps: CampaignsRouterDeps): Router {
     try {
       requireAuth(req);
       const body = createCampaignBodySchema.parse(req.body);
-      const data = await deps.createCampaign.execute(body);
+
+      const resolvedInitialStatus: "OPEN" | "PENDING" | "CLOSED" =
+        body.chatRouting?.initialStatus ??
+        (body.routingConfig?.chatStatus?.toUpperCase() as "OPEN" | "PENDING" | "CLOSED" | undefined) ??
+        "CLOSED";
+
+      const chatRouting = {
+        initialStatus: resolvedInitialStatus,
+        departmentId: body.chatRouting?.departmentId ?? null,
+        assignedAgentId: body.chatRouting?.assignedAgentId ?? null,
+        keepAssignedToUser: body.chatRouting?.keepAssignedToUser ?? body.routingConfig?.keepAssigned ?? false,
+        delegateToBot: body.chatRouting?.delegateToBot ?? body.routingConfig?.delegateToBot ?? false,
+        forceChatUpdate: body.chatRouting?.forceChatUpdate ?? body.routingConfig?.forceChatUpdate ?? false,
+      };
+
+      const data = await deps.createCampaign.execute({
+        ...body,
+        messageBody: body.messageBody ?? body.messageText,
+        quickModeIntervalSeconds: body.quickModeIntervalSeconds ?? body.intervalSeconds,
+        chatRouting,
+      });
       res.status(201).json({ data });
     } catch (error) {
       next(error);

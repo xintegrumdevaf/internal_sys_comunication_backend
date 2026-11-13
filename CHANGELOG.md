@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.16] - 2026-11-13
+
+### Fixed & Improved
+- **Corrección de Error 400 Bad Request en Guardado de Departamentos y Sanitización de Casos Mock (`departments.router.ts`, `update-department.use-case.ts`, frontend `DepartmentsDirectoryPanel.tsx`, `department-mocks.ts`, `department-routing.test.ts`)**:
+  - *Contexto y Problema*:
+    Al intentar modificar o guardar cambios en un departamento desde el panel de administración (por ejemplo, en el área de "Facturación"), la petición HTTP `PUT /api/departments/:id` era rechazada con un error `400 Bad Request` (`VALIDATION_ERROR`, 510 bytes de respuesta), imposibilitando la configuración de límites, visibilidad o casos del área.
+  - *Causa Raíz*:
+    1. En el frontend, el módulo `department-mocks.ts` precargaba una plantilla estática de 33 motivos de atención con identificadores ficticios de cadena (`"mock-case-1"` a `"mock-case-33"`).
+    2. Al guardar el departamento, `DepartmentsDirectoryPanel.tsx` enviaba esos 33 casos dentro del arreglo `cases` del cuerpo de la petición.
+    3. En el backend, el validador Zod `caseItemSchema` exigía estrictamente `id: z.string().uuid().optional()`. Al recibir identificadores no UUID, Zod acumulaba 33 fallos `"Invalid uuid"` concatenados en el error de validación (510 bytes).
+    4. Adicionalmente, si el frontend omitía el `id`, el caso de uso `UpdateDepartmentUseCase` borraba y recreaba todos los casos en PostgreSQL sin reconciliar por clave de intención, lo que generaba saltos de IDs y pérdida de referencias relacionales.
+  - *Resolución y Justificación*:
+    1. En `departments.router.ts`, se flexibilizó la validación del `id` con un transformador tolerante: `z.string().nullish().transform(val => (val && UUID_REGEX.test(val) ? val : undefined))`. Cualquier cadena que no cumpla el estándar UUIDv4 es saneada automáticamente a `undefined` sin rechazar la solicitud HTTP.
+    2. En `caseItemSchema`, se agregó un valor por defecto seguro a `description` (`.default("Sin descripción").pipe(z.string().min(1))`) para prevenir rechazos si un caso nuevo no contiene texto descriptivo aún.
+    3. En `update-department.use-case.ts`, se implementó la reconciliación por `intentKey`: si un caso enviado carece de `id` válido, el caso de uso busca si ya existe un registro con la misma clave de intención (`toIntentKey(item.label)`) en `existingCases`. Si coincide, se reutiliza su `id` existente de PostgreSQL, evitando ciclos innecesarios de eliminación y recreación.
+    4. En el frontend (`DepartmentsDirectoryPanel.tsx` y `department-mocks.ts`), se eliminaron los IDs ficticios quemados (`"mock-case-X"`), se filtraron los IDs no UUID en `handleSubmit` y `toCaseItemForms`, y se priorizó la carga de casos reales persistidos en base de datos (`casesCache` o `dept.cases`) antes de mostrar la plantilla de respaldo.
+    5. Se añadieron pruebas unitarias en `test/departments/department-routing.test.ts` para verificar la sincronización y resolución de casos por `intentKey`.
+
+- **Enrutamiento por Defecto a "Cerradas" y Protección de Clientes en Atención Activa en Campañas Masivas (`campaign.repository.pg.ts`, `campaigns.router.ts`, `process-campaign-batch.use-case.ts`, frontend `CampaignWizardDialog.tsx`)**:
+  - *Contexto y Problema*:
+    1. Al despachar una campaña masiva por WhatsApp (por ejemplo, avisos de corte o facturación a más de 600 clientes), todas las conversaciones resultantes se creaban o actualizaban en estado `open`, abarrotando la "Bandeja de Abiertos" de los asesores con cientos de chats donde el destinatario aún no había respondido.
+    2. Faltaba una política explícita para contactos incluidos en la campaña que ya contaban con una conversación en curso: existía el riesgo de cerrar intempestivamente la atención de un asesor o alterar el estado de un caso en proceso.
+  - *Causa Raíz*:
+    1. En `campaign.repository.pg.ts`, tanto el método de mapeo de filas (`mapCampaignRow`) como los valores por defecto (`defaultChatRouting`) tenían hardcodeado `initialStatus: "OPEN"`.
+    2. El diálogo de creación de campañas del frontend (`CampaignWizardDialog.tsx`) enviaba el objeto `routingConfig: { chatStatus: "closed" }`, mientras que el backend esperaba exclusivamente `chatRouting: { initialStatus: "CLOSED" }`. Al no coincidir las claves, el backend caía en el valor por defecto erróneo (`"OPEN"`).
+    3. En el worker de despacho de campañas (`process-campaign-batch.use-case.ts`), no se evaluaba la existencia de casos activos (`conv.activeCaseId`) antes de forzar el estado de la conversación.
+  - *Resolución y Justificación*:
+    1. En `campaign.repository.pg.ts`, se cambió el valor por defecto absoluto de `chatRouting.initialStatus` de `"OPEN"` a `"CLOSED"`.
+    2. En `campaigns.router.ts`, se actualizó `createCampaignBodySchema` y la creación de campañas `POST /api/campaigns` para aceptar y normalizar tanto `chatRouting` como `routingConfig` (`chatStatus: "closed"` -> `initialStatus: "CLOSED"`), forzando `"CLOSED"` por defecto si no se especifica.
+    3. **Protección de Clientes con Atención Activa (`activeCaseId`)**: En `process-campaign-batch.use-case.ts`, antes de alterar el estado de la conversación, el worker verifica si el cliente tiene un caso activo en curso (`conv.activeCaseId`):
+       - **Cliente en Atención Activa**: Si el contacto está siendo atendido por un asesor humano o por la IA, el mensaje de la campaña se entrega normalmente en su WhatsApp y se anexa al historial de la conversación vinculándolo a su `activeCaseId`. **No se modifica el estado de la conversación a `"closed"`**, preservando intacta la sesión de atención y el trabajo del asesor (salvo que la campaña tenga encendido explícitamente `forceChatUpdate: true`).
+       - **Cliente sin Caso Activo o con Caso Resuelto (`COMPLETED`/`CANCELLED`)**: La conversación se enruta limpiamente a la pestaña de **"Cerradas"** (`status: "closed"`), manteniendo despejada la bandeja operativa.
+       - **Respuesta Posterior del Cliente**: Si el cliente contesta al mensaje de la campaña en WhatsApp, `ReceiveInboundMessageUseCase` detecta el mensaje entrante, traslada automáticamente la conversación a `"open"` en tiempo real y la IA interpreta su solicitud tomando en cuenta el texto previo de la campaña.
+    4. En el frontend (`CampaignWizardDialog.tsx`), se garantizó el envío explícito de `chatRouting: { initialStatus: "CLOSED" }` y `routingConfig: { chatStatus: "closed" }`.
+
+- **Atribución y Trazabilidad del Asesor en Envío Manual de Plantillas de WhatsApp (`conversations.router.ts`, `process-buffered-messages.use-case.ts`, frontend `ChatMessageItem.tsx`)**:
+  - *Contexto y Problema*:
+    Cuando un asesor enviaba manualmente una plantilla de Meta desde el chat de una conversación (por ejemplo, para reanudar la ventana de 24 horas o enviar una notificación formal), la cabecera de la burbuja mostraba la etiqueta genérica *"📢 PLANTILLA / CAMPAÑA"*, sin mostrar el nombre de la persona que estaba atendiendo.
+  - *Causa Raíz*:
+    1. En `conversations.router.ts` (`POST /api/conversations/:id/template`), el registro del mensaje saliente se insertaba con `agentId: null`.
+    2. En `ChatMessageItem.tsx`, cualquier mensaje que tuviera un pie de plantilla (`caption?.startsWith("template:")`) se catalogaba incondicionalmente como una campaña automatizada sin asesor.
+    3. Si se agregaba `agentId` sin precauciones, el detector de inactividad de asesores (`process-buffered-messages.use-case.ts`) podía interpretar el envío de la plantilla como una conversación humana activa y silenciar al bot de IA por 24 horas (`HANDOFF_INACTIVITY_HOURS`) si el cliente respondía horas después.
+  - *Resolución y Justificación*:
+    1. En `conversations.router.ts`, se asignó `agentId: agent.id` a partir de la sesión autenticada del asesor (`req.agent`).
+    2. En `process-buffered-messages.use-case.ts`, se incorporó la regla `!isTemplateMessage` en la verificación de `isRealHumanAgent`. De este modo, una plantilla oficial enviada para contactar al cliente no silencia la capacidad de la IA de intervenir si el cliente formula una consulta posterior.
+    3. En el frontend (`ChatMessageItem.tsx`), si el mensaje fue enviado por un asesor humano (`hasHumanAgent`), la cabecera muestra claramente el nombre del asesor que realizó el envío junto con una insignia sutil `🏷️ Plantilla`, reservando la etiqueta de `📢 Campaña Masiva` exclusivamente para despachos desatendidos del sistema.
+
 ## [0.2.15] - 2026-11-12
 
 ### Added & Improved

@@ -192,7 +192,11 @@ export class ProcessBufferedMessagesUseCase {
       const lastPrior = [...priorMessages]
         .reverse()
         .find((message) => !inboundIds.has(message.id) && message.author !== "system");
-      const isRealHumanAgent = lastPrior?.author === "agent" && Boolean(lastPrior?.agentId);
+      const isTemplateMessage = Boolean(lastPrior?.caption?.startsWith("template:"));
+      const isRealHumanAgent =
+        lastPrior?.author === "agent" &&
+        Boolean(lastPrior?.agentId) &&
+        !isTemplateMessage;
       const isCaseActive = Boolean(targetCase && !TERMINAL_CASE_STATUSES.includes(targetCase.status));
       const humanIntervenedRecently =
         isRealHumanAgent &&

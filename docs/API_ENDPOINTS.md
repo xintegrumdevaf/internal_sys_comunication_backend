@@ -59,11 +59,16 @@ No está bajo `/api`.
 ### Modelo de Casos por Departamento (`cases`)
 Cada departamento puede declarar qué motivos o solicitudes atiende:
 - **`label`**: Nombre amigable para el operador (ej. *"Cancelación de Contrato"*).
-- **`description`**: Frases o ejemplos de lo que dice el cliente (ej. *"cuando el cliente pide cancelar el contrato o darse de baja"*). Se inyecta en el prompt de la IA en tiempo real.
+- **`description`**: Frases o ejemplos de lo que dice el cliente (ej. *"cuando el cliente pide cancelar el contrato o darse de baja"*). Se inyecta en el prompt de la IA en tiempo real. Fallback automático a `"Sin descripción"` si no se especifica.
 - **`handlingMode`**:
   - `"ai_assisted"`: La IA atiende primero con RAG y escala si no se resuelve.
   - `"human_direct"`: Escala de inmediato al departamento y notifica al cliente sin preguntas de bot.
 - **`workflowType`**: Flujo base asignado (por defecto `"GENERAL_INQUIRY"`).
+
+> [!NOTE]
+> **Sanitización y Persistencia Robusta de Casos (`PUT /api/departments/:id`)**:
+> - **Tolerancia a IDs no-UUID**: Si el cliente envía identificadores temporales o mock (ej. `"mock-case-1"` o cadenas vacías), el backend los sanea automáticamente a `undefined`, eliminando errores `400 Bad Request` por `VALIDATION_ERROR`.
+> - **Reconciliación por `intentKey`**: Al actualizar el catálogo de un departamento, si un ítem no posee `id`, el backend verifica si ya existe un registro con el mismo `intentKey` (`toIntentKey(label)`). Si existe, reutiliza el `id` original de PostgreSQL en lugar de borrar y recrear el registro, conservando claves foráneas e integridad referencial.
 
 ---
 
@@ -76,6 +81,7 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 | `GET` | `/api/conversations/:id/automation` | — | Automation del caso activo (o `null`) |
 | `POST` | `/api/conversations/:id/read` | — | Marca todos los mensajes de la conversación como leídos (pone `unreadCount` en 0) |
 | `POST` | `/api/conversations/:id/reply` | `{ "body" }` → `201` | Respuesta humana a WhatsApp (el agente es el de la sesión); desactiva automation si hacía falta |
+| `POST` | `/api/conversations/:id/template` | `{ "templateName", "templateLanguage?", "parameters?", "components?" }` → `201` | Envío manual de plantilla oficial de WhatsApp/Meta por parte del asesor. Asigna `agentId: agent.id` de la sesión activa para trazabilidad del asesor. No silencia a la IA por inactividad si el cliente responde posteriormente |
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
 | `POST` | `/api/conversations/sync-history` | sesión de `role=admin` | Encola en Redis la sincronización de mensajes históricos de Zernio. Body opcional: `{ "days": 30, "limit": 100 }` |
 | `GET` | `/api/conversations/sync-history/status` | sesión (`admin` o `manager`) | Consulta el estado del worker de sincronización (`idle`, `running`, `completed`, `failed`), total sincronizado y errores |
@@ -363,9 +369,19 @@ Endpoints para la gestión, importación de destinatarios y despacho progresivo 
 | `POST` | `/api/campaigns/:id/resume` | sesión | Reanuda una campaña suspendida reencolando los pendientes |
 | `DELETE` | `/api/campaigns/:id` | sesión | Elimina una campaña (únicamente permitido si está en estado `DRAFT`) |
 
-### Enrutamiento de Chat (`chatRouting`) y Ciclo de Vida:
+### Enrutamiento de Chat (`chatRouting`), Casos Activos y Ciclo de Vida:
 * **Bandeja de Cerrados por Defecto (`initialStatus: "CLOSED"`)**:
-  Al enviar cada mensaje de campaña, el backend registra la conversación y el mensaje saliente en la base de datos local y aplica `status: 'closed'`. Esto evita saturar la **Bandeja de abiertos** de los asesores con cientos de mensajes mientras los destinatarios aún no responden.
+  Al crear y despachar una campaña, la configuración por defecto de `chatRouting.initialStatus` es estrictamente `"CLOSED"` (tanto si el frontend envía `chatRouting` como si envía `routingConfig: { chatStatus: "closed" }`). Al entregar cada mensaje masivo, la conversación se posiciona en la pestaña **"Cerradas"** (`status: 'closed'`), evitando inundar la **Bandeja de Abiertos** de los asesores con cientos de mensajes salientes sin interacción del cliente.
+* **Protección de Clientes con Atención Humana o Caso Activo (`activeCaseId`)**:
+  ¿Qué sucede si un cliente incluido en la campaña masiva está siendo atendido actualmente por un asesor o bot?
+  - Si la conversación tiene un caso activo en curso (`activeCaseId` no nulo, ej. `HUMAN_ACTIVE` o `ACTIVE`):
+    - El mensaje de la campaña se entrega exitosamente al WhatsApp del cliente y se añade al historial del chat vinculándolo al `activeCaseId`.
+    - **NO se modifica el estado de la conversación a `"closed"`**: la conversación permanece abierta (`open`), protegiendo la sesión del asesor para que el chat no se mueva de su bandeja ni se interrumpa la conversación en curso (salvo que la campaña declare explícitamente `forceChatUpdate: true`).
+* **Clientes con Casos Resueltos (`COMPLETED`) o sin Caso Activo**:
+  - Si el cliente tenía un caso previo que ya fue cerrado o resuelto (o no tenía casos previos), el envío del mensaje de campaña ubica la conversación en **"Cerradas"** (`status: 'closed'`). El caso resuelto se mantiene cerrado en su historial y no se reabre.
+* **Diferenciación entre Campaña Masiva y Envío Manual de Plantilla**:
+  - **Campaña Masiva**: Despachada por el motor de campañas en lotes automatizados; se enruta por defecto a "Cerradas", no tiene asesor asignado (`agentId: null`) y en la interfaz muestra la etiqueta `📢 Campaña Masiva`.
+  - **Plantilla Manual (`POST /api/conversations/:id/template`)**: Enviada por un asesor desde el chat individual (ej. para reabrir ventana de 24h o notificar individualmente); **no altera el estado del chat a cerrado**, registra la autoría con `agentId: agent.id` y muestra en pantalla el nombre real del asesor con la etiqueta `🏷️ Plantilla`.
 * **Reapertura y Análisis con IA al Recibir Respuesta**:
   Cuando un cliente responde al mensaje de la campaña en WhatsApp:
   1. `ReceiveInboundMessageUseCase` reabre automáticamente la conversación (`status: 'open'`), trasladándola a la bandeja de Abiertos en tiempo real.

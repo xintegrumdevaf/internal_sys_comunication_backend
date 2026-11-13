@@ -67,18 +67,11 @@ export class UpdateDepartmentUseCase {
     if (input.patch.cases && Array.isArray(input.patch.cases)) {
       const slug = updated.slug;
 
-      // Sincronizar casos: eliminar los que existían pero fueron quitados del formulario
       const existingCases = await this.deps.departmentRepo.listRoutings(department.id);
-      const incomingIds = new Set(
-        input.patch.cases.filter((c) => c.id).map((c) => c.id!),
-      );
-      for (const existing of existingCases) {
-        if (!incomingIds.has(existing.id)) {
-          await this.deps.departmentRepo.deleteRouting(existing.id);
-        }
-      }
+      const existingByIntent = new Map(existingCases.map((c) => [c.intentKey, c]));
 
-      for (const item of input.patch.cases) {
+      // Resolver intents y asociar id si coincide con uno existente por intent_key
+      const resolvedCases = input.patch.cases.map((item) => {
         const normalizedLabel = item.label
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
@@ -86,13 +79,33 @@ export class UpdateDepartmentUseCase {
           .replace(/[^a-z0-9]+/g, "_")
           .replace(/^_+|_+$/g, "");
         const rawIntent = item.intentKey?.trim() || `${slug}.${normalizedLabel}`;
+        const matchedExisting = !item.id ? existingByIntent.get(rawIntent) : undefined;
+        const resolvedId = item.id ?? matchedExisting?.id;
 
+        return {
+          ...item,
+          id: resolvedId,
+          rawIntent,
+        };
+      });
+
+      // Sincronizar casos: eliminar los que existían pero fueron quitados del formulario
+      const incomingIds = new Set(
+        resolvedCases.filter((c) => c.id).map((c) => c.id!),
+      );
+      for (const existing of existingCases) {
+        if (!incomingIds.has(existing.id)) {
+          await this.deps.departmentRepo.deleteRouting(existing.id);
+        }
+      }
+
+      for (const item of resolvedCases) {
         const resolvedWorkflowType = inferWorkflowType(
           slug,
           updated.name,
           item.label,
           item.description,
-          rawIntent,
+          item.rawIntent,
           item.workflowType,
         );
 
@@ -100,7 +113,7 @@ export class UpdateDepartmentUseCase {
           await this.deps.departmentRepo.updateRouting(item.id, {
             label: item.label,
             description: item.description,
-            intentKey: rawIntent,
+            intentKey: item.rawIntent,
             handlingMode: item.handlingMode,
             workflowType: resolvedWorkflowType,
             active: item.active,
@@ -108,7 +121,7 @@ export class UpdateDepartmentUseCase {
         } else {
           await this.deps.departmentRepo.createRouting({
             departmentId: department.id,
-            intentKey: rawIntent,
+            intentKey: item.rawIntent,
             label: item.label,
             description: item.description,
             handlingMode: item.handlingMode ?? "ai_assisted",
