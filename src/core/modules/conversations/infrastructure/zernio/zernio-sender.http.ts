@@ -782,32 +782,6 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           },
           body: JSON.stringify(payload),
         });
-      } else if (
-        !existingConversationId &&
-        response.status === 400 &&
-        (errorBody.includes("TEMPLATE_REQUIRED") || errorBody.toLowerCase().includes("template"))
-      ) {
-        this.logger.warn(
-          { cleanPhone, errorBody },
-          "Zernio reportó TEMPLATE_REQUIRED al crear conversación para media. Reintentando búsqueda de conversación existente...",
-        );
-        const recoveredId = await this.searchConversationInZernio(cleanPhone);
-        if (recoveredId) {
-          this.logger.info(
-            { cleanPhone, recoveredId },
-            "Conversación existente recuperada en Zernio; reintentando entrega de media a la conversación...",
-          );
-          url = `${config.baseUrl}/inbox/conversations/${recoveredId}/messages`;
-          payload = buildPayload(accountId, false);
-          response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${config.apiKey}`,
-            },
-            body: JSON.stringify(payload),
-          });
-        }
       }
 
       if (!response.ok) {

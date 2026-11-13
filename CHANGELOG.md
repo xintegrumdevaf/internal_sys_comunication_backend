@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [0.2.16] - 2026-11-13
 
 ### Fixed & Improved
+- **Corrección de Rama Duplicada en Cadena Condicional de `sendMedia` en CI/CD (`zernio-sender.http.ts`)**:
+  - *Contexto y Problema*:
+    Durante la ejecución del pipeline automatizado de GitHub Actions (`test-and-deploy`), la etapa de compilación y verificación estricta de TypeScript falló con `exit code 1`, reportando el error `src/core/modules/conversations/infrastructure/zernio/zernio-sender.http.ts#L786: This branch can never execute. Its condition is a duplicate or covered by previous conditions in the if-else-if chain`.
+  - *Causa Raíz*:
+    Al incorporar el reintento de auto-recuperación ante `TEMPLATE_REQUIRED` dentro de `sendMedia`, la cláusula condicional `else if (!existingConversationId && response.status === 400 && ...)` quedó replicada dos veces dentro de la misma estructura `if-else-if` (una tras el bloque de *conversación no encontrada* y otra tras el de *cuenta no encontrada*), originando una rama inalcanzable (dead code) detectada por el linter.
+  - *Resolución y Justificación*:
+    Se depuró la estructura de control en `sendMedia`, removiendo la rama redundante y dejando una secuencia estrictamente unificada: 1) reintento por `404 conversation not found`, 2) auto-recuperación de ID y reintento por `400 TEMPLATE_REQUIRED`, y 3) refresco de credenciales por `404 account not found`. Esto garantiza la aprobación del build en el CI/CD preservando la resiliencia del envío de archivos adjuntos.
+
 - **Persistencia en Redis y Auto-Recuperación de Conversaciones en Zernio ante Falso Positivo de Ventana Cerrada (`zernio-sender.http.ts`, `container.ts`, `zernio-webhook.router.ts`, `meta-delivery-error.ts`)**:
   - *Contexto y Problema*:
     Al intentar responder un asesor humano (o enviar texto o archivos multimedia) a un cliente en WhatsApp vía Zernio dentro de la ventana de atención activa (por ejemplo, habiendo transcurrido apenas 3 horas desde el último mensaje entrante del cliente), la entrega fallaba con un error HTTP `400 Bad Request`: `{"error":"WhatsApp conversations must start with an approved template, or with a Direct Send utility message...","code":"TEMPLATE_REQUIRED"}`. En la interfaz web, el sistema alertaba erróneamente *"Ventana de WhatsApp (24h) cerrada (Requiere plantilla)"* con el banner amarillo *"VENTANA DE 24H INACTIVA"*, impidiendo la comunicación a pesar de que la ventana de 24 horas estaba completamente abierta y de que en el panel oficial de Zernio la conversación figuraba sin ningún error.
