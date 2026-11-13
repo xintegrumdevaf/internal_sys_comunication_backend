@@ -1,3 +1,4 @@
+import type Redis from "ioredis";
 import type { Env } from "../../../../../shared/config/env";
 import type { Logger } from "../../../../../shared/logging/logger";
 import { externalServiceError } from "../../../../../shared/errors/domain-errors";
@@ -44,6 +45,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     private readonly logger: Logger,
     private readonly fallbackSender?: WhatsAppSenderPort,
     private readonly settingsService?: SystemSettingsService,
+    private readonly redisClient?: Redis,
   ) {
     if (this.env.ZERNIO_ACCOUNT_ID?.trim()) {
       this.resolvedAccountId = this.env.ZERNIO_ACCOUNT_ID.trim();
@@ -87,13 +89,24 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
 
   /**
    * Guarda o actualiza la asociación de un teléfono con su ID de conversación en Zernio.
-   * Utilizado también desde el webhook entrante para enriquecer el cache.
+   * Utilizado también desde el webhook entrante para enriquecer el cache en memoria y en Redis.
    */
   public registerConversation(waPhone: string, conversationId: string): void {
     const cleanPhone = waPhone.replace(/\D/g, "");
     if (cleanPhone && conversationId && !this.isBusinessAccount(cleanPhone)) {
       this.conversationIdCache.set(cleanPhone, conversationId);
       this.phoneByConversationIdCache.set(conversationId, cleanPhone);
+
+      if (this.redisClient) {
+        void this.redisClient
+          .set(`zernio:conv:${cleanPhone}`, conversationId, "EX", 30 * 86400)
+          .catch((err) => {
+            this.logger.warn({ err, cleanPhone, conversationId }, "No se pudo guardar conversationId en Redis");
+          });
+        void this.redisClient
+          .set(`zernio:phone:${conversationId}`, cleanPhone, "EX", 30 * 86400)
+          .catch(() => {});
+      }
     }
   }
 
@@ -108,9 +121,25 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       return existing;
     }
 
+    if (this.redisClient) {
+      try {
+        const fromRedis = await this.redisClient.get(`zernio:phone:${conversationId}`);
+        if (fromRedis) {
+          this.phoneByConversationIdCache.set(conversationId, fromRedis);
+          this.conversationIdCache.set(fromRedis, conversationId);
+          return fromRedis;
+        }
+      } catch {
+        // Fallback a API de Zernio
+      }
+    }
+
     try {
       const config = await this.resolveConfig();
-      const url = `${config.baseUrl}/inbox/conversations?platform=whatsapp`;
+      const accountId = await this.getAccountId().catch(() => "");
+      const url = accountId
+        ? `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`
+        : `${config.baseUrl}/inbox/conversations?platform=whatsapp&limit=100`;
       const res = await fetch(url, {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
@@ -122,8 +151,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
         for (const item of data.data || []) {
           const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
           if (participant && !this.isBusinessAccount(participant)) {
-            this.conversationIdCache.set(participant, item.id);
-            this.phoneByConversationIdCache.set(item.id, participant);
+            this.registerConversation(participant, item.id);
           }
         }
       }
@@ -183,34 +211,88 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     return this.resolvedAccountId;
   }
 
-  private async resolveConversationId(cleanPhone: string): Promise<string | null> {
-    if (this.conversationIdCache.has(cleanPhone)) {
-      return this.conversationIdCache.get(cleanPhone)!;
-    }
-
+  /**
+   * Búsqueda activa de una conversación en Zernio por teléfono exacto, con prefijo o paginado.
+   */
+  public async searchConversationInZernio(cleanPhone: string): Promise<string | null> {
     try {
       const config = await this.resolveConfig();
-      const url = `${config.baseUrl}/inbox/conversations?platform=whatsapp`;
-      const res = await fetch(url, {
+      const accountId = await this.getAccountId();
+
+      // Probar variaciones comunes del número (con prefijo internacional 593, sin él o local)
+      const searchTerms = [cleanPhone];
+      if (cleanPhone.startsWith("593") && cleanPhone.length > 9) {
+        searchTerms.push(cleanPhone.substring(3)); // sin 593 (ej. 990931770)
+        searchTerms.push(`0${cleanPhone.substring(3)}`); // local ecuatoriano con 0 (ej. 0990931770)
+      }
+
+      for (const term of searchTerms) {
+        const searchUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&search=${encodeURIComponent(term)}`;
+        const res = await fetch(searchUrl, {
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+          },
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as { data?: ZernioConversationItem[] };
+          for (const item of data.data || []) {
+            const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
+            if (participant && !this.isBusinessAccount(participant)) {
+              this.registerConversation(participant, item.id);
+            }
+          }
+          if (this.conversationIdCache.has(cleanPhone)) {
+            return this.conversationIdCache.get(cleanPhone)!;
+          }
+        }
+      }
+
+      // Si search no indexó el contacto, consultar listado con mayor límite (100)
+      const listUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`;
+      const listRes = await fetch(listUrl, {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
         },
       });
 
-      if (res.ok) {
-        const data = (await res.json()) as { data?: ZernioConversationItem[] };
+      if (listRes.ok) {
+        const data = (await listRes.json()) as { data?: ZernioConversationItem[] };
         for (const item of data.data || []) {
           const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
-          if (participant) {
-            this.conversationIdCache.set(participant, item.id);
+          if (participant && !this.isBusinessAccount(participant)) {
+            this.registerConversation(participant, item.id);
           }
         }
       }
     } catch (err) {
-      this.logger.warn({ err }, "No se pudo sincronizar cache de conversaciones de Zernio");
+      this.logger.warn({ err, cleanPhone }, "No se pudo sincronizar cache de conversaciones de Zernio");
     }
 
     return this.conversationIdCache.get(cleanPhone) || null;
+  }
+
+  private async resolveConversationId(cleanPhone: string): Promise<string | null> {
+    if (this.conversationIdCache.has(cleanPhone)) {
+      return this.conversationIdCache.get(cleanPhone)!;
+    }
+
+    // 1. Intentar recuperar desde Redis
+    if (this.redisClient) {
+      try {
+        const fromRedis = await this.redisClient.get(`zernio:conv:${cleanPhone}`);
+        if (fromRedis) {
+          this.conversationIdCache.set(cleanPhone, fromRedis);
+          this.phoneByConversationIdCache.set(fromRedis, cleanPhone);
+          return fromRedis;
+        }
+      } catch (err) {
+        this.logger.warn({ err, cleanPhone }, "Error al consultar cache de Redis para Zernio conversationId");
+      }
+    }
+
+    // 2. Búsqueda activa en la API de Zernio
+    return this.searchConversationInZernio(cleanPhone);
   }
 
   async sendText(waPhone: string, body: string): Promise<{ externalId: string }> {
@@ -325,6 +407,58 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           this.logger.error({ status: response.status, body: secondErr }, "Zernio API rechazo el envio tras reintento");
           throw new Error(`Zernio sendText fallo (${response.status}): ${secondErr}`);
         }
+      } else if (
+        !existingConversationId &&
+        response.status === 400 &&
+        (errorBody.includes("TEMPLATE_REQUIRED") || errorBody.toLowerCase().includes("template"))
+      ) {
+        this.logger.warn(
+          { cleanPhone, errorBody },
+          "Zernio reportó TEMPLATE_REQUIRED al crear conversación. Reintentando búsqueda a fondo de conversación existente...",
+        );
+        const recoveredId = await this.searchConversationInZernio(cleanPhone);
+        if (recoveredId) {
+          this.logger.info(
+            { cleanPhone, recoveredId },
+            "Conversación existente recuperada en Zernio; reintentando entrega del mensaje a la conversación...",
+          );
+          url = `${config.baseUrl}/inbox/conversations/${recoveredId}/messages`;
+          payload = {
+            accountId,
+            message: body,
+          };
+          response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            const retryErr = await response.text();
+            if (this.fallbackSender) {
+              this.logger.warn(
+                { cleanPhone, retryErr },
+                "Zernio falló tras reintento en conversación recuperada; entregando vía Meta Cloud API...",
+              );
+              return this.fallbackSender.sendText(waPhone, body);
+            }
+            this.logger.error({ status: response.status, body: retryErr }, "Fallo tras reintento en conversación recuperada de Zernio");
+            throw externalServiceError(`Zernio sendText fallo (${response.status}): ${retryErr}`);
+          }
+        } else {
+          if (this.fallbackSender) {
+            this.logger.warn(
+              { cleanPhone, errorBody },
+              "Zernio reportó TEMPLATE_REQUIRED y no se encontró conversación existente; entregando vía Meta Cloud API...",
+            );
+            return this.fallbackSender.sendText(waPhone, body);
+          }
+          this.logger.error({ status: response.status, body: errorBody }, "Zernio API rechazo el envio de mensaje (TEMPLATE_REQUIRED)");
+          throw externalServiceError(`Zernio sendText fallo (${response.status}): ${errorBody}`);
+        }
       } else {
         if (response.status === 429) {
           this.logger.error({ status: 429, body: errorBody }, "Zernio API tasa de envíos excedida (429 Rate Limit)");
@@ -363,7 +497,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
     }
 
     if (data.data?.conversationId && !existingConversationId) {
-      this.conversationIdCache.set(cleanPhone, data.data.conversationId);
+      this.registerConversation(cleanPhone, data.data.conversationId);
     }
 
     return { externalId };
@@ -608,6 +742,32 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           body: JSON.stringify(payload),
         });
       } else if (
+        !existingConversationId &&
+        response.status === 400 &&
+        (errorBody.includes("TEMPLATE_REQUIRED") || errorBody.toLowerCase().includes("template"))
+      ) {
+        this.logger.warn(
+          { cleanPhone, errorBody },
+          "Zernio reportó TEMPLATE_REQUIRED al crear conversación para media. Reintentando búsqueda de conversación existente...",
+        );
+        const recoveredId = await this.searchConversationInZernio(cleanPhone);
+        if (recoveredId) {
+          this.logger.info(
+            { cleanPhone, recoveredId },
+            "Conversación existente recuperada en Zernio; reintentando entrega de media a la conversación...",
+          );
+          url = `${config.baseUrl}/inbox/conversations/${recoveredId}/messages`;
+          payload = buildPayload(accountId, false);
+          response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+        }
+      } else if (
         response.status === 404 &&
         (errorBody.toLowerCase().includes("account not found") ||
           errorBody.toLowerCase().includes("account_not_found"))
@@ -622,6 +782,32 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
           },
           body: JSON.stringify(payload),
         });
+      } else if (
+        !existingConversationId &&
+        response.status === 400 &&
+        (errorBody.includes("TEMPLATE_REQUIRED") || errorBody.toLowerCase().includes("template"))
+      ) {
+        this.logger.warn(
+          { cleanPhone, errorBody },
+          "Zernio reportó TEMPLATE_REQUIRED al crear conversación para media. Reintentando búsqueda de conversación existente...",
+        );
+        const recoveredId = await this.searchConversationInZernio(cleanPhone);
+        if (recoveredId) {
+          this.logger.info(
+            { cleanPhone, recoveredId },
+            "Conversación existente recuperada en Zernio; reintentando entrega de media a la conversación...",
+          );
+          url = `${config.baseUrl}/inbox/conversations/${recoveredId}/messages`;
+          payload = buildPayload(accountId, false);
+          response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+        }
       }
 
       if (!response.ok) {
@@ -661,7 +847,7 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       `zernio-media-${Date.now()}`;
 
     if (data.data?.conversationId && !existingConversationId) {
-      this.conversationIdCache.set(cleanPhone, data.data.conversationId);
+      this.registerConversation(cleanPhone, data.data.conversationId);
     }
 
     return {
@@ -761,13 +947,20 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       }
     }
 
-    const data = (await response.json()) as ZernioMessageResponse;
+    const data = (await response.json()) as ZernioMessageResponse & {
+      data?: { id?: string; conversationId?: string; messageId?: string };
+    };
     const externalId =
       data.data?.messageId ||
       data.platformMessageId ||
       data.messageId ||
       data.id ||
       `zernio-tpl-${Date.now()}`;
+
+    const convId = data.data?.conversationId || data.data?.id;
+    if (convId) {
+      this.registerConversation(cleanPhone, convId);
+    }
 
     return { externalId };
   }

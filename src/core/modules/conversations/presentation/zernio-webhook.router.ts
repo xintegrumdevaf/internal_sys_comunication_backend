@@ -133,12 +133,30 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
       }
 
       // Si el payload incluye el conversationId de Zernio, enriquecemos el cache del sender
-      const convId = req.body?.message?.conversationId;
-      const msgObj = req.body?.message;
+      const convId =
+        req.body?.message?.conversationId ||
+        req.body?.conversationId ||
+        req.body?.data?.conversationId ||
+        req.body?.data?.id;
+      const msgObj = req.body?.message ?? req.body?.data;
       const isOutboundMsg = msgObj?.direction === "outgoing" || msgObj?.fromMe === true;
       const rawParticipant = isOutboundMsg
-        ? msgObj?.recipient?.id || msgObj?.recipient?.username || msgObj?.participantId
-        : msgObj?.sender?.id || msgObj?.sender?.username || msgObj?.participantId;
+        ? msgObj?.recipient?.id ||
+          msgObj?.recipient?.username ||
+          msgObj?.recipient?.phone ||
+          msgObj?.recipientId ||
+          msgObj?.participantId ||
+          msgObj?.participantUsername ||
+          msgObj?.to ||
+          (typeof msgObj?.metadata?.to === "string" ? msgObj.metadata.to : undefined) ||
+          (typeof msgObj?.metadata?.phone === "string" ? msgObj.metadata.phone : undefined) ||
+          (typeof msgObj?.metadata?.recipient === "string" ? msgObj.metadata.recipient : undefined)
+        : msgObj?.sender?.id ||
+          msgObj?.sender?.username ||
+          (msgObj as Record<string, unknown>)?.senderPhoneNumber ||
+          (msgObj as Record<string, unknown>)?.senderId ||
+          msgObj?.participantId ||
+          msgObj?.participantUsername;
 
       if (convId && rawParticipant && zernioSender) {
         zernioSender.registerConversation(String(rawParticipant), String(convId));

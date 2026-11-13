@@ -89,6 +89,13 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 
 Todas requieren sesión (§1) — el agente que responde/toma control es siempre el de la cookie, nunca uno declarado en el body.
 
+> [!NOTE]
+> **Resiliencia de Envío en WhatsApp vía Zernio y Manejo de Ventana de 24 Horas**:
+> - **Rutas de Envío en Zernio**: Cuando un asesor responde vía `POST /api/conversations/:id/reply`, el adaptador `ZernioSenderHttp` debe entregar el mensaje en `POST /inbox/conversations/:id/messages` (conversación existente). Si no posee el `conversationId` y llamase a `POST /inbox/conversations` (crear chat nuevo), Meta rechaza mensajes de texto plano con `400 TEMPLATE_REQUIRED`.
+> - **Persistencia en Redis (`zernio:conv:*`)**: Para evitar pérdidas de IDs ante reinicios del backend, la correspondencia `teléfono <-> zernio_conversation_id` se persiste en Redis con TTL de 30 días, además de registrarse desde los webhooks entrantes y salientes.
+> - **Búsqueda Activa y Auto-Recuperación**: Si la caché fallase y Zernio respondiera `TEMPLATE_REQUIRED`, el adaptador consulta automáticamente a Zernio por teléfono (`search=${cleanPhone}`, con y sin prefijo internacional `593`), recupera el `conversationId` existente y reintenta la entrega de inmediato por el endpoint de conversación existente, entregando el mensaje sin requerir plantilla.
+> - **Desambiguación de Errores de Entrega**: La función normalizadora `is24HourWindowError` (`meta-delivery-error.ts`) solo marca la ventana como cerrada ante reportes explícitos de expiración de tiempo (código Meta `131047` o `"24 hours elapsed"`), previniendo falsos positivos de chat inactivo cuando la ventana de 24h del cliente sigue vigente.
+
 ### Postman — reply
 
 ```http
