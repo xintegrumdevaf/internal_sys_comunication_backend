@@ -137,7 +137,10 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
         req.body?.message?.conversationId ||
         req.body?.conversationId ||
         req.body?.data?.conversationId ||
-        req.body?.data?.id;
+        req.body?.data?.id ||
+        req.body?.data?._id ||
+        req.body?.message?._id ||
+        req.body?.message?.id;
       const msgObj = req.body?.message ?? req.body?.data;
       const isOutboundMsg = msgObj?.direction === "outgoing" || msgObj?.fromMe === true;
       const rawParticipant = isOutboundMsg
@@ -150,13 +153,18 @@ export function createZernioWebhookRouter(deps: ZernioWebhookRouterDeps): Router
           msgObj?.to ||
           (typeof msgObj?.metadata?.to === "string" ? msgObj.metadata.to : undefined) ||
           (typeof msgObj?.metadata?.phone === "string" ? msgObj.metadata.phone : undefined) ||
-          (typeof msgObj?.metadata?.recipient === "string" ? msgObj.metadata.recipient : undefined)
+          (typeof msgObj?.metadata?.recipient === "string" ? msgObj.metadata.recipient : undefined) ||
+          req.body?.recipientId ||
+          req.body?.to
         : msgObj?.sender?.id ||
           msgObj?.sender?.username ||
           (msgObj as Record<string, unknown>)?.senderPhoneNumber ||
           (msgObj as Record<string, unknown>)?.senderId ||
           msgObj?.participantId ||
-          msgObj?.participantUsername;
+          msgObj?.participantUsername ||
+          req.body?.senderId ||
+          req.body?.participantId ||
+          req.body?.phone;
 
       if (convId && rawParticipant && zernioSender) {
         zernioSender.registerConversation(String(rawParticipant), String(convId));

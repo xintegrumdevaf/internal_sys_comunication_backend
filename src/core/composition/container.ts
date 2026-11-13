@@ -341,6 +341,7 @@ export function createContainer(): Container {
   // No inyectamos fallbackSender (metaSender) para evitar falsos positivos cuando
   // la API de Meta está bloqueada o inactiva y Zernio es el proveedor configurado.
   const zernioSender = new ZernioSenderHttp(env, conversationsLogger, undefined, systemSettingsService, redisClient);
+  void zernioSender.preloadRecentConversations().catch(() => {});
   const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
   const mediaStorage: MediaStoragePort = new LocalMediaStorageAdapter({
     env,

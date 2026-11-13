@@ -24,10 +24,24 @@ type ZernioMessageResponse = {
 };
 
 type ZernioConversationItem = {
-  id: string;
-  accountId: string;
-  participantId: string;
+  id?: string;
+  _id?: string;
+  conversationId?: string;
+  accountId?: string;
+  participantId?: string;
   participantUsername?: string;
+  participantPhone?: string;
+  phone?: string;
+  recipientId?: string;
+  recipient?: string | { id?: string; phone?: string; username?: string };
+  participant?: string | { id?: string; phone?: string; username?: string };
+  to?: string;
+  metadata?: {
+    phone?: string;
+    participantId?: string;
+    to?: string;
+    recipient?: string;
+  };
 };
 
 /**
@@ -88,25 +102,100 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
   }
 
   /**
+   * Genera todas las variaciones posibles de un número de teléfono (internacional 593, local con 0, nacional de 9 dígitos).
+   */
+  public getPhoneVariations(phone: string): string[] {
+    const clean = phone.replace(/\D/g, "");
+    if (!clean) return [];
+    const set = new Set<string>();
+    set.add(clean);
+
+    if (clean.startsWith("593") && clean.length >= 11) {
+      const national = clean.substring(3); // ej: 995848829
+      set.add(national);
+      set.add(`0${national}`); // ej: 0995848829
+    } else if (clean.startsWith("09") && clean.length === 10) {
+      const national = clean.substring(1); // ej: 995848829
+      set.add(national);
+      set.add(`593${national}`); // ej: 593995848829
+    } else if (clean.startsWith("9") && clean.length === 9) {
+      set.add(`0${clean}`); // ej: 0995848829
+      set.add(`593${clean}`); // ej: 593995848829
+    }
+
+    return Array.from(set);
+  }
+
+  /**
+   * Extrae el ID de conversación de un objeto devuelto por Zernio (soporta id, _id y conversationId).
+   */
+  public extractConversationId(item: unknown): string | null {
+    if (!item || typeof item !== "object") return null;
+    const obj = item as Record<string, unknown>;
+    const rawId = obj.id || obj._id || obj.conversationId;
+    return typeof rawId === "string" && rawId.trim() ? rawId.trim() : null;
+  }
+
+  /**
+   * Extrae el número del participante desde múltiples campos posibles de Zernio.
+   */
+  public extractParticipantPhone(item: unknown): string | null {
+    if (!item || typeof item !== "object") return null;
+    const obj = item as Record<string, unknown>;
+    const raw =
+      obj.participantId ||
+      obj.participantUsername ||
+      obj.participantPhone ||
+      (typeof obj.participant === "string" ? obj.participant : undefined) ||
+      (typeof obj.participant === "object" && obj.participant !== null
+        ? (obj.participant as Record<string, unknown>).phone || (obj.participant as Record<string, unknown>).id
+        : undefined) ||
+      obj.recipientId ||
+      (typeof obj.recipient === "string" ? obj.recipient : undefined) ||
+      (typeof obj.recipient === "object" && obj.recipient !== null
+        ? (obj.recipient as Record<string, unknown>).phone || (obj.recipient as Record<string, unknown>).id
+        : undefined) ||
+      obj.phone ||
+      obj.to ||
+      (typeof (obj.metadata as Record<string, unknown>)?.phone === "string"
+        ? (obj.metadata as Record<string, unknown>).phone
+        : undefined) ||
+      (typeof (obj.metadata as Record<string, unknown>)?.participantId === "string"
+        ? (obj.metadata as Record<string, unknown>).participantId
+        : undefined);
+
+    if (typeof raw !== "string" && typeof raw !== "number") return null;
+    const clean = String(raw).replace(/\D/g, "");
+    return clean.length >= 7 ? clean : null;
+  }
+
+  /**
    * Guarda o actualiza la asociación de un teléfono con su ID de conversación en Zernio.
-   * Utilizado también desde el webhook entrante para enriquecer el cache en memoria y en Redis.
+   * Registra automáticamente todas las variantes del número (593..., 09..., 9...) tanto
+   * en el caché en memoria como en Redis con TTL de 30 días.
    */
   public registerConversation(waPhone: string, conversationId: string): void {
-    const cleanPhone = waPhone.replace(/\D/g, "");
-    if (cleanPhone && conversationId && !this.isBusinessAccount(cleanPhone)) {
-      this.conversationIdCache.set(cleanPhone, conversationId);
-      this.phoneByConversationIdCache.set(conversationId, cleanPhone);
+    if (!waPhone || !conversationId) return;
+    const variations = this.getPhoneVariations(waPhone);
+    const validVariations = variations.filter((v) => !this.isBusinessAccount(v));
+    if (validVariations.length === 0) return;
 
-      if (this.redisClient) {
+    for (const v of validVariations) {
+      this.conversationIdCache.set(v, conversationId);
+    }
+    this.phoneByConversationIdCache.set(conversationId, validVariations[0]!);
+
+    if (this.redisClient) {
+      for (const v of validVariations) {
         void this.redisClient
-          .set(`zernio:conv:${cleanPhone}`, conversationId, "EX", 30 * 86400)
+          .set(`zernio:conv:${v}`, conversationId, "EX", 30 * 86400)
           .catch((err) => {
-            this.logger.warn({ err, cleanPhone, conversationId }, "No se pudo guardar conversationId en Redis");
+            this.logger.warn({ err, phone: v, conversationId }, "No se pudo guardar conversationId en Redis");
           });
-        void this.redisClient
-          .set(`zernio:phone:${conversationId}`, cleanPhone, "EX", 30 * 86400)
-          .catch(() => {});
       }
+      void this.redisClient
+        .set(`zernio:phone:${conversationId}`, validVariations[0]!, "EX", 30 * 86400)
+        .catch(() => {});
     }
   }
 
@@ -125,8 +214,11 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       try {
         const fromRedis = await this.redisClient.get(`zernio:phone:${conversationId}`);
         if (fromRedis) {
+          const variations = this.getPhoneVariations(fromRedis);
+          for (const v of variations) {
+            this.conversationIdCache.set(v, conversationId);
+          }
           this.phoneByConversationIdCache.set(conversationId, fromRedis);
-          this.conversationIdCache.set(fromRedis, conversationId);
           return fromRedis;
         }
       } catch {
@@ -147,11 +239,20 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
       });
 
       if (res.ok) {
-        const data = (await res.json()) as { data?: ZernioConversationItem[] };
-        for (const item of data.data || []) {
-          const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
-          if (participant && !this.isBusinessAccount(participant)) {
-            this.registerConversation(participant, item.id);
+        const body = (await res.json()) as { data?: unknown[]; conversations?: unknown[] } | unknown[];
+        const items = Array.isArray(body)
+          ? body
+          : Array.isArray(body?.data)
+            ? body.data
+            : Array.isArray(body?.conversations)
+              ? body.conversations
+              : [];
+
+        for (const item of items) {
+          const convId = this.extractConversationId(item);
+          const participant = this.extractParticipantPhone(item);
+          if (convId && participant && !this.isBusinessAccount(participant)) {
+            this.registerConversation(participant, convId);
           }
         }
       }
@@ -212,86 +313,211 @@ export class ZernioSenderHttp implements WhatsAppSenderPort {
   }
 
   /**
-   * Búsqueda activa de una conversación en Zernio por teléfono exacto, con prefijo o paginado.
+   * Búsqueda activa de una conversación en Zernio por teléfono exacto, con prefijos y paginación a fondo.
    */
   public async searchConversationInZernio(cleanPhone: string): Promise<string | null> {
     try {
       const config = await this.resolveConfig();
       const accountId = await this.getAccountId();
+      const variations = this.getPhoneVariations(cleanPhone);
 
-      // Probar variaciones comunes del número (con prefijo internacional 593, sin él o local)
-      const searchTerms = [cleanPhone];
-      if (cleanPhone.startsWith("593") && cleanPhone.length > 9) {
-        searchTerms.push(cleanPhone.substring(3)); // sin 593 (ej. 990931770)
-        searchTerms.push(`0${cleanPhone.substring(3)}`); // local ecuatoriano con 0 (ej. 0990931770)
+      const indexItems = (items: unknown[]): string | null => {
+        let matchedId: string | null = null;
+        for (const raw of items) {
+          const convId = this.extractConversationId(raw);
+          const participant = this.extractParticipantPhone(raw);
+          if (convId && participant && !this.isBusinessAccount(participant)) {
+            this.registerConversation(participant, convId);
+            const partVariations = this.getPhoneVariations(participant);
+            if (variations.some((target) => partVariations.includes(target))) {
+              matchedId = convId;
+            }
+          }
+        }
+        return matchedId;
+      };
+
+      // 1. Probar endpoints con parámetro search para cada variación
+      for (const term of variations) {
+        const searchUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&search=${encodeURIComponent(term)}`;
+        try {
+          const res = await fetch(searchUrl, {
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+            },
+          });
+
+          if (res.ok) {
+            const body = (await res.json()) as { data?: unknown[]; conversations?: unknown[] } | unknown[];
+            const items = Array.isArray(body)
+              ? body
+              : Array.isArray(body?.data)
+                ? body.data
+                : Array.isArray(body?.conversations)
+                  ? body.conversations
+                  : [];
+            const foundId = indexItems(items);
+            if (foundId) {
+              this.logger.info({ cleanPhone, foundId, term }, "Conversación encontrada en Zernio vía search");
+              return foundId;
+            }
+          }
+        } catch (err) {
+          this.logger.debug({ err, term }, "Fallo búsqueda puntual con search en Zernio");
+        }
       }
 
-      for (const term of searchTerms) {
-        const searchUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&search=${encodeURIComponent(term)}`;
-        const res = await fetch(searchUrl, {
+      // 2. Si search no la indexó, paginar listado de conversaciones con cursor (hasta 5 páginas = 500 chats)
+      let cursor: string | null = null;
+      let hasMore = true;
+      let page = 0;
+      const MAX_PAGES = 5;
+
+      while (hasMore && page < MAX_PAGES) {
+        page++;
+        let listUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`;
+        if (cursor) {
+          listUrl += `&cursor=${encodeURIComponent(cursor)}`;
+        }
+
+        const listRes = await fetch(listUrl, {
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
           },
         });
 
-        if (res.ok) {
-          const data = (await res.json()) as { data?: ZernioConversationItem[] };
-          for (const item of data.data || []) {
-            const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
-            if (participant && !this.isBusinessAccount(participant)) {
-              this.registerConversation(participant, item.id);
-            }
-          }
-          if (this.conversationIdCache.has(cleanPhone)) {
-            return this.conversationIdCache.get(cleanPhone)!;
-          }
+        if (!listRes.ok) {
+          break;
         }
-      }
 
-      // Si search no indexó el contacto, consultar listado con mayor límite (100)
-      const listUrl = `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`;
-      const listRes = await fetch(listUrl, {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-      });
+        const body = (await listRes.json()) as {
+          data?: unknown[];
+          conversations?: unknown[];
+          pagination?: { hasMore?: boolean; nextCursor?: string };
+        } | unknown[];
 
-      if (listRes.ok) {
-        const data = (await listRes.json()) as { data?: ZernioConversationItem[] };
-        for (const item of data.data || []) {
-          const participant = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
-          if (participant && !this.isBusinessAccount(participant)) {
-            this.registerConversation(participant, item.id);
-          }
+        const items = Array.isArray(body)
+          ? body
+          : Array.isArray(body?.data)
+            ? body.data
+            : Array.isArray(body?.conversations)
+              ? body.conversations
+              : [];
+
+        const foundId = indexItems(items);
+        if (foundId) {
+          this.logger.info({ cleanPhone, foundId, page }, "Conversación encontrada en Zernio vía paginación");
+          return foundId;
+        }
+
+        if (!Array.isArray(body) && body?.pagination?.hasMore && body.pagination.nextCursor) {
+          cursor = body.pagination.nextCursor;
+        } else {
+          hasMore = false;
         }
       }
     } catch (err) {
       this.logger.warn({ err, cleanPhone }, "No se pudo sincronizar cache de conversaciones de Zernio");
     }
 
-    return this.conversationIdCache.get(cleanPhone) || null;
+    // Verificar si alguna variación quedó registrada en memoria
+    const variations = this.getPhoneVariations(cleanPhone);
+    for (const v of variations) {
+      const id = this.conversationIdCache.get(v);
+      if (id) return id;
+    }
+
+    return null;
+  }
+
+  /**
+   * Precarga en segundo plano las conversaciones más recientes de Zernio para poblar
+   * de inmediato el caché de Redis y memoria tras el arranque del sistema.
+   */
+  public async preloadRecentConversations(): Promise<void> {
+    try {
+      const config = await this.resolveConfig();
+      if (!config.apiKey) return;
+      const accountId = await this.getAccountId().catch(() => "");
+      let cursor: string | null = null;
+      let pages = 0;
+
+      while (pages < 3) {
+        pages++;
+        let url = accountId
+          ? `${config.baseUrl}/inbox/conversations?accountId=${encodeURIComponent(accountId)}&limit=100`
+          : `${config.baseUrl}/inbox/conversations?platform=whatsapp&limit=100`;
+        if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${config.apiKey}` },
+        });
+        if (!res.ok) break;
+
+        const body = (await res.json()) as {
+          data?: unknown[];
+          conversations?: unknown[];
+          pagination?: { hasMore?: boolean; nextCursor?: string };
+        } | unknown[];
+
+        const items = Array.isArray(body)
+          ? body
+          : Array.isArray(body?.data)
+            ? body.data
+            : Array.isArray(body?.conversations)
+              ? body.conversations
+              : [];
+
+        for (const item of items) {
+          const convId = this.extractConversationId(item);
+          const phone = this.extractParticipantPhone(item);
+          if (convId && phone && !this.isBusinessAccount(phone)) {
+            this.registerConversation(phone, convId);
+          }
+        }
+
+        if (!Array.isArray(body) && body?.pagination?.hasMore && body.pagination.nextCursor) {
+          cursor = body.pagination.nextCursor;
+        } else {
+          break;
+        }
+      }
+      this.logger.info("Precarga de conversaciones activas de Zernio completada con éxito");
+    } catch (err) {
+      this.logger.warn({ err }, "No se pudo precargar conversaciones de Zernio en arranque");
+    }
   }
 
   private async resolveConversationId(cleanPhone: string): Promise<string | null> {
-    if (this.conversationIdCache.has(cleanPhone)) {
-      return this.conversationIdCache.get(cleanPhone)!;
-    }
+    const variations = this.getPhoneVariations(cleanPhone);
 
-    // 1. Intentar recuperar desde Redis
-    if (this.redisClient) {
-      try {
-        const fromRedis = await this.redisClient.get(`zernio:conv:${cleanPhone}`);
-        if (fromRedis) {
-          this.conversationIdCache.set(cleanPhone, fromRedis);
-          this.phoneByConversationIdCache.set(fromRedis, cleanPhone);
-          return fromRedis;
-        }
-      } catch (err) {
-        this.logger.warn({ err, cleanPhone }, "Error al consultar cache de Redis para Zernio conversationId");
+    // 1. Intentar recuperar desde memoria local para cualquiera de las variaciones
+    for (const v of variations) {
+      const cached = this.conversationIdCache.get(v);
+      if (cached) {
+        return cached;
       }
     }
 
-    // 2. Búsqueda activa en la API de Zernio
+    // 2. Intentar recuperar desde Redis para cualquiera de las variaciones
+    if (this.redisClient) {
+      for (const v of variations) {
+        try {
+          const fromRedis = await this.redisClient.get(`zernio:conv:${v}`);
+          if (fromRedis) {
+            for (const itemVar of variations) {
+              this.conversationIdCache.set(itemVar, fromRedis);
+            }
+            this.phoneByConversationIdCache.set(fromRedis, v);
+            return fromRedis;
+          }
+        } catch (err) {
+          this.logger.warn({ err, phone: v }, "Error al consultar cache de Redis para Zernio conversationId");
+        }
+      }
+    }
+
+    // 3. Búsqueda activa a fondo en la API de Zernio
     return this.searchConversationInZernio(cleanPhone);
   }
 

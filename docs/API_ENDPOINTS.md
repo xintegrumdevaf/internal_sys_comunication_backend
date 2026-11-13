@@ -429,7 +429,28 @@ Gestión ejecutiva por Telegram Bot API (alertas reactivas de SLA/OLT/cola, puls
 
 ---
 
-## 19. Qué **no** es HTTP en esta API
+## 20. Integración con Zernio & Resolución de Conversaciones de WhatsApp
+
+Mecanismo de comunicación con WhatsApp Business Cloud vía el gateway oficial de Zernio:
+
+* **Resolución de `conversationId` vs. Inicio de Conversación (`POST /inbox/conversations/:id/messages` vs `POST /inbox/conversations`)**:
+  - En la API de Zernio, `POST /inbox/conversations` se utiliza exclusivamente para *iniciar un chat nuevo*. De acuerdo con las políticas oficiales de Meta, las empresas no pueden iniciar chats nuevos con texto libre, exigiendo una plantilla aprobada (`TEMPLATE_REQUIRED`).
+  - Para enviar mensajes libres dentro de una conversación ya iniciada por el cliente dentro de las últimas 24 horas, la API debe llamar a `POST /inbox/conversations/:conversationId/messages`.
+* **Caché Distribuido y Normalización Multi-Variante en Redis (`zernio:conv:*`)**:
+  - Para evitar falsos positivos de `TEMPLATE_REQUIRED`, `ZernioSenderHttp` normaliza cualquier número ecuatoriano en sus tres variantes oficiales: internacional con código de país (`593995848829`), formato nacional (`995848829`) y local con cero (`0995848829`).
+  - Todas las variantes se registran simultáneamente tanto en memoria como en Redis con una vigencia de 30 días (`EX 2592000s`). Cualquier reinicio del servidor recupera de inmediato la conversación sin depender del estado en memoria.
+* **Soporte de Identificadores `_id` de MongoDB**:
+  - La extracción de identificadores soporta indistintamente `id`, `_id` y `conversationId`, previniendo valores `undefined` al interactuar con documentos serializados de MongoDB.
+* **Búsqueda Paginada con Cursor en Zernio (`searchConversationInZernio`)**:
+  - Si un chat no figura en el caché de Redis, el backend consulta a Zernio mediante el parámetro de búsqueda `search` y recorre hasta 5 páginas consecutivas con cursor (`limit=100`, hasta 500 chats), indexando en caliente todas las conversaciones activas.
+* **Precarga Proactiva al Iniciar el Servidor (`preloadRecentConversations`)**:
+  - Al arrancar el proceso del backend, se ejecuta en segundo plano una sincronización de los chats recientes de Zernio para precargar las claves en Redis, garantizando respuestas inmediatas de los asesores.
+* **Desambiguación de Ventana de 24 Horas**:
+  - Los requerimientos de plantilla en inicio de chat (`TEMPLATE_REQUIRED`) quedan diferenciados de los verdaderos cierres de ventana de 24 horas (error Meta `131047`), evitando bloqueos indebidos en la interfaz de atención cuando el cliente escribió pocas horas antes.
+
+---
+
+## 21. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.
