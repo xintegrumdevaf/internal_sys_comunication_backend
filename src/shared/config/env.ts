@@ -95,6 +95,11 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().default("").optional(),
   TELEGRAM_DEFAULT_CHAT_ID: z.string().default("").optional(),
 
+  // Integración bidireccional con CRM Comercial (CRM_sys_backend)
+  CRM_BACKEND_URL: z.string().default("").optional(),
+  CRM_WEBHOOK_SECRET: z.string().default("").optional(),
+  CRM_INTERNAL_API_KEY: z.string().default("").optional(),
+
   // El registro de accion -> URL de n8n vive en la tabla n8n_workflow_registry
   // (docs/spec/01_DATA_MODEL.md §2, v3) — aqui solo quedan defaults globales,
   // el timeout/retries por accion especifica se puede sobreescribir en la fila.

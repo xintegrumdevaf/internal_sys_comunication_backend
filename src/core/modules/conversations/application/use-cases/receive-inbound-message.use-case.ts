@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type Redis from "ioredis";
 import { withConversationLock } from "../../../../../shared/queue/redis";
 import type { Logger } from "../../../../../shared/logging/logger";
@@ -9,7 +10,8 @@ import type { MediaStoragePort } from "../ports/media-storage.port";
 import type { InboundBufferService } from "../../../ingestion/application/services/inbound-buffer.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
-import type { Case } from "../../../cases/domain/case.entity";
+import { TERMINAL_CASE_STATUSES, type Case } from "../../../cases/domain/case.entity";
+import type { CrmBridgePort } from "../../../crm-bridge/application/ports/crm-bridge.port";
 
 export type ReceiveInboundMessageInput = {
   waPhone: string;
@@ -50,6 +52,7 @@ export type ReceiveInboundMessageDeps = {
   /** Almacenamiento local permanente para descargar imágenes, audios, videos y documentos al recibir el webhook. */
   mediaStorage?: MediaStoragePort;
   caseRepo?: CaseRepositoryPort;
+  crmBridge?: CrmBridgePort;
 };
 
 /**
@@ -168,10 +171,16 @@ export class ReceiveInboundMessageUseCase {
         await inboundBuffer?.push(conversation.id, message.id);
 
         let activeCase: Case | null = null;
-        if (conversation.activeCaseId && this.deps.caseRepo) {
+        if (this.deps.caseRepo) {
           try {
-            const aggregate = await this.deps.caseRepo.findById(conversation.activeCaseId);
-            activeCase = aggregate?.case ?? null;
+            if (conversation.activeCaseId) {
+              const aggregate = await this.deps.caseRepo.findById(conversation.activeCaseId);
+              activeCase = aggregate?.case ?? null;
+            }
+            if (!activeCase) {
+              const cases = await this.deps.caseRepo.listByConversation(conversation.id);
+              activeCase = cases.find((c) => !TERMINAL_CASE_STATUSES.includes(c.status)) ?? null;
+            }
           } catch {
             // No bloquear la ingesta si la lectura del caso falla
           }
@@ -180,6 +189,38 @@ export class ReceiveInboundMessageUseCase {
         const isHumanActive = activeCase
           ? activeCase.status === "HUMAN_ACTIVE" || activeCase.status === "ESCALATED"
           : false;
+
+        if (activeCase && this.deps.crmBridge?.isEnabled()) {
+          let isCrmLinked =
+            activeCase.workflowType === "SALES" ||
+            activeCase.workflowType === "SALES_PACKAGES";
+          if (!isCrmLinked && this.deps.caseRepo) {
+            const auto = await this.deps.caseRepo
+              .getAutomationState(activeCase.id)
+              .catch(() => null);
+            isCrmLinked = auto?.disabledReason === "CRM_HUMAN_HANDOFF";
+          }
+          if (isCrmLinked) {
+            void this.deps.crmBridge
+              .notifySalesEvent(
+                {
+                  eventId: message.externalId || `isp-in-${message.id}-${randomUUID().slice(0, 6)}`,
+                  eventType: "sales.message.received",
+                  occurredAt: new Date().toISOString(),
+                  conversationId: conversation.id,
+                  caseId: activeCase.id,
+                  customerId: conversation.customerId ?? undefined,
+                  waPhone: conversation.waPhone,
+                  fullName: input.waProfileName || conversation.waProfileName || undefined,
+                  lastMessageBody: input.body,
+                },
+                { correlationId: input.correlationId },
+              )
+              .catch((err) => {
+                log.warn({ err, messageId: message.id }, "fallo notificación inbound a CRM");
+              });
+          }
+        }
 
         this.deps.broadcaster?.publish({
           type: "MESSAGE_RECEIVED",

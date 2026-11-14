@@ -153,6 +153,10 @@ import {
   createSalesWorkflow,
   salesPackagesWorkflow,
 } from "../modules/cases/application/engine/definitions/sales.workflow";
+import { CrmBridgeHttp } from "../modules/crm-bridge/infrastructure/http/crm-bridge.http";
+import { ReceiveCrmOutboundMessageUseCase } from "../modules/crm-bridge/application/use-cases/receive-crm-outbound-message.use-case";
+import { ReceiveCrmDomainEventUseCase } from "../modules/crm-bridge/application/use-cases/receive-crm-domain-event.use-case";
+import { createCrmWebhooksRouter } from "../modules/crm-bridge/presentation/crm-webhooks.router";
 import { CoverageRepositoryPg } from "../modules/coverage/infrastructure/postgres/coverage.repository.pg";
 import { KmlParserService } from "../modules/coverage/application/services/kml-parser.service";
 import { CoverageService } from "../modules/coverage/application/services/coverage.service";
@@ -674,6 +678,15 @@ export function createContainer(): Container {
     departmentRepo,
   });
 
+  // --- Puente bidireccional CRM Comercial (ADR-003) ---
+  const crmLogger = logger.child({ module: "crm-bridge" });
+  const crmBridge = new CrmBridgeHttp({
+    crmBackendUrl: env.CRM_BACKEND_URL ?? "",
+    webhookSecret: env.CRM_WEBHOOK_SECRET ?? "",
+    internalApiKey: env.CRM_INTERNAL_API_KEY || env.API_INTERNAL_KEY,
+    logger: crmLogger,
+  });
+
   // --- Casos de uso (application) ---
   const advanceCase = new AdvanceCaseUseCase({
     caseRepo,
@@ -705,6 +718,8 @@ export function createContainer(): Container {
     escalationService,
     broadcaster,
     expirationService,
+    crmBridge,
+    customerRepo,
   });
   const cancelCase = new CancelCaseUseCase({
     caseRepo,
@@ -831,6 +846,7 @@ export function createContainer(): Container {
     broadcaster,
     mediaStorage,
     caseRepo,
+    crmBridge,
   });
   const receiveInboundEdit = new ReceiveInboundEditUseCase({
     conversationRepo,
@@ -867,6 +883,7 @@ export function createContainer(): Container {
     agentRepo,
     departmentRepo,
     mediaStorage,
+    crmBridge,
   });
   const takeControl = new TakeControlUseCase({
     conversationRepo,
@@ -1040,6 +1057,31 @@ export function createContainer(): Container {
       broadcaster,
       conversationRepo,
       settingsService: systemSettingsService,
+    }),
+  );
+
+  const receiveCrmOutboundMessage = new ReceiveCrmOutboundMessageUseCase({
+    conversationRepo,
+    messageRepo,
+    whatsappSender,
+    caseRepo,
+    auditRepo,
+    broadcaster,
+    redisClient,
+    logger: crmLogger,
+  });
+  const receiveCrmDomainEvent = new ReceiveCrmDomainEventUseCase({
+    conversationRepo,
+    caseRepo,
+    auditRepo,
+    broadcaster,
+    logger: crmLogger,
+  });
+  app.use(
+    createCrmWebhooksRouter({
+      env,
+      receiveOutboundMessage: receiveCrmOutboundMessage,
+      receiveDomainEvent: receiveCrmDomainEvent,
     }),
   );
 

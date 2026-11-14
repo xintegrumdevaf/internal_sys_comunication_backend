@@ -3,6 +3,7 @@ import { notFound, validationError } from "../../../../../shared/errors/domain-e
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { AuditRepositoryPort } from "../../../audit/application/ports/audit.repository.port";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
+import type { CrmBridgePort } from "../../../crm-bridge/application/ports/crm-bridge.port";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
@@ -54,6 +55,7 @@ export type ReplyAsHumanDeps = {
   departmentRepo?: DepartmentRepositoryPort;
   /** Almacenamiento local permanente para adjuntos enviados por el agente. */
   mediaStorage?: MediaStoragePort;
+  crmBridge?: CrmBridgePort;
 };
 
 export function resolveWhatsAppMediaType(
@@ -322,6 +324,31 @@ export class ReplyAsHumanUseCase {
       },
       "respuesta de agente enviada por whatsapp",
     );
+
+    if (this.deps.crmBridge?.isEnabled() && caseRepo && effectiveCaseId) {
+      void (async () => {
+        const agg = await caseRepo.findById(effectiveCaseId);
+        const auto = await caseRepo.getAutomationState(effectiveCaseId);
+        const isSalesOrCrm =
+          agg?.case.workflowType === "SALES" ||
+          agg?.case.workflowType === "SALES_PACKAGES" ||
+          auto?.disabledReason === "CRM_HUMAN_HANDOFF";
+        if (!isSalesOrCrm) return;
+        await this.deps.crmBridge!.notifySalesEvent({
+          eventId: message.externalId || `isp-human-${message.id}`,
+          eventType: "sales.message.sent",
+          occurredAt: new Date().toISOString(),
+          conversationId: conversation.id,
+          caseId: effectiveCaseId,
+          customerId: conversation.customerId ?? undefined,
+          waPhone: conversation.waPhone,
+          fullName: conversation.waProfileName ?? undefined,
+          lastMessageBody: effectiveBody,
+        });
+      })().catch((err) => {
+        logger.warn({ err, messageId: message.id }, "fallo notificación de reply humano al CRM");
+      });
+    }
 
     return message;
   }

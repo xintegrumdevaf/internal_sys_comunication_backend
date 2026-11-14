@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { DomainError } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import { TERMINAL_CASE_STATUSES, type Case } from "../../domain/case.entity";
 import { emptyContextFor, type CaseContext } from "../../domain/contexts/case-context";
+import type { SalesContext } from "../../domain/contexts/sales.context";
 import type { BillingBalanceContext } from "../../domain/contexts/billing-balance.context";
+import type { CrmBridgePort } from "../../../crm-bridge/application/ports/crm-bridge.port";
+import type { CustomerRepositoryPort } from "../../../customers/application/ports/customer.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
 import type { WhatsAppSenderPort } from "../../../conversations/application/ports/whatsapp-sender.port";
@@ -44,6 +48,8 @@ export type ProcessBufferedMessagesDeps = {
   escalationService?: EscalationService;
   broadcaster?: RealtimeBroadcaster;
   expirationService?: ExpirationService;
+  crmBridge?: CrmBridgePort;
+  customerRepo?: CustomerRepositoryPort;
 };
 
 export type ProcessBufferedMessagesInput = {
@@ -789,6 +795,14 @@ export class ProcessBufferedMessagesUseCase {
           text,
           entities: seedPurposeEntities(interpretation.intent, interpretation.entities),
         });
+        await this.notifyCrmAfterSalesStep({
+          conversationId,
+          correlationId,
+          caseEntity: advanced.case,
+          outcome: advanced.outcome,
+          customerText: text,
+          log,
+        });
         await this.sendCustomerReply({
           conversationId,
           correlationId,
@@ -1041,6 +1055,14 @@ export class ProcessBufferedMessagesUseCase {
         correlationId,
         text,
         entities: seededEntities,
+      });
+      await this.notifyCrmAfterSalesStep({
+        conversationId,
+        correlationId,
+        caseEntity: advanced.case,
+        outcome: advanced.outcome,
+        customerText: text,
+        log,
       });
       await this.sendCustomerReply({
         conversationId,
@@ -1509,8 +1531,103 @@ export class ProcessBufferedMessagesUseCase {
         messageId: outbound.id,
         author: "ai",
       });
+      if (
+        (input.workflowType === "SALES" || input.workflowType === "SALES_PACKAGES") &&
+        this.deps.crmBridge?.isEnabled()
+      ) {
+        void this.deps.crmBridge
+          .notifySalesEvent(
+            {
+              eventId: outbound.externalId || `sales-out-${outbound.id}`,
+              eventType: "sales.message.sent",
+              occurredAt: new Date().toISOString(),
+              conversationId: input.conversationId,
+              caseId: input.caseId,
+              waPhone: conversation.waPhone,
+              fullName: conversation.waProfileName ?? undefined,
+              lastMessageBody: body,
+            },
+            { correlationId: input.correlationId },
+          )
+          .catch((err) => {
+            input.log.warn({ err }, "no se pudo notificar sales.message.sent al CRM");
+          });
+      }
     }
     input.log.info({ bodyPreview: body.slice(0, 80) }, "respuesta de IA enviada al cliente");
+  }
+
+  private async notifyCrmAfterSalesStep(input: {
+    conversationId: string;
+    correlationId: string;
+    caseEntity: Case;
+    outcome: Parameters<typeof resolveReplyTemplate>[0]["outcome"];
+    customerText?: string;
+    log: Logger;
+  }): Promise<void> {
+    const { crmBridge, conversationRepo, customerRepo } = this.deps;
+    if (!crmBridge?.isEnabled()) return;
+    if (
+      input.caseEntity.workflowType !== "SALES" &&
+      input.caseEntity.workflowType !== "SALES_PACKAGES"
+    ) {
+      return;
+    }
+
+    const salesData: Partial<SalesContext> =
+      input.caseEntity.context && "data" in input.caseEntity.context
+        ? (input.caseEntity.context.data as Partial<SalesContext>)
+        : {};
+
+    const isEscalated = input.outcome?.type === "ESCALATED";
+    const outcomeNextState =
+      input.outcome && "nextState" in input.outcome
+        ? (input.outcome as { nextState?: string }).nextState
+        : undefined;
+    const isNoCoverage =
+      input.outcome?.type === "COMPLETED" &&
+      (outcomeNextState === "NO_COVERAGE" || salesData.coverage?.hasCoverage === false);
+
+    if (!isEscalated && !isNoCoverage) return;
+
+    const conversation = await conversationRepo.findById(input.conversationId);
+    if (!conversation) return;
+
+    const customer =
+      conversation.customerId && customerRepo
+        ? await customerRepo.findById(conversation.customerId).catch(() => null)
+        : null;
+
+    await crmBridge
+      .notifySalesEvent(
+        {
+          eventId: `isp-${input.caseEntity.id}-${isEscalated ? "escalated" : "no-cov"}-${randomUUID().slice(0, 8)}`,
+          eventType: isEscalated ? "sales.lead.escalated" : "sales.lead.no_coverage",
+          occurredAt: new Date().toISOString(),
+          conversationId: input.conversationId,
+          caseId: input.caseEntity.id,
+          customerId: conversation.customerId ?? undefined,
+          waPhone: conversation.waPhone,
+          fullName: customer?.fullName || conversation.waProfileName || undefined,
+          nationalId: customer?.nationalId ?? undefined,
+          requestedSpeed: salesData.requestedSpeed,
+          address: salesData.address ?? salesData.mapLocation,
+          coordinates: salesData.coordinates,
+          coverage: salesData.coverage
+            ? {
+                hasCoverage: salesData.coverage.hasCoverage,
+                zoneName: salesData.coverage.zoneName,
+                city: salesData.coverage.city,
+                reason: salesData.coverage.reason,
+              }
+            : { hasCoverage: !isNoCoverage },
+          lastMessageBody: input.customerText,
+        },
+        { correlationId: input.correlationId },
+      )
+      .catch((err) => {
+        input.log.warn({ err }, "fallo notificación de evento SALES al CRM");
+      });
   }
 
   private async escalateToHuman(caseId: string, log: Logger): Promise<void> {
