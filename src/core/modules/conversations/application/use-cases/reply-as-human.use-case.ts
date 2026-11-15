@@ -29,7 +29,9 @@ export type ReplyAsHumanMediaInput = {
 
 export type ReplyAsHumanInput = {
   conversationId: string;
-  agentUserId: string;
+  agentUserId?: string | null;
+  actorName?: string;
+  skipCrmSync?: boolean;
   body?: string;
   caption?: string;
   media?: ReplyAsHumanMediaInput;
@@ -118,7 +120,7 @@ export class ReplyAsHumanUseCase {
       throw notFound(`Conversacion ${input.conversationId} no encontrada`);
     }
 
-    if (caseRepo && this.deps.agentRepo && this.deps.departmentRepo) {
+    if (input.agentUserId && caseRepo && this.deps.agentRepo && this.deps.departmentRepo) {
       const cases = await caseRepo.listByConversation(conversation.id);
       const humanCase = cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
       if (humanCase) {
@@ -241,7 +243,7 @@ export class ReplyAsHumanUseCase {
         // Si no hay ningún caso en la conversación (ej: contacto nuevo o iniciado por agente),
         // creamos automáticamente un caso GENERAL_INQUIRY en HUMAN_ACTIVE asignado al agente.
         let departmentId: string | null = null;
-        if (this.deps.agentRepo) {
+        if (input.agentUserId && this.deps.agentRepo) {
           const agent = await this.deps.agentRepo.findById(input.agentUserId);
           if (agent && agent.primaryDepartmentId) {
             departmentId = agent.primaryDepartmentId;
@@ -258,7 +260,9 @@ export class ReplyAsHumanUseCase {
         });
         effectiveCaseId = newCase.case.id;
 
-        await caseRepo.setAssignedAgent(effectiveCaseId, input.agentUserId);
+        if (input.agentUserId) {
+          await caseRepo.setAssignedAgent(effectiveCaseId, input.agentUserId);
+        }
         await caseRepo.applyTransition({
           caseId: effectiveCaseId,
           expectedCaseVersion: newCase.case.version,
@@ -277,7 +281,7 @@ export class ReplyAsHumanUseCase {
       author: "agent",
       body: effectiveBody,
       externalId,
-      agentId: input.agentUserId,
+      agentId: input.agentUserId ?? null,
       caseId: effectiveCaseId,
       type: messageType,
       mediaId,
@@ -293,12 +297,14 @@ export class ReplyAsHumanUseCase {
     if (caseRepo && effectiveCaseId) {
       const automation = await caseRepo.getAutomationState(effectiveCaseId);
       if (automation?.enabled !== false) {
+        const disabledReason = input.agentUserId ? "HUMAN_REPLY" : "CRM_HUMAN_HANDOFF";
         await caseRepo.setAutomationEnabled(effectiveCaseId, false, {
-          reason: "HUMAN_REPLY",
-          changedBy: input.agentUserId,
+          reason: disabledReason,
+          changedBy: input.agentUserId ?? input.actorName ?? "crm-agent",
         });
         await caseRepo.appendEvent(effectiveCaseId, "AUTOMATION_DISABLED", {
-          reason: "HUMAN_REPLY",
+          reason: disabledReason,
+          ...(input.actorName ? { actorName: input.actorName } : {}),
         });
       }
     }
@@ -307,10 +313,11 @@ export class ReplyAsHumanUseCase {
       action: "CONVERSATION_REPLY",
       resourceType: "conversation",
       resourceId: conversation.id,
-      actorId: input.agentUserId,
+      actorId: input.agentUserId ?? null,
       metadata: {
         messageId: message.id,
         type: messageType,
+        ...(input.actorName ? { actorName: input.actorName } : {}),
         ...(filename ? { filename } : {}),
       },
     });
@@ -319,13 +326,14 @@ export class ReplyAsHumanUseCase {
       {
         conversationId: conversation.id,
         messageId: message.id,
-        agentUserId: input.agentUserId,
+        agentUserId: input.agentUserId ?? null,
+        actorName: input.actorName,
         type: messageType,
       },
       "respuesta de agente enviada por whatsapp",
     );
 
-    if (this.deps.crmBridge?.isEnabled() && caseRepo && effectiveCaseId) {
+    if (!input.skipCrmSync && this.deps.crmBridge?.isEnabled() && caseRepo && effectiveCaseId) {
       void (async () => {
         const agg = await caseRepo.findById(effectiveCaseId);
         const auto = await caseRepo.getAutomationState(effectiveCaseId);

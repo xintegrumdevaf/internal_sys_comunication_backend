@@ -3,8 +3,12 @@ import type { Env } from "../../../../shared/config/env";
 import { verifyCrmWebhookAuth } from "../../../../shared/http/crm-signature";
 import type { ReceiveCrmDomainEventUseCase } from "../application/use-cases/receive-crm-domain-event.use-case";
 import type { ReceiveCrmOutboundMessageUseCase } from "../application/use-cases/receive-crm-outbound-message.use-case";
+import {
+  registerCrmConversationsBridgeRoutes,
+  type CrmConversationsBridgeDeps,
+} from "./crm-conversations-bridge.router";
 
-export interface CrmWebhooksRouterDeps {
+export interface CrmWebhooksRouterDeps extends CrmConversationsBridgeDeps {
   env: Env;
   receiveOutboundMessage: ReceiveCrmOutboundMessageUseCase;
   receiveDomainEvent: ReceiveCrmDomainEventUseCase;
@@ -69,6 +73,8 @@ export function createCrmWebhooksRouter(deps: CrmWebhooksRouterDeps): Router {
       next(err);
     }
   });
+
+  registerCrmConversationsBridgeRoutes(router, env, isAuthorizedCrmRequest, deps);
 
   return router;
 }
