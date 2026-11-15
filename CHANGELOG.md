@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added & Changed
+- **Coexistencia SSO JWT con ERP Corporativo (`erp-sso-jwt.verifier.ts`, `auth.router.ts`, `container.ts`, `.env`)**:
+  - Agregado `POST /api/auth/sso-exchange` para validar el JWT firmado por `ERP_sys_backend` (`ERP_JWT_SECRET` / `JWT_SECRET`), verificar permiso sobre el módulo `isp` (`isSuperAdmin` o `modules.includes("isp")`), mapear el rol (`admin` / `manager` / `agent`), emitir sesión real en Redis y responder `{ data, token }` + cookie de sesión.
+  - Configurado `PORT=4200` en desarrollo para coexistir en la misma suite sin colisión con `CRM_sys_frontend` (`3000`), `ERP_sys_frontend` (`3100`), `CRM_sys_backend` (`4000`) y `ERP_sys_backend` (`4100`).
+
 ## [0.2.15] - 2026-11-12
 
 ### Added & Improved

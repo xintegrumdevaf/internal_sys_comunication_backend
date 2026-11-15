@@ -1097,6 +1097,8 @@ export function createContainer(): Container {
       updateAvailability,
       sessionTtlSeconds: env.SESSION_TTL_SECONDS,
       auditRepo,
+      agentRepo,
+      sessionStore,
     }),
   );
 

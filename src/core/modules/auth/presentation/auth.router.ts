@@ -10,6 +10,9 @@ import type { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import type { ChangePasswordUseCase } from "../application/use-cases/change-password.use-case";
 import type { UpdateAgentAvailabilityUseCase } from "../application/use-cases/update-agent-availability.use-case";
 import type { AuditRepositoryPort } from "../../audit/application/ports/audit.repository.port";
+import type { AgentRepositoryPort } from "../../departments/application/ports/agent.repository.port";
+import type { SessionStorePort } from "../application/ports/session-store.port";
+import { verifyErpSsoJwt } from "../application/erp-sso-jwt.verifier";
 
 export type AuthRouterDeps = {
   login: LoginUseCase;
@@ -18,6 +21,8 @@ export type AuthRouterDeps = {
   updateAvailability: UpdateAgentAvailabilityUseCase;
   sessionTtlSeconds: number;
   auditRepo?: AuditRepositoryPort;
+  agentRepo?: AgentRepositoryPort;
+  sessionStore?: SessionStorePort;
 };
 
 const loginBodySchema = z.object({
@@ -94,6 +99,37 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           })
           .catch(() => undefined);
       }
+      next(error);
+    }
+  });
+
+  router.post("/api/auth/sso-exchange", async (req, res, next) => {
+    try {
+      const erpToken =
+        typeof req.body?.erpToken === "string" ? req.body.erpToken.trim() : "";
+      if (!erpToken || !deps.agentRepo || !deps.sessionStore) {
+        throw validationError("erpToken es requerido para intercambio SSO.");
+      }
+
+      const claims = verifyErpSsoJwt(erpToken);
+      const agents = await deps.agentRepo.list();
+      const activeAgents = agents.filter((a) => a.active);
+      const matched =
+        (claims.email
+          ? activeAgents.find((a) => a.email.toLowerCase() === claims.email.toLowerCase())
+          : undefined) ??
+        activeAgents.find((a) => a.role === claims.role) ??
+        (claims.role === "manager" ? activeAgents.find((a) => a.role === "admin") : undefined) ??
+        activeAgents[0];
+
+      if (!matched) {
+        throw validationError("No hay agente ISP activo disponible para sesión SSO.");
+      }
+
+      const session = await deps.sessionStore.create(matched.id, deps.sessionTtlSeconds);
+      res.cookie(SESSION_COOKIE_NAME, session.token, sessionCookieOptions(env, deps.sessionTtlSeconds));
+      res.json({ data: { ...toPublicAgentDto(matched), mustChangePassword: false }, token: session.token });
+    } catch (error) {
       next(error);
     }
   });
