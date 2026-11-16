@@ -12,8 +12,6 @@ import { ProcessCampaignBatchUseCase } from "./process-campaign-batch.use-case";
 import { SuspendCampaignUseCase } from "./suspend-campaign.use-case";
 import { ResumeCampaignUseCase } from "./resume-campaign.use-case";
 import { DeleteCampaignUseCase } from "./delete-campaign.use-case";
-import { ListCampaignsUseCase } from "./list-campaigns.use-case";
-import { GetCampaignUseCase } from "./get-campaign.use-case";
 import type { WhatsAppSenderPort } from "../../../conversations/application/ports/whatsapp-sender.port";
 import type { Logger } from "../../../../../shared/logging/logger";
 import * as XLSX from "xlsx";

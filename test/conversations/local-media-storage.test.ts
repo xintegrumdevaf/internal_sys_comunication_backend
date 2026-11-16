@@ -218,6 +218,8 @@ describe("LocalMediaStorageAdapter & /api/media persistent storage", () => {
         getAutomationState: vi.fn().mockResolvedValue({ enabled: true, disabledReason: null }),
         setAutomationEnabled: setAutomationEnabledMock,
         appendEvent: appendEventMock,
+        findById: vi.fn().mockResolvedValue(null),
+        listByConversation: vi.fn().mockResolvedValue([]),
       } as unknown as CaseRepositoryPort,
       logger: {
         info: vi.fn(),

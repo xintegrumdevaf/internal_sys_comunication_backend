@@ -53,6 +53,7 @@ export async function isGeneralDepartment(
   departmentId: string | null | undefined,
 ): Promise<boolean> {
   if (!departmentId) return true;
+  if (!departmentRepo || typeof departmentRepo.findById !== "function") return false;
   const dept = await departmentRepo.findById(departmentId);
   if (!dept) return false;
   const normSlug = (dept.slug || "").toLowerCase().trim();

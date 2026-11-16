@@ -117,7 +117,7 @@ export class ReplyAsHumanUseCase {
       throw notFound(`Conversacion ${input.conversationId} no encontrada`);
     }
 
-    if (caseRepo && this.deps.agentRepo && this.deps.departmentRepo) {
+    if (caseRepo && typeof caseRepo.listByConversation === "function" && this.deps.agentRepo && this.deps.departmentRepo) {
       const cases = await caseRepo.listByConversation(conversation.id);
       const humanCase = cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
       if (humanCase) {
@@ -228,7 +228,7 @@ export class ReplyAsHumanUseCase {
     }
 
     let effectiveCaseId = conversation.activeCaseId;
-    if (!effectiveCaseId && caseRepo) {
+    if (!effectiveCaseId && caseRepo && typeof caseRepo.listByConversation === "function") {
       const cases = await caseRepo.listByConversation(conversation.id);
       const active =
         cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
@@ -303,7 +303,12 @@ export class ReplyAsHumanUseCase {
 
       // Si el caso está en General/Triage y el asesor que responde pertenece a un departamento
       // especializado (ej: Facturación, Soporte), el caso adopta automáticamente su departamento.
-      if (this.deps.agentRepo && this.deps.departmentRepo) {
+      if (
+        this.deps.agentRepo &&
+        this.deps.departmentRepo &&
+        typeof caseRepo.findById === "function" &&
+        typeof caseRepo.applyTransition === "function"
+      ) {
         const currentAggregate = await caseRepo.findById(effectiveCaseId);
         if (currentAggregate) {
           const agent = await this.deps.agentRepo.findById(input.agentUserId);
@@ -333,11 +338,11 @@ export class ReplyAsHumanUseCase {
     }
 
     let replyDepartmentId: string | null = null;
-    if (caseRepo && effectiveCaseId) {
+    if (caseRepo && typeof caseRepo.findById === "function" && effectiveCaseId) {
       const c = await caseRepo.findById(effectiveCaseId);
-      if (c?.case.departmentId) replyDepartmentId = c.case.departmentId;
+      if (c?.case?.departmentId) replyDepartmentId = c.case.departmentId;
     }
-    if (!replyDepartmentId && this.deps.agentRepo) {
+    if (!replyDepartmentId && this.deps.agentRepo && typeof this.deps.agentRepo.findById === "function") {
       const ag = await this.deps.agentRepo.findById(input.agentUserId);
       if (ag?.primaryDepartmentId) replyDepartmentId = ag.primaryDepartmentId;
     }

@@ -25,6 +25,20 @@ All notable changes to this project will be documented in this file.
   - *Resolución y Justificación*:
     Se actualizó el nodo de consolidación de datos del workflow de n8n para iterar la totalidad de filas devueltas (`$input.all()`), sumando de forma acumulativa todo saldo pendiente (`DEBE > 0`) sin importar si el contrato se encuentra en estado `ACTIVO`, `CORTADO`, `ANULADO` o `RETIRADO`, garantizando que el saldo final informado al cliente y a los asesores refleje la deuda total real consolidada.
 
+- **Corrección de Error 500 por Mocks Parciales de `CaseRepositoryPort` en CI/CD (`reply-as-human.use-case.ts`, `general-department.helper.ts`, `local-media-storage.test.ts`, `campaign-file-parser.service.ts`, `campaign-use-cases.spec.ts`)**:
+  - *Contexto y Problema*:
+    Durante la ejecución del pipeline automatizado de GitHub Actions (`test-and-deploy`) en la rama `develop`, la suite de pruebas unitarias falló con `exit code 1` debido a la aserción:
+    `AssertionError: expected 500 to be 201 > test/conversations/local-media-storage.test.ts:269:27`.
+    671 pruebas pasaron en verde y únicamente falló el test de envío de adjuntos multimedia desde la bandeja de asesor.
+  - *Causas Raíz*:
+    1. En `test/conversations/local-media-storage.test.ts`, la prueba utilizaba un mock parcial de `CaseRepositoryPort` que incluía únicamente `getAutomationState`, `setAutomationEnabled` y `appendEvent`, pero no definía los métodos `findById` ni `listByConversation`.
+    2. Al invocarse `reply-as-human.use-case.ts`, el nuevo flujo de adopción de departamento intentaba ejecutar `caseRepo.findById(effectiveCaseId)`. Al ser indefinido en el mock, se produjo una excepción no controlada (`TypeError: caseRepo.findById is not a function`), resultando en una respuesta HTTP `500 Internal Server Error` capturada por Express.
+  - *Resolución y Justificación*:
+    1. **Blindaje Defensivo en Casos de Uso (`reply-as-human.use-case.ts`)**: Se incorporaron validaciones estrictas con `typeof caseRepo.findById === "function"`, `typeof caseRepo.listByConversation === "function"`, `typeof caseRepo.applyTransition === "function"` y `typeof agentRepo.findById === "function"` antes de invocar cualquier método opcional sobre los repositorios inyectados, garantizando total resiliencia frente a mocks parciales en pruebas y llamadas desacopladas.
+    2. **Blindaje en Helper de Departamento (`general-department.helper.ts`)**: Se añadió protección defensiva en `isGeneralDepartment` para verificar que `departmentRepo` cuente con el método `findById` antes de consultarlo.
+    3. **Completitud del Mock en Pruebas (`local-media-storage.test.ts`)**: Se añadieron `findById: vi.fn().mockResolvedValue(null)` y `listByConversation: vi.fn().mockResolvedValue([])` al mock del repositorio de casos.
+    4. **Depuración de Warnings de Linter**: Se corrigió el escape redundante `\.` dentro de la clase de caracteres en `campaign-file-parser.service.ts` y se removieron importaciones sin uso en `campaign-use-cases.spec.ts`.
+
 ## [0.2.17] - 2026-11-16
 
 ### Fixed & Improved
