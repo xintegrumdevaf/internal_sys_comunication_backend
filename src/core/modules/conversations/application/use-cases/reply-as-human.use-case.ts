@@ -301,11 +301,22 @@ export class ReplyAsHumanUseCase {
       }
     }
 
+    let replyDepartmentId: string | null = null;
+    if (caseRepo && effectiveCaseId) {
+      const c = await caseRepo.findById(effectiveCaseId);
+      if (c?.case.departmentId) replyDepartmentId = c.case.departmentId;
+    }
+    if (!replyDepartmentId && this.deps.agentRepo) {
+      const ag = await this.deps.agentRepo.findById(input.agentUserId);
+      if (ag?.primaryDepartmentId) replyDepartmentId = ag.primaryDepartmentId;
+    }
+
     await auditRepo.record({
       action: "CONVERSATION_REPLY",
       resourceType: "conversation",
       resourceId: conversation.id,
       actorId: input.agentUserId,
+      departmentId: replyDepartmentId,
       metadata: {
         messageId: message.id,
         type: messageType,

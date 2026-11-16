@@ -163,9 +163,21 @@ describe("Sistema de Auditoría Empresarial (Enterprise Audit System)", () => {
     expect(resForbidden.status).toBe(403);
   });
 
-  it("GET /api/audit/stats entrega métricas agregadas por categoría y top acciones", async () => {
+  it("GET /api/audit/stats entrega métricas agregadas por categoría y top acciones, incluso con filtro departmentId", async () => {
     const admin = await createTestAgent("admin");
+    const dept = await createTestDepartment("Depto Stats Test");
     const client = await loginClient(admin.email);
+
+    await auditRepo.record({
+      action: "CASE_TRANSFERRED",
+      category: "operational",
+      resourceType: "case",
+      resourceId: randomUUID(),
+      actorType: "agent",
+      actorId: admin.id,
+      departmentId: dept.id,
+      metadata: { reason: "test" },
+    });
 
     const res = await client.get("/api/audit/stats");
     expect(res.status).toBe(200);
@@ -176,6 +188,11 @@ describe("Sistema de Auditoría Empresarial (Enterprise Audit System)", () => {
     expect(res.body.data.byCategory).toHaveProperty("data_change");
     expect(Array.isArray(res.body.data.topActions)).toBe(true);
     expect(Array.isArray(res.body.data.topActors)).toBe(true);
+
+    const resWithDept = await client.get(`/api/audit/stats?departmentId=${dept.id}`);
+    expect(resWithDept.status).toBe(200);
+    expect(resWithDept.body.data.totalEvents).toBeGreaterThanOrEqual(1);
+    expect(resWithDept.body.data.byCategory.operational).toBeGreaterThanOrEqual(1);
   });
 
   it("soporta paginación por cursor en /api/audit", async () => {

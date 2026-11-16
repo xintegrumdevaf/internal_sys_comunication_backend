@@ -229,6 +229,15 @@ Cuando los casos escalan a atención humana (`status = 'ESCALATED'`) sin disponi
 3. **Concurrencia Segura y Tolerancia a Fallos:**
    * La extracción de casos pendientes en PostgreSQL se ejecuta con `FOR UPDATE OF e SKIP LOCKED`, garantizando que múltiples conexiones o workers paralelos jamás asignen el mismo caso por condición de carrera.
 
+## 16. Guardarraíles de Transferencia y Disponibilidad Estricta de Asesores
+
+1. **Prohibición de Asignación Forzada a Asesores Desconectados:**
+   * La auto-asignación por menor carga (`AutoAssignAgentService`) exige estrictamente que el agente esté activo y con turno abierto (`active === true && autoAssignEnabled === true`), además de contar con cupo disponible por debajo de `department.max_concurrent_cases`.
+   * Se prohíbe el mecanismo de fallback forzado hacia agentes desconectados (`fallbackToAnyActive = false`). Si ningún asesor del departamento destino tiene el turno abierto al momento de la transferencia, el caso permanece encolado de forma segura en `ESCALATED` con escalación en `PENDING` para ser asignado en cuanto un agente inicie turno o sea reclamado conscientemente.
+2. **Separación de Responsabilidad en Transferencias:**
+   * Si un caso es transferido automáticamente a un área sin agente específico, el mensaje de sistema indica exclusivamente la derivación departamental realizada por el operador actuante. La auto-asignación posterior genera su propio evento de sistema `HUMAN_ASSIGNED`, preservando la autoría real y evitando atribuciones falsas de derivación directa.
+
+
 
 
 

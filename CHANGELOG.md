@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.17] - 2026-11-16
+
+### Fixed & Improved
+- **Auditoría Forense de Turnos de Asesores (Switch ON / OFF) y Trazabilidad Administrativa (`update-agent-availability.use-case.ts`, `update-agent.use-case.ts`, `auth.router.ts`, `agents.router.ts`, frontend `audit-event.ts`, `AuditLogView.tsx`)**:
+  - *Contexto y Problema*:
+    En el panel de supervisión y control operativo (`/auditoria`), no existía un registro explícito e identificable cuando un asesor abría su turno (switch de asignación automática en ON) o lo cerraba/pausaba (switch en OFF). Cuando un asesor cambiaba su disponibilidad, se emitía una acción genérica sin indicación de estado, y cuando un administrador modificaba el switch desde el directorio de agentes (`/usuarios`), únicamente se registraba `AGENT_UPDATED` con metadatos genéricos de cambio de campos (`changed: ["autoAssignEnabled"]`), impidiendo auditorías de cumplimiento horario y control laboral.
+  - *Causas Raíz*:
+    1. `UpdateAgentAvailabilityUseCase` registraba la acción genérica `AGENT_AVAILABILITY_CHANGED` sin indicar el estado del switch ni los diferenciales de estado estructurados (`beforeState` / `afterState`).
+    2. `UpdateAgentUseCase` no detectaba la transición de `autoAssignEnabled` al ser modificado por administradores, omitiendo un evento de inicio o fin de turno asociado al agente objetivo.
+    3. `auth.router.ts` y `agents.router.ts` no propagaban los datos de red del actor (`ipAddress`, `userAgent`, `correlationId`) en estas operaciones de disponibilidad.
+  - *Resolución y Justificación*:
+    1. **Acciones Explícitas de Turno**: Se crearon y registraron las acciones de auditoría `AGENT_SHIFT_STARTED` (cuando `autoAssignEnabled` pasa a `true` / Switch ON) y `AGENT_SHIFT_ENDED` (cuando pasa a `false` / Switch OFF), categorizadas como `operational`.
+    2. **Metadatos y State Diff Enriquecidos**: Cada evento registra `switch: "ON" | "OFF"`, `shiftStatus: "OPEN" | "CLOSED"`, `previousAutoAssign`, `currentAutoAssign`, descripción legible en lenguaje natural, y los estados completos `beforeState` y `afterState` para el visor de diferencias.
+    3. **Trazabilidad de Cierre por Cierre de Sesión**: En `auth.router.ts`, el cierre de sesión (`POST /api/auth/logout`) desactiva automáticamente la disponibilidad del asesor registrando `AGENT_SHIFT_ENDED` antes de `AGENT_LOGOUT`, evitando que agentes desconectados queden con turno abierto en base de datos.
+    4. **Auditoría de Modificación por Administrador**: En `UpdateAgentUseCase`, cuando un admin cambia el switch de un agente desde la tabla de usuarios, se genera un evento `AGENT_SHIFT_STARTED` o `AGENT_SHIFT_ENDED` asociando al administrador como `actorId`, con `changedByAdmin: true` y el nombre y correo del asesor objetivo en los metadatos.
+    5. **Trazabilidad de Red**: Se agregaron `ipAddress`, `userAgent` y `correlationId` en la invocación de `updateAvailability` y `updateAgent`.
+
+- **Corrección de Error 500 (Doble Cláusula `WHERE`) y Resolución de Departamentos en Filtro de Auditoría (`audit.repository.pg.ts`, `reply-as-human.use-case.ts`, `complete-case.use-case.ts`, `test/audit/audit-repository-pg.unit.test.ts`)**:
+  - *Contexto y Problema*:
+    Al aplicar un filtro por área/departamento (por ejemplo, "Facturación") en la sección de Auditoría & Logs (`/auditoria`), la petición HTTP fallaba con un error `500 Internal Server Error`, disparando la notificación toast roja *"Error interno inesperado"* y no mostrando información del área. Adicionalmente, casi todos los eventos históricos de atención y respuestas figuraban en la tabla con departamento `Global / N/A`, y al filtrar por área no aparecían las actividades realizadas por los asesores de dicho departamento.
+  - *Causas Raíz*:
+    1. **Sintaxis SQL Inválida en Estadísticas (`AuditRepositoryPg.getStats`)**: Al filtrar por `departmentId`, `from` o `to`, la variable `whereSql` generaba `WHERE a.department_id = $1`. Posteriormente, la consulta de `topActors` concatenaba literalmente `WHERE a.actor_id IS NOT NULL` a continuación de `${whereSql}`, resultando en dos cláusulas `WHERE` contiguas (`... WHERE department_id = $1 WHERE a.actor_id IS NOT NULL ...`). PostgreSQL rechazaba la consulta con `syntax error at or near "WHERE"`.
+    2. **Eventos con `department_id` Nulo**: Casos de uso como `ReplyAsHumanUseCase` (`CONVERSATION_REPLY`) y `CompleteCaseUseCase` (`CASE_COMPLETED`) no enviaban el `departmentId` a `auditRepo.record`, guardando `department_id = null` en la base de datos a pesar de que el caso o el asesor pertenecían a un área específica.
+  - *Resolución y Justificación*:
+    1. **Unificación de Condiciones `WHERE`**: En `getStats()`, las cláusulas condicionales se consolidan en un único arreglo (`actorWhereClauses = [...whereClauses, "a.actor_id IS NOT NULL"]`) unidas mediante `AND`, garantizando sintaxis SQL válida en todos los escenarios de filtrado.
+    2. **Resolución Jerárquica con `COALESCE`**: En `list()` y `getStats()`, se implementó `COALESCE(a.department_id, ag.primary_department_id)` junto con `LEFT JOIN department ag_d ON ag_d.id = ag.primary_department_id`. Si un evento no tiene departamento explícito, el sistema lo asocia automáticamente al área del asesor actuante (`primaryDepartmentId`), mostrando el nombre del departamento (ej. "Facturación") en la tabla y permitiendo que el filtro por área devuelva todas las actividades de su personal.
+    3. **Persistencia Directa de Departamento**: Se actualizó `reply-as-human.use-case.ts` y `complete-case.use-case.ts` para resolver e insertar siempre el `departmentId` del caso o del asesor al registrar eventos en `audit_event`.
+    4. **Pruebas Unitarias de Repositorio**: Se creó la suite `test/audit/audit-repository-pg.unit.test.ts` con mock de `Pool` que valida que las consultas generadas por `getStats` y `list` con filtros de departamento no tengan doble `WHERE` y contengan los `JOIN` y `COALESCE` requeridos.
+
+- **Eliminación de Asignación Forzada a Asesores Desconectados en Transferencias (`transfer-case.use-case.ts`, `auto-assign-agent.service.ts`, `test/cases/use-cases/transfer-case.use-case.test.ts`)**:
+  - *Contexto y Problema*:
+    Al transferir un caso a otra área con la opción por defecto *"Auto-asignar automáticamente (menor carga)"* o sin seleccionar asesor específico, el caso se asignaba forzosamente a personal que se encontraba fuera de turno o desconectado (por ejemplo, Sara Terán en Facturación con `autoAssignEnabled = false`). Además, el mensaje de sistema en la conversación afirmaba falsamente que el operador que realizó la transferencia había derivado personalmente el caso a ese asesor específico (`"Caso transferido al área Facturación (Sara Terán) por Admin Global..."`), confundiendo a los clientes y al equipo.
+  - *Causas Raíz*:
+    1. En `AutoAssignAgentService`, existía la opción `fallbackToAnyActive: true`, que ante la falta de asesores con turno abierto (`autoAssignEnabled === true`), seleccionaba a cualquier agente activo del área sin importar si estaba disponible para recibir casos.
+    2. En `TransferCaseUseCase`, se pasaba `fallbackToAnyActive: true` incondicionalmente, obligando la asignación a un agente desconectado en lugar de dejar el ticket en cola para el personal en turno.
+    3. El mensaje de sistema concatenaba el nombre del agente auto-asignado en la misma oración de la transferencia ejecutada por el operador.
+  - *Resolución y Justificación*:
+    1. **Eliminación Definitiva de `fallbackToAnyActive`**: Se removió el parámetro y la lógica de fallback en `AutoAssignAgentService`. La auto-asignación exige estrictamente `active === true && autoAssignEnabled === true`. Si ningún asesor del área tiene el turno abierto, el servicio retorna `null`.
+    2. **Encolamiento Seguro de Casos Transferidos**: En `TransferCaseUseCase`, si ningún asesor del área destino está en turno, el caso se transfiere de forma segura manteniéndose en estado `ESCALATED` con escalación en `PENDING` para ser asignado en cuanto un asesor active su turno o lo reclame.
+    3. **Desacoplamiento de Mensajes de Sistema**: El mensaje generado para el operador transfiere formalmente el caso al área (`"Caso transferido al área Facturación por Admin Global. Motivo: ..."`). Si el sistema auto-asigna a un asesor en turno, se emite el evento de asignación correspondiente sin atribuir la elección al operador.
+
 ## [0.2.16] - 2026-11-13
 
 ### Fixed & Improved

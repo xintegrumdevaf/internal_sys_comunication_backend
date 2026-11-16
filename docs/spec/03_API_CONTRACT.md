@@ -560,3 +560,18 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 - Evita que conversaciones con casos históricos cerrados en un departamento (ej. Cartera) se filtren indebidamente en bandejas de esa área cuando el cliente tiene un caso activo abierto en otra (ej. Soporte).
 - Optimización de consulta: resolución del caso activo en una sola pasada para filtrado y construcción del `ConversationDto.activeCase`.
 
+**v9 → v10**: Control Forense de Turnos y Resiliencia en Auditoría & Transferencias:
+- **Trazabilidad de Turnos (Switch ON / OFF)**:
+  - Nuevas acciones formales en `audit_event`: `AGENT_SHIFT_STARTED` (cuando `agent.auto_assign_enabled` pasa a `true`) y `AGENT_SHIFT_ENDED` (cuando pasa a `false`).
+  - Persistencia de `before_state`, `after_state` y metadatos estructurados (`switch: "ON" | "OFF"`, `shiftStatus: "OPEN" | "CLOSED"`, `description`, `changedByAdmin: boolean`, `targetAgentId`, `targetAgentName`).
+  - Al cerrar sesión (`POST /api/auth/logout`), se desactiva el turno automáticamente emitiendo `AGENT_SHIFT_ENDED` antes de `AGENT_LOGOUT`.
+  - Cuando un administrador modifica el turno de un asesor desde `PUT /api/agents/:id`, se audita como `AGENT_SHIFT_STARTED`/`AGENT_SHIFT_ENDED` con el `actorId` del admin responsable.
+- **Resolución Jerárquica y Corrección SQL en Auditoría (`GET /api/audit`, `GET /api/audit/stats`)**:
+  - `COALESCE(a.department_id, ag.primary_department_id)`: si un evento operativo carece de `department_id` explícito, se resuelve al departamento del asesor que lo ejecutó, garantizando que el filtro por departamento traiga todas las actividades de su personal.
+  - Corrección de sintaxis en `AuditRepositoryPg.getStats`: unificación limpia de condiciones con `AND` eliminando cláusulas `WHERE` duplicadas.
+  - Registro de `departmentId` explícito en `CONVERSATION_REPLY` y `CASE_COMPLETED`.
+- **Eliminación de Asignación Forzada a Asesores Desconectados en Transferencias**:
+  - Supresión definitiva de `fallbackToAnyActive` en `AutoAssignAgentService` y `TransferCaseUseCase`.
+  - La asignación automática exige estrictamente `active === true && autoAssignEnabled === true`. Si ningún asesor del área destino tiene turno abierto, el caso se transfiere en cola (`ESCALATED` / `PENDING`) sin asignar a personal ausente.
+
+

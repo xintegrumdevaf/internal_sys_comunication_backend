@@ -11,6 +11,9 @@ export type UpdateAgentInput = {
   patch: UpdateAgentPatch;
   /** Admin que ejecuta el cambio (para audit_event). */
   actorId: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  correlationId?: string | null;
 };
 
 export type UpdateAgentDeps = {
@@ -75,12 +78,81 @@ export class UpdateAgentUseCase {
 
     const updated = await this.deps.agentRepo.update(current.id, patch);
 
+    const switchChanged =
+      patch.autoAssignEnabled !== undefined &&
+      patch.autoAssignEnabled !== current.autoAssignEnabled;
+
+    if (switchChanged) {
+      const isSwitchOn = updated.autoAssignEnabled;
+      await this.deps.auditRepo.record({
+        action: isSwitchOn ? "AGENT_SHIFT_STARTED" : "AGENT_SHIFT_ENDED",
+        category: "operational",
+        resourceType: "agent",
+        resourceId: updated.id,
+        actorType: "agent",
+        actorId: input.actorId,
+        departmentId: updated.primaryDepartmentId,
+        beforeState: {
+          autoAssignEnabled: current.autoAssignEnabled,
+          activeDepartmentIds: current.activeDepartmentIds,
+        },
+        afterState: {
+          autoAssignEnabled: updated.autoAssignEnabled,
+          activeDepartmentIds: updated.activeDepartmentIds,
+        },
+        metadata: {
+          switch: isSwitchOn ? "ON" : "OFF",
+          shiftStatus: isSwitchOn ? "OPEN" : "CLOSED",
+          previousAutoAssign: current.autoAssignEnabled,
+          currentAutoAssign: updated.autoAssignEnabled,
+          targetAgentId: updated.id,
+          targetAgentName: updated.name,
+          targetAgentEmail: updated.email,
+          changedByAdmin: true,
+          description: isSwitchOn
+            ? `Turno activado (switch ON) para ${updated.name} por administrador`
+            : `Turno cerrado (switch OFF) para ${updated.name} por administrador`,
+        },
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        correlationId: input.correlationId,
+      });
+    }
+
     await this.deps.auditRepo.record({
       action: "AGENT_UPDATED",
+      category: "data_change",
       resourceType: "agent",
       resourceId: updated.id,
+      actorType: "agent",
       actorId: input.actorId,
-      metadata: { changed: Object.keys(input.patch) },
+      departmentId: updated.primaryDepartmentId,
+      beforeState: {
+        name: current.name,
+        email: current.email,
+        role: current.role,
+        primaryDepartmentId: current.primaryDepartmentId,
+        departmentIds: current.departmentIds,
+        active: current.active,
+        autoAssignEnabled: current.autoAssignEnabled,
+      },
+      afterState: {
+        name: updated.name,
+        email: updated.email,
+        role: updated.role,
+        primaryDepartmentId: updated.primaryDepartmentId,
+        departmentIds: updated.departmentIds,
+        active: updated.active,
+        autoAssignEnabled: updated.autoAssignEnabled,
+      },
+      metadata: {
+        changed: Object.keys(input.patch),
+        targetAgentId: updated.id,
+        targetAgentName: updated.name,
+      },
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      correlationId: input.correlationId,
     });
     this.deps.logger.info({ agentId: updated.id, actorId: input.actorId }, "agente actualizado");
 

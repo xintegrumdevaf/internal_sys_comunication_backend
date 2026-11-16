@@ -77,8 +77,8 @@ describe("UpdateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 PUT /api/agents/:
     ).rejects.toMatchObject({ type: "BUSINESS_ERROR" });
   });
 
-  it("permite activar y desactivar autoAssignEnabled via patch parcial", async () => {
-    const { agentRepo, useCase } = build();
+  it("permite activar y desactivar autoAssignEnabled via patch parcial y audita el cambio de turno", async () => {
+    const { agentRepo, auditRepo, useCase } = build();
     const agent = agentRepo.seed({ name: "Ana", email: "ana@isp.local", role: "agent" });
     expect(agent.autoAssignEnabled).toBe(false);
 
@@ -88,6 +88,19 @@ describe("UpdateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 PUT /api/agents/:
       actorId: "admin-1",
     });
     expect(enabled.autoAssignEnabled).toBe(true);
+    expect(auditRepo.events).toContainEqual(
+      expect.objectContaining({
+        action: "AGENT_SHIFT_STARTED",
+        resourceId: agent.id,
+        actorId: "admin-1",
+        metadata: expect.objectContaining({
+          switch: "ON",
+          shiftStatus: "OPEN",
+          targetAgentName: "Ana",
+          changedByAdmin: true,
+        }),
+      }),
+    );
 
     const disabled = await useCase.execute({
       agentId: agent.id,
@@ -95,6 +108,19 @@ describe("UpdateAgentUseCase (docs/spec/06_BACKEND_GAPS.md §1 PUT /api/agents/:
       actorId: "admin-1",
     });
     expect(disabled.autoAssignEnabled).toBe(false);
+    expect(auditRepo.events).toContainEqual(
+      expect.objectContaining({
+        action: "AGENT_SHIFT_ENDED",
+        resourceId: agent.id,
+        actorId: "admin-1",
+        metadata: expect.objectContaining({
+          switch: "OFF",
+          shiftStatus: "CLOSED",
+          targetAgentName: "Ana",
+          changedByAdmin: true,
+        }),
+      }),
+    );
   });
 
   it("si hay mas de un admin activo, si permite degradar o desactivar a uno de ellos", async () => {
