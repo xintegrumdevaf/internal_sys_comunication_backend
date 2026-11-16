@@ -142,4 +142,147 @@ describe("Claim & Act on Triage Case by standard agent", () => {
     expect(message.author).toBe("agent");
     expect(message.body).toBe("Hola, te ayudo con tu consulta");
   });
+
+  it("adopta automáticamente el departamento del asesor (ej: Facturación) cuando reclama un caso en General", async () => {
+    const { caseRepo, conversationRepo, escalationRepo, agentRepo, departmentRepo, claimCase } = build();
+    const general = departmentRepo.seed({ slug: "general", name: "General" });
+    const billing = departmentRepo.seed({ slug: "facturacion", name: "Facturación" });
+
+    const emilie = agentRepo.seed({
+      name: "Emilie Matiz",
+      email: "emilie@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+    });
+
+    const conversation = conversationRepo.createOpen();
+    const { case: generalCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "GENERAL_INQUIRY",
+      departmentId: general.id, // caso en pool general
+      context: { workflowType: "GENERAL_INQUIRY", data: {} },
+      initialState: "TRIAGE",
+      expiresAt: null,
+    });
+
+    await escalationRepo.create({
+      caseId: generalCase.id,
+      departmentId: general.id,
+      reason: "FALLBACK_GENERAL",
+      summary: {
+        problem: "consulta general",
+        workflow: null,
+        department: "General",
+        status: "ESCALATED",
+        reason: "FALLBACK_GENERAL",
+        completedSteps: [],
+        results: {},
+        pendingAction: "TRIAGE",
+        timeline: [],
+      },
+    });
+
+    // Emilie de Facturación reclama el caso que estaba en General
+    await claimCase.execute({
+      caseId: generalCase.id,
+      agentUserId: emilie.id,
+    });
+
+    const claimed = await caseRepo.findById(generalCase.id);
+    expect(claimed?.case.assignedAgentId).toBe(emilie.id);
+    // El caso debe haber adoptado el departamento de Emilie (Facturación)
+    expect(claimed?.case.departmentId).toBe(billing.id);
+
+    const escalation = await escalationRepo.findByCaseId(generalCase.id);
+    expect(escalation?.assignedAgentId).toBe(emilie.id);
+    expect(escalation?.status).toBe("ASSIGNED");
+    expect(escalation?.departmentId).toBe(billing.id);
+  });
+
+  it("adopta automáticamente el departamento del asesor al responder si el caso seguía en General", async () => {
+    const { caseRepo, conversationRepo, agentRepo, departmentRepo, replyAsHuman } = build();
+    const general = departmentRepo.seed({ slug: "general", name: "General" });
+    const billing = departmentRepo.seed({ slug: "facturacion", name: "Facturación" });
+
+    const emilie = agentRepo.seed({
+      name: "Emilie Matiz",
+      email: "emilie@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+    });
+
+    const conversation = conversationRepo.createOpen();
+    const { case: generalCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "GENERAL_INQUIRY",
+      departmentId: general.id,
+      context: { workflowType: "GENERAL_INQUIRY", data: {} },
+      initialState: "HUMAN_ACTIVE",
+      expiresAt: null,
+    });
+
+    // Simulamos que ya estaba asignado a Emilie pero aún tenía departmentId: general
+    await caseRepo.setAssignedAgent(generalCase.id, emilie.id);
+    await conversationRepo.setActiveCaseId(conversation.id, generalCase.id);
+
+    // Emilie responde
+    await replyAsHuman.execute({
+      conversationId: conversation.id,
+      agentUserId: emilie.id,
+      body: "Entiendo, yo me encargo de tu factura.",
+    });
+
+    const afterReply = await caseRepo.findById(generalCase.id);
+    expect(afterReply?.case.departmentId).toBe(billing.id);
+  });
+
+  it("mantiene el departamento especializado si el caso ya pertenecía a otro departamento no-general", async () => {
+    const { caseRepo, conversationRepo, escalationRepo, agentRepo, departmentRepo, claimCase } = build();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const billing = departmentRepo.seed({ slug: "facturacion", name: "Facturación" });
+
+    const emilie = agentRepo.seed({
+      name: "Emilie Matiz",
+      email: "emilie@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+    });
+
+    const conversation = conversationRepo.createOpen();
+    const { case: supportCase } = await caseRepo.create({
+      conversationId: conversation.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id, // departamento específico de soporte
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "ESCALATED",
+      expiresAt: null,
+    });
+
+    await escalationRepo.create({
+      caseId: supportCase.id,
+      departmentId: support.id,
+      reason: "TECH_ISSUE",
+      summary: {
+        problem: "soporte técnico",
+        workflow: "SUPPORT_INTERNET",
+        department: "Soporte",
+        status: "ESCALATED",
+        reason: "TECH_ISSUE",
+        completedSteps: [],
+        results: {},
+        pendingAction: "SUPPORT",
+        timeline: [],
+      },
+    });
+
+    await claimCase.execute({
+      caseId: supportCase.id,
+      agentUserId: emilie.id,
+    });
+
+    const claimed = await caseRepo.findById(supportCase.id);
+    expect(claimed?.case.assignedAgentId).toBe(emilie.id);
+    // Debe mantener Soporte porque NO era General ni triage
+    expect(claimed?.case.departmentId).toBe(support.id);
+  });
 });

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.18] - 2026-11-16
+
+### Fixed & Improved
+- **Adopción Automática de Departamento Especializado al Reclamar o Responder Casos de General / Triage (`claim-case.use-case.ts`, `reply-as-human.use-case.ts`, `general-department.helper.ts`, `test/escalation/claim-triage-case.test.ts`)**:
+  - *Contexto y Problema*:
+    Cuando una conversación era derivada a la bandeja general por falta de clasificación o por mensajes no procesables (ej. notas de voz sin transcripción o fallbacks de triage), el ticket quedaba etiquetado con la pastilla naranja `GENERAL`. Al ser tomado o respondido por un asesor especializado (por ejemplo, Emilie Matiz del departamento de `Facturación`), el sistema asignaba al asesor pero mantenía permanentemente la pastilla `GENERAL` en lugar de mostrar `FACTURACIÓN`, lo que generaba confusión visual y descuadraba las métricas y filtros por área.
+  - *Causas Raíz*:
+    1. En `ClaimCaseUseCase`, la resolución del departamento utilizaba el operador de coalescencia nula: `const targetDepartmentId = aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;`. Como `departmentId` ya apuntaba al UUID del departamento `General` (resuelto por el fallback de escalación), el `primaryDepartmentId` del asesor era ignorado por completo.
+    2. La condición para invocar `applyTransition` exigía `aggregate.case.status !== nextStatus || (aggregate.case.departmentId === null && targetDepartmentId !== null)`. Si el caso ya tenía departamento General (no `null`) o el estado ya era `HUMAN_ACTIVE`, no se aplicaba ninguna transición de departamento en base de datos.
+    3. `ReplyAsHumanUseCase` no verificaba si el caso activo se encontraba en `General` o `Triage` al momento de enviar una respuesta de agente humano.
+  - *Resolución y Justificación*:
+    1. **Helper de Detección de General/Triage (`isGeneralDepartment`)**: Se introdujo una función en `general-department.helper.ts` que identifica si un `departmentId` es nulo (pool de triage) o si corresponde a cualquiera de los slugs y nombres de fallback general (`general`, `atencion`, `atencion-al-cliente`, `recepcion`).
+    2. **Adopción Inmediata en Claim**: En `ClaimCaseUseCase`, si el caso se encuentra en triage o en `General` y el agente posee un departamento primario especializado, `targetDepartmentId` adopta inmediatamente `agent.primaryDepartmentId`. Además, se actualiza la condición a `aggregate.case.departmentId !== targetDepartmentId` para persistir la transición en la tabla `case` y actualizar el registro en `escalation`.
+    3. **Adopción al Responder**: En `ReplyAsHumanUseCase`, al enviar una respuesta humana se evalúa el caso activo; si aún reside en General o Triage, se actualiza de forma automática al departamento primario del asesor actuante.
+    4. **Protección de Departamentos Técnicos**: Si el caso ya se encontraba clasificado en un área técnica específica (por ejemplo, `Soporte Técnico`), la asignación directa o respuesta no lo sobrescribe, reservando el cambio de área técnica exclusivamente a la acción explícita de `Transferir / Delegar` (`TransferCaseUseCase`).
+    5. **Pruebas Automatizadas**: Se ampliaron los tests en `test/escalation/claim-triage-case.test.ts` validando la adopción de Facturación desde General al reclamar, la adopción al responder, y la preservación de departamentos técnicos legítimos.
+
+- **Soporte Multi-Línea y Acumulación de Deudas en Estados Anulados, Cortados y Retirados en Consulta de Saldo (`n8n/check-balance.json`)**:
+  - *Contexto y Problema*:
+    En el flujo de consulta de saldo (`check-balance`), cuando un cliente con el mismo número de cédula poseía múltiples contratos o registros con estados distintos a `ACTIVO` (por ejemplo contratos `CORTADO`, `ANULADO` o `RETIRADO` con saldo pendiente en la columna `DEBE`), el sistema solo tomaba la primera fila que cumpliera una condición restrictiva o devolvía 0.00, omitiendo deudas acumuladas de contratos previos.
+  - *Resolución y Justificación*:
+    Se actualizó el nodo de consolidación de datos del workflow de n8n para iterar la totalidad de filas devueltas (`$input.all()`), sumando de forma acumulativa todo saldo pendiente (`DEBE > 0`) sin importar si el contrato se encuentra en estado `ACTIVO`, `CORTADO`, `ANULADO` o `RETIRADO`, garantizando que el saldo final informado al cliente y a los asesores refleje la deuda total real consolidada.
+
 ## [0.2.17] - 2026-11-16
 
 ### Fixed & Improved

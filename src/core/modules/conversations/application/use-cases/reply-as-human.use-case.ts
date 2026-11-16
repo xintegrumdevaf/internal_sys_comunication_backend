@@ -6,6 +6,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
+import { isGeneralDepartment } from "../../../departments/application/services/general-department.helper";
 import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
@@ -298,6 +299,36 @@ export class ReplyAsHumanUseCase {
         await caseRepo.appendEvent(effectiveCaseId, "AUTOMATION_DISABLED", {
           reason: "HUMAN_REPLY",
         });
+      }
+
+      // Si el caso está en General/Triage y el asesor que responde pertenece a un departamento
+      // especializado (ej: Facturación, Soporte), el caso adopta automáticamente su departamento.
+      if (this.deps.agentRepo && this.deps.departmentRepo) {
+        const currentAggregate = await caseRepo.findById(effectiveCaseId);
+        if (currentAggregate) {
+          const agent = await this.deps.agentRepo.findById(input.agentUserId);
+          if (agent?.primaryDepartmentId) {
+            const isGeneralOrTriage = await isGeneralDepartment(
+              this.deps.departmentRepo,
+              currentAggregate.case.departmentId,
+            );
+            if (
+              isGeneralOrTriage &&
+              currentAggregate.case.departmentId !== agent.primaryDepartmentId
+            ) {
+              await caseRepo.applyTransition({
+                caseId: currentAggregate.case.id,
+                expectedCaseVersion: currentAggregate.case.version,
+                expectedWorkflowVersion: currentAggregate.workflowInstance.version,
+                status: currentAggregate.case.status,
+                context: currentAggregate.case.context,
+                currentState: currentAggregate.workflowInstance.currentState,
+                departmentId: agent.primaryDepartmentId,
+                expiresAt: currentAggregate.case.expiresAt,
+              });
+            }
+          }
+        }
       }
     }
 

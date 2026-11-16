@@ -183,9 +183,9 @@ o en error:
 
 | Endpoint | Efecto |
 |---|---|
-| `POST /api/conversations/:id/reply` `{ body }` | Respuesta humana (agente = sesión actual); fuerza `automation.enabled=false` si no lo estaba |
-| `POST /api/conversations/:id/take-control` | Un agente toma la conversación |
-| `POST /api/cases/:id/claim` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño |
+| `POST /api/conversations/:id/reply` `{ body }` | Respuesta humana (agente = sesión actual); fuerza `automation.enabled=false` si no lo estaba; adopta el departamento primario del asesor si el caso estaba en General o Triage |
+| `POST /api/conversations/:id/take-control` | Un agente toma la conversación (reclama el caso activo adoptando departamento si estaba en General/Triage y deshabilita automatización) |
+| `POST /api/cases/:id/claim` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño; adopta el departamento primario del asesor si el caso estaba en General o Triage |
 | `POST /api/cases/:id/assign` `{ agentUserId }` | Asigna/reasigna el caso (requiere `manager`/`admin` del departamento del caso, o ser el pool de triage) |
 | `POST /api/cases/:id/reassign` `{ agentUserId }` | Reasigna (alias semántico de `assign` sobre un caso ya asignado) |
 | `POST /api/cases/:id/complete` `{ resolutionNote?, closeReason?: 'RESOLVED' \| 'CLIENT_NO_RESPONSE' }` | `COMPLETED` (Cierre manual con motivo: Cierre normal o Cierre por falta de respuesta) |

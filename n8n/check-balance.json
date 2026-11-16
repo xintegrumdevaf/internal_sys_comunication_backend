@@ -38,6 +38,8 @@
         },
         "options": {}
       },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
@@ -55,7 +57,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\nconst debtAmount = parseFloat((debt || \"0\").replace(\",\", \".\"));\n\nreturn [\n  {\n    json: {\n      hasDebt: Number.isFinite(debtAmount) && debtAmount > 0,\n      debt: Number.isFinite(debtAmount) ? debtAmount : 0\n    }\n  }\n];"
+        "jsCode": "const items = $input.all();\n\n// Si Google Sheets devolvió un error (ej. credencial caída o problema de red)\nconst first = items[0]?.json || {};\nif (first.error) {\n  const msg = typeof first.error === 'string'\n    ? first.error\n    : (first.error.message || first.message || 'Google Sheets error');\n  return [{\n    json: {\n      success: false,\n      result: null,\n      error: {\n        type: 'EXTERNAL_SERVICE_ERROR',\n        message: msg,\n        retryable: true,\n      },\n    },\n  }];\n}\n\nlet totalDebt = 0;\nconst contractsFound = [];\n\nfor (const item of items) {\n  const row = item.json;\n  if (!row) continue;\n\n  const rawDebt = row[\"DEBE\"] ?? row[\"debe\"];\n  let parsedDebt = 0;\n  if (rawDebt !== undefined && rawDebt !== null) {\n    const cleanedDebt = String(rawDebt)\n      .replace(/[$]/g, '')\n      .replace(/\\s+/g, '')\n      .replace(',', '.');\n    const parsed = parseFloat(cleanedDebt);\n    if (Number.isFinite(parsed) && parsed > 0) {\n      parsedDebt = parsed;\n      totalDebt += parsed;\n    }\n  }\n\n  // Registrar contrato / fila encontrada independientemente del estado\n  const code = row[\"CÓDIGO\"] || row[\"CODIGO\"] || row[\"codigo\"] || row[\"id\"] || \"\";\n  const status = row[\"ESTADO\"] || row[\"estado\"] || \"\";\n  if (code || status || rawDebt !== undefined) {\n    contractsFound.push({\n      code: String(code).trim(),\n      status: String(status).trim(),\n      debt: Math.round(parsedDebt * 100) / 100,\n    });\n  }\n}\n\n// Redondear a 2 decimales para evitar imprecisiones de coma flotante en JS\nconst finalDebt = Math.round(totalDebt * 100) / 100;\nconst hasDebt = finalDebt > 0;\n\nreturn [\n  {\n    json: {\n      success: true,\n      result: {\n        hasDebt,\n        debt: finalDebt,\n        contractsCount: contractsFound.length,\n        contracts: contractsFound,\n      },\n      hasDebt,\n      debt: finalDebt,\n      error: null,\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -194,6 +196,8 @@
           },
           "options": {}
         },
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput",
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4.7,
         "position": [
@@ -211,7 +215,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nconst row = $input.first().json;\n\nconst debt = row[\"DEBE\"]?.trim() || \"\";\nconst debtAmount = parseFloat((debt || \"0\").replace(\",\", \".\"));\n\nreturn [\n  {\n    json: {\n      hasDebt: Number.isFinite(debtAmount) && debtAmount > 0,\n      debt: Number.isFinite(debtAmount) ? debtAmount : 0\n    }\n  }\n];"
+          "jsCode": "const items = $input.all();\n\n// Si Google Sheets devolvió un error (ej. credencial caída o problema de red)\nconst first = items[0]?.json || {};\nif (first.error) {\n  const msg = typeof first.error === 'string'\n    ? first.error\n    : (first.error.message || first.message || 'Google Sheets error');\n  return [{\n    json: {\n      success: false,\n      result: null,\n      error: {\n        type: 'EXTERNAL_SERVICE_ERROR',\n        message: msg,\n        retryable: true,\n      },\n    },\n  }];\n}\n\nlet totalDebt = 0;\nconst contractsFound = [];\n\nfor (const item of items) {\n  const row = item.json;\n  if (!row) continue;\n\n  const rawDebt = row[\"DEBE\"] ?? row[\"debe\"];\n  let parsedDebt = 0;\n  if (rawDebt !== undefined && rawDebt !== null) {\n    const cleanedDebt = String(rawDebt)\n      .replace(/[$]/g, '')\n      .replace(/\\s+/g, '')\n      .replace(',', '.');\n    const parsed = parseFloat(cleanedDebt);\n    if (Number.isFinite(parsed) && parsed > 0) {\n      parsedDebt = parsed;\n      totalDebt += parsed;\n    }\n  }\n\n  // Registrar contrato / fila encontrada independientemente del estado\n  const code = row[\"CÓDIGO\"] || row[\"CODIGO\"] || row[\"codigo\"] || row[\"id\"] || \"\";\n  const status = row[\"ESTADO\"] || row[\"estado\"] || \"\";\n  if (code || status || rawDebt !== undefined) {\n    contractsFound.push({\n      code: String(code).trim(),\n      status: String(status).trim(),\n      debt: Math.round(parsedDebt * 100) / 100,\n    });\n  }\n}\n\n// Redondear a 2 decimales para evitar imprecisiones de coma flotante en JS\nconst finalDebt = Math.round(totalDebt * 100) / 100;\nconst hasDebt = finalDebt > 0;\n\nreturn [\n  {\n    json: {\n      success: true,\n      result: {\n        hasDebt,\n        debt: finalDebt,\n        contractsCount: contractsFound.length,\n        contracts: contractsFound,\n      },\n      hasDebt,\n      debt: finalDebt,\n      error: null,\n    },\n  },\n];"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,

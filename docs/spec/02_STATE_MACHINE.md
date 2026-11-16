@@ -130,6 +130,7 @@ Cuando la interpretación de IA es `UNCLEAR` de forma sostenida (reintento agota
 
 `case.assigned_agent_id` determina quién puede escribir (responder, ejecutar acciones de agente) sobre un caso una vez que pasó a `HUMAN_ACTIVE`/`ESCALATED`:
 - `NULL` → cualquier agente con visibilidad sobre ese caso puede **reclamarlo** (`POST /api/cases/:id/claim`, `03_API_CONTRACT.md` §C.2), lo que fija `assigned_agent_id`.
+  - **Adopción de departamento en Triage / General**: Si el caso se encuentra en el pool de triage (`department_id IS NULL`) o en el departamento de fallback `General`, al ser reclamado o respondido por un asesor especializado (con `primary_department_id` definido, ej. Facturación), el caso adopta automáticamente el departamento primario del asesor (`departmentId = agent.primaryDepartmentId`), actualizando tanto la entidad del caso como el registro de escalación. Si el caso ya pertenecía a un área técnica especializada (ej. `Soporte Técnico`), la asignación no altera dicho departamento; para moverlo entre áreas técnicas debe usarse la acción explícita de transferencia (`POST /api/cases/:id/transfer`).
 - Asignado → solo ese agente (o un `manager`/`admin` de su departamento, vía `reassign`) puede actuar; el resto de agentes lo ve en modo lectura si `department.visibility='shared'`.
 - Un caso puede ser visible sin estar asignado (bandeja compartida); la asignación es lo que bloquea la edición, no la visibilidad.
 
