@@ -1,14 +1,14 @@
 {
   "name": "isp-customer-service-api",
-  "version": "0.2.15",
+  "version": "0.2.19",
   "description": "Backend de la plataforma omnicanal de atencion automatizada para un ISP (WhatsApp Business Cloud + n8n + PostgreSQL + Redis).",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "private": true,
   "scripts": {
     "dev": "tsx watch --include .env src/index.ts",
     "build": "tsc -p tsconfig.json",
     "build:prod": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "migrate": "tsx scripts/migrate.ts",

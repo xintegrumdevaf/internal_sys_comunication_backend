@@ -55,8 +55,8 @@ export class TransferCaseUseCase {
 
     if (input.toAgentId && this.deps.agentRepo) {
       assignedAgent = await this.deps.agentRepo.findById(input.toAgentId);
-      if (!assignedAgent || !assignedAgent.active) {
-        throw notFound(`Agente destino ${input.toAgentId} no encontrado o inactivo`);
+      if (!assignedAgent) {
+        throw notFound(`Agente destino ${input.toAgentId} no encontrado`);
       }
       if (!input.toDepartmentId && assignedAgent.primaryDepartmentId) {
         targetDeptId = assignedAgent.primaryDepartmentId;

@@ -237,6 +237,10 @@ Cuando los casos escalan a atención humana (`status = 'ESCALATED'`) sin disponi
    * Se prohíbe el mecanismo de fallback forzado hacia agentes desconectados (`fallbackToAnyActive = false`). Si ningún asesor del departamento destino tiene el turno abierto al momento de la transferencia, el caso permanece encolado de forma segura en `ESCALATED` con escalación en `PENDING` para ser asignado en cuanto un agente inicie turno o sea reclamado conscientemente.
 2. **Separación de Responsabilidad en Transferencias:**
    * Si un caso es transferido automáticamente a un área sin agente específico, el mensaje de sistema indica exclusivamente la derivación departamental realizada por el operador actuante. La auto-asignación posterior genera su propio evento de sistema `HUMAN_ASSIGNED`, preservando la autoría real y evitando atribuciones falsas de derivación directa.
+3. **Transferencia Directa vs Auto-Asignación y Visibilidad Departamental:**
+   * **Transferencia dentro del propio departamento**: Un asesor o líder puede transferir manualmente de forma directa (`toAgentId`) a cualquier compañero de su mismo departamento, esté activo o no (ej. reasignación interna de cartera o casos asignados a usuarios inactivos). El backend permite la asignación siempre que el agente exista en el catálogo.
+   * **Transferencia hacia departamentos externos**: Al transferir hacia otra área, la interfaz restringe la lista de selección manual únicamente a los agentes activos con turno de asignación automática abierto (`active !== false && autoAssignEnabled === true`), impidiendo derivar casos manualmente a personal desconectado de otras áreas.
+   * **Auto-asignación inter-departamental**: Si no se selecciona un agente puntual ("Auto-asignar automáticamente (menor carga)"), el backend evalúa únicamente al personal en turno del área destino; si ninguno está disponible, el caso queda encolado como `ESCALATED` / `PENDING` a la espera de que alguien abra turno o lo reclame.
 
 
 

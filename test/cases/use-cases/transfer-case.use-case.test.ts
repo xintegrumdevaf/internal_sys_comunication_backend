@@ -411,5 +411,36 @@ describe("TransferCaseUseCase - Auto-asignación al transferir de área", () => 
       "Caso transferido al área Facturación por Admin Global. Asignado automáticamente a Sara Terán. Motivo: Requiere atención del área destino",
     );
   });
+
+  it("permite transferir directamente a un usuario del departamento aunque esté inactivo (active: false)", async () => {
+    const { caseRepo, agentRepo, transferCase, support, billing } = buildTestStack();
+
+    const inactiveAgent = agentRepo.seed({
+      name: "Agente Inactivo",
+      email: "inactivo@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+      active: false,
+    });
+
+    const { case: currentCase } = await caseRepo.create({
+      conversationId: "conv-inactive-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: billing.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    const transferred = await transferCase.execute({
+      caseId: currentCase.id,
+      toAgentId: inactiveAgent.id,
+      reason: "Transferencia a agente inactivo en mi departamento",
+      agentUserId: "user-admin",
+    });
+
+    expect(transferred.assignedAgentId).toBe(inactiveAgent.id);
+    expect(transferred.departmentId).toBe(billing.id);
+  });
 });
 

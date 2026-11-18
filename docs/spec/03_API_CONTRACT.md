@@ -574,4 +574,15 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
   - Supresión definitiva de `fallbackToAnyActive` en `AutoAssignAgentService` y `TransferCaseUseCase`.
   - La asignación automática exige estrictamente `active === true && autoAssignEnabled === true`. Si ningún asesor del área destino tiene turno abierto, el caso se transfiere en cola (`ESCALATED` / `PENDING`) sin asignar a personal ausente.
 
+**v10 → v11**: Flexibilización de Transferencia Manual Departamental, Resiliencia CORS y Robustez de Despliegue:
+- **Transferencia Manual en Mismo Departamento (`POST /api/cases/:id/transfer`)**:
+  - Eliminación de la validación restrictiva `!assignedAgent.active` en transferencias manuales directas con `toAgentId`. Si un asesor o supervisor transfiere directamente a un agente existente de su mismo departamento, el caso de uso lo permite sin lanzar HTTP 404, permitiendo reasignaciones de cartera o seguimiento hacia cuentas inactivas.
+- **Middleware CORS Universal (`src/shared/http/middlewares/cors.middleware.ts`, `container.ts`)**:
+  - Validación dinámica mediante expresión regular de cualquier origen local (`localhost` o `127.0.0.1` en cualquier puerto).
+  - Incorporación de `FRONTEND_URL` al conjunto de orígenes permitidos.
+  - Envío automático de `Access-Control-Allow-Credentials: true`, `Access-Control-Max-Age: 86400` y respuesta inmediata `204 No Content` para solicitudes preflight `OPTIONS`, eliminando bloqueos de login desde `localhost:8080`.
+- **Corrección de Entrypoint en Build de Producción (`package.json`)**:
+  - Actualización de `"main"` y `"start"` apuntando a `dist/src/index.js` en concordancia con la salida generada por `tsc`.
+
+
 

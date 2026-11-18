@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.19] - 2026-11-18
+
+### Fixed & Improved
+- **Transferencia Directa de Casos a Personal del Mismo Departamento (`transfer-case.use-case.ts`, `test/cases/use-cases/transfer-case.use-case.test.ts`)**:
+  - *Contexto y Requerimiento*:
+    Los operadores y supervisores de área requieren transferir casos manualmente a compañeros de su mismo departamento (por ejemplo, reasignación de casos en Facturación o Cartera para seguimiento histórico o continuidad de atención), aun cuando la cuenta del asesor destino se encuentre temporalmente inactiva (`active: false`).
+  - *Problema Previo*:
+    `TransferCaseUseCase` evaluaba `if (!assignedAgent || !assignedAgent.active)` arrojando una excepción HTTP 404 (`Agente destino ${input.toAgentId} no encontrado o inactivo`), bloqueando transferencias manuales intencionales dentro del propio equipo.
+  - *Resolución y Justificación*:
+    1. **Eliminación de Restricción Restrictiva**: Se modificó la validación para exigir únicamente que el agente exista en base de datos (`if (!assignedAgent)`), permitiendo derivar el caso al asesor especificado independientemente de su estado de activación.
+    2. **Pruebas Automatizadas**: Se incorporó el test unitario `"permite transferir directamente a un usuario del departamento aunque esté inactivo (active: false)"` en `test/cases/use-cases/transfer-case.use-case.test.ts`, asegurando la asignación del `assignedAgentId` y la preservación del `departmentId` con 8/8 pruebas en verde.
+
+- **Middleware CORS Universal y Soporte de Credenciales en Entornos Locales (`cors.middleware.ts`, `container.ts`, `.env`)**:
+  - *Contexto y Problema*:
+    Al acceder al frontend desde puertos locales alternativos (como `http://localhost:8080`), las solicitudes HTTP del navegador (`/api/auth/me`, `/api/departments`, `/api/auth/login`) eran bloqueadas por CORS con el error: `Response to preflight request doesn't pass access control check: The value of the 'Access-Control-Allow-Credentials' header in the response is '' which must be 'true' when the request's credentials mode is 'include'`.
+  - *Causas Raíz*:
+    1. La lista blanca estricta de orígenes no contemplaba puertos de desarrollo dinámicos distintos a `5173`.
+    2. Las peticiones preflight `OPTIONS` no emitían de manera consistente `Access-Control-Allow-Credentials: true` ni `Access-Control-Max-Age` al reflejar el origen, provocando que el navegador abortara la petición previa a la autenticación.
+    3. `FRONTEND_URL` no se propagaba dinámicamente desde el contenedor de inyección de dependencias hacia el middleware CORS.
+  - *Resolución y Justificación*:
+    1. **Soporte Dinámico de Orígenes Locales**: Se implementó la verificación regex `isLocalOrigin` (`/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i`), permitiendo cualquier puerto local de forma segura en entornos de desarrollo y pruebas.
+    2. **Propagación de `FRONTEND_URL`**: En `container.ts`, se actualizó la invocación a `createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV, env.FRONTEND_URL)`.
+    3. **Preflight y Credenciales Robustas**: Se garantiza la emisión de `Access-Control-Allow-Credentials: true`, `Access-Control-Max-Age: 86400` y respuesta `204 No Content` para cualquier solicitud `OPTIONS`.
+
+- **Corrección de Entrypoint para Ejecución de Producción (`package.json`)**:
+  - *Problema*: `package.json` referenciaba `"main": "dist/index.js"` y `"start": "node dist/index.js"`. Debido a la presencia de `test` y `scripts` en el proyecto TypeScript, `tsc` compila manteniendo la estructura bajo `dist/src/index.js`, lo que provocaba un fallo fatal `Cannot find module` al iniciar en modo compilado.
+  - *Resolución*: Se ajustaron `"main"` y `"start"` a `dist/src/index.js`.
+
 ## [0.2.18] - 2026-11-16
 
 ### Fixed & Improved
