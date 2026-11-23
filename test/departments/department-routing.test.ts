@@ -418,4 +418,134 @@ describe("Enrutamiento dinámico de departamentos y casos (Configuración desde 
       expect(existingUpdated?.description).toBe("nueva descripción del caso");
     });
   });
+
+  describe("Regresión de retiro/baja hacia departamento dinámico (Facturación) y prioridad en prompt", () => {
+    it("resuelve support.equipment_return y support.service_cancellation hacia cartera.retiro (Facturación) evitando General o motivos secundarios", async () => {
+      const carteraDept = departmentRepo.seed({
+        slug: "Cartera",
+        name: "Facturación",
+        description: "Todos los casos correspondientes a pagos, cobros e informacion",
+      });
+
+      await departmentRepo.createRouting({
+        departmentId: carteraDept.id,
+        intentKey: "cartera.ultima_factura_posterior_a_retiro",
+        label: "Última factura posterior a retiro",
+        description: "- Ya cancelé el contrato y siguen llegando facturas",
+        handlingMode: "human_direct",
+        workflowType: "GENERAL_INQUIRY",
+      });
+
+      await departmentRepo.createRouting({
+        departmentId: carteraDept.id,
+        intentKey: "cartera.retiro",
+        label: "Retiro",
+        description: "- Retirar el internet\n- Dar de baja el internet",
+        handlingMode: "ai_assisted",
+        workflowType: "GENERAL_INQUIRY",
+      });
+
+      await routingService.invalidateCache();
+
+      const resolvedEquip = await routingService.resolveByIntent("support.equipment_return");
+      expect(resolvedEquip).not.toBeNull();
+      expect(resolvedEquip?.intentKey).toBe("cartera.retiro");
+      expect(resolvedEquip?.departmentId).toBe(carteraDept.id);
+
+      const resolvedCancel = await routingService.resolveByIntent("support.service_cancellation");
+      expect(resolvedCancel).not.toBeNull();
+      expect(resolvedCancel?.intentKey).toBe("cartera.retiro");
+      expect(resolvedCancel?.departmentId).toBe(carteraDept.id);
+
+      const emptyCaseRepo: CaseRepositoryPort = {
+        create: async () => {
+          throw new Error("not implemented");
+        },
+        findById: async () => null,
+        findActiveByConversation: async () => null,
+        findPausedByConversationAndType: async () => null,
+        listByConversation: async () => [],
+        listAutomatableExpiring: async () => [],
+        applyTransition: async () => {
+          throw new Error("not implemented");
+        },
+        setAssignedAgent: async () => {},
+        getAutomationState: async () => null,
+        setAutomationEnabled: async () => {
+          throw new Error("not implemented");
+        },
+        appendEvent: async () => {},
+        listEvents: async () => [],
+        countActiveCasesByAgent: async () => ({}),
+        getDashboardMetrics: async () => ({
+          openConversations: 0,
+          myAssignedCases: 0,
+          escalatedPending: 0,
+          waitingUser: 0,
+          unattendedCases: 0,
+        }),
+      };
+
+      const arbitration = new CaseArbitrationService(emptyCaseRepo, silentLogger, routingService);
+
+      const humanDecision = await arbitration.decide({
+        conversationId: "conv-retiro-1",
+        interpretation: {
+          type: "REQUEST_HUMAN",
+          intent: "support.equipment_return",
+          entities: {},
+          confidence: 0.95,
+        },
+      });
+      expect(humanDecision).toMatchObject({
+        action: "REQUEST_HUMAN",
+        departmentId: carteraDept.id,
+      });
+
+      const newIntentDecision = await arbitration.decide({
+        conversationId: "conv-retiro-2",
+        interpretation: {
+          type: "NEW_INTENT",
+          intent: "support.equipment_return",
+          entities: {},
+          confidence: 0.95,
+        },
+      });
+      expect(newIntentDecision).toMatchObject({
+        action: "ACTIVATE",
+        workflowType: "GENERAL_INQUIRY",
+      });
+      if (newIntentDecision.action === "ACTIVATE") {
+        const resolver = new DepartmentResolverService(departmentRepo, routingService);
+        const resolvedDeptId = await resolver.resolveDepartmentId(
+          newIntentDecision.workflowType,
+          "support.equipment_return",
+        );
+        expect(resolvedDeptId).toBe(carteraDept.id);
+      }
+    });
+
+    it("prioriza el catálogo dinámico de departamentos en interpret-message.prompt sobre reglas genéricas de cancelación", () => {
+      const result = buildInterpretMessagePrompt(
+        {
+          correlationId: "corr-retiro",
+          conversationId: "conv-retiro",
+          messageId: "msg-retiro",
+          text: "Deseo que me retiren los ruter",
+          conversationSnapshot: { recentMessages: [] },
+        },
+        [
+          {
+            intent: "cartera.retiro",
+            label: "Retiro",
+            description: "- Retirar el internet\n- Dar de baja el internet",
+          },
+        ],
+      );
+
+      expect(result.system).toContain("PRIORIDAD ALTA");
+      expect(result.system).toContain("cartera.retiro");
+      expect(result.system).toContain("clasifica SIEMPRE con ese `intent` exacto del catálogo dinámico");
+    });
+  });
 });

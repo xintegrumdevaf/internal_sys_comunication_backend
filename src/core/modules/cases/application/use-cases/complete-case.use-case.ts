@@ -1,6 +1,6 @@
 import { businessError, notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
-import type { Case, CaseStatus } from "../../domain/case.entity";
+import { TERMINAL_CASE_STATUSES, type Case, type CaseStatus } from "../../domain/case.entity";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { MessageRepositoryPort } from "../../../conversations/application/ports/message.repository.port";
@@ -94,6 +94,52 @@ export class CompleteCaseUseCase {
     });
     await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, null);
     await this.deps.conversationRepo.setStatus(aggregate.case.conversationId, "resolved");
+
+    // Cerrar cualquier otro caso no terminal huérfano en la misma conversación para
+    // evitar que quede listado como HUMAN_ACTIVE/ESCALATED tras resolver la conversación.
+    if (typeof this.deps.caseRepo.listByConversation === "function") {
+      const siblingCases = await this.deps.caseRepo.listByConversation(aggregate.case.conversationId);
+      for (const sibling of siblingCases) {
+        if (sibling.id === aggregate.case.id || TERMINAL_CASE_STATUSES.includes(sibling.status)) {
+          continue;
+        }
+        try {
+          const siblingAgg = await this.deps.caseRepo.findById(sibling.id);
+          if (!siblingAgg || TERMINAL_CASE_STATUSES.includes(siblingAgg.case.status)) {
+            continue;
+          }
+          await this.deps.caseRepo.applyTransition({
+            caseId: siblingAgg.case.id,
+            expectedCaseVersion: siblingAgg.case.version,
+            expectedWorkflowVersion: siblingAgg.workflowInstance.version,
+            status: "CANCELLED",
+            context: {
+              ...siblingAgg.case.context,
+              closeReason,
+              closedByAgentId: input.agentUserId,
+              closedByAgentName: actorName,
+              closedAt,
+            },
+            currentState: siblingAgg.workflowInstance.currentState,
+            expiresAt: null,
+          });
+          await this.deps.caseRepo.setAutomationEnabled(siblingAgg.case.id, false, {
+            reason: "SUPERSEDED_BY_CASE_COMPLETION",
+            changedBy: input.agentUserId,
+          });
+          await this.deps.caseRepo.appendEvent(siblingAgg.case.id, "CASE_CANCELLED", {
+            reason: "SUPERSEDED_BY_CASE_COMPLETION",
+            completedCaseId: aggregate.case.id,
+            agentUserId: input.agentUserId,
+          });
+        } catch (err) {
+          this.deps.logger.warn(
+            { err, orphanCaseId: sibling.id, completedCaseId: aggregate.case.id },
+            "no se pudo cancelar caso huérfano paralelo al completar caso",
+          );
+        }
+      }
+    }
 
     // Registrar mensaje de sistema visible en la conversación para trazabilidad visual de todo el equipo
     if (this.deps.messageRepo) {

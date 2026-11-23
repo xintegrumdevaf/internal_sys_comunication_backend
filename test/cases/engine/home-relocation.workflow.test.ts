@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowEngine } from "../../../src/core/modules/cases/application/engine/workflow-engine";
 import { createHomeRelocationWorkflow } from "../../../src/core/modules/cases/application/engine/definitions/home-relocation.workflow";
+import { resolveReplyTemplate } from "../../../src/core/modules/cases/application/services/resolve-reply-template";
 import type { CaseContext } from "../../../src/core/modules/cases/domain/contexts/case-context";
 import { N8nGatewayFake } from "../fakes";
 import type { RagService } from "../../../src/core/modules/ai/application/services/rag.service";
@@ -219,5 +220,67 @@ describe("homeRelocationWorkflow", () => {
     expect(outcome).toMatchObject({ type: "CONTINUE", nextState: "GATHER_RELOCATION_DETAILS" });
     if (outcome.type !== "CONTINUE" || outcome.context.workflowType !== "HOME_RELOCATION") throw new Error("unreachable");
     expect(outcome.context.data.client?.fullName).toBe("Carlos Torres");
+  });
+
+  it("no inventa referencias ni mapLocation por un texto largo y resuelve plantillas y campos faltantes en español", async () => {
+    const workflow = createHomeRelocationWorkflow(fakeRagService);
+    const engine = new WorkflowEngine([workflow]);
+    const gateway = new N8nGatewayFake({});
+
+    const ctx: CaseContext = {
+      workflowType: "HOME_RELOCATION",
+      data: { client: { nationalId: "1720001112", fullName: "Juan Pérez" } },
+    };
+
+    const step = await engine.step("HOME_RELOCATION", {
+      ...baseInput("GATHER_RELOCATION_DETAILS", ctx, gateway),
+      text: "Me voy a mudar a mi nueva casa este fin de semana y necesito ayuda",
+    });
+
+    expect(step).toMatchObject({ type: "WAITING_USER", nextState: "GATHER_RELOCATION_DETAILS" });
+    if (step.context.workflowType !== "HOME_RELOCATION") throw new Error("unreachable");
+    expect(step.context.data.relocationDetails?.references).toBeUndefined();
+    expect(step.context.data.relocationDetails?.mapLocation).toBeUndefined();
+
+    const reply = resolveReplyTemplate({
+      definition: workflow,
+      outcome: step,
+      context: step.context,
+    });
+    expect(reply.templateHint).not.toContain("newAddress");
+    expect(reply.templateHint).not.toContain("mapLocation");
+    expect(reply.templateHint).toContain("dirección del nuevo domicilio");
+
+    const escReply = resolveReplyTemplate({
+      definition: workflow,
+      outcome: {
+        type: "ESCALATED",
+        reason: "Traslado completo",
+        context: {
+          workflowType: "HOME_RELOCATION",
+          data: {
+            client: { nationalId: "1720001112", fullName: "Juan Pérez" },
+            relocationDetails: {
+              newAddress: "Av. Shyris",
+              references: "Frente al parque",
+              mapLocation: "https://maps.google.com/?q=0,0",
+            },
+          },
+        },
+      },
+      context: {
+        workflowType: "HOME_RELOCATION",
+        data: {
+          client: { nationalId: "1720001112", fullName: "Juan Pérez" },
+          relocationDetails: {
+            newAddress: "Av. Shyris",
+            references: "Frente al parque",
+            mapLocation: "https://maps.google.com/?q=0,0",
+          },
+        },
+      },
+    });
+    expect(escReply.templateHint).toContain("Hemos recopilado toda la información");
+    expect(escReply.templateHint).toContain("{{relocationDetails.newAddress}}");
   });
 });

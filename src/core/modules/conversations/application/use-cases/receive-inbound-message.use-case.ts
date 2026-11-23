@@ -12,6 +12,7 @@ import type { RealtimeBroadcaster } from "../../../realtime/application/realtime
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
 import { TERMINAL_CASE_STATUSES, type Case } from "../../../cases/domain/case.entity";
 import type { CrmBridgePort } from "../../../crm-bridge/application/ports/crm-bridge.port";
+import { resolveConversationCases } from "../services/resolve-conversation-cases";
 
 export type ReceiveInboundMessageInput = {
   waPhone: string;
@@ -159,8 +160,11 @@ export class ReceiveInboundMessageUseCase {
             conversation = { ...conversation, status: "open" };
           }
         } else if (conversation.status === "resolved" || conversation.status === "closed") {
-          if (!isPoliteClosingMessage(input.body, input.type)) {
-            log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada por nueva consulta");
+          // Delegamos la reapertura de conversaciones resueltas/cerradas a ProcessBufferedMessages
+          // para evaluar la intención real con NLU (evitando reabrir por despedidas o cortesías).
+          // Si no hay buffer configurado, reabrimos directamente.
+          if (!inboundBuffer) {
+            log.info({ conversationId: conversation.id }, "reabriendo conversacion resuelta/cerrada sin buffer NLU");
             await conversationRepo.setStatus(conversation.id, "open");
             conversation = { ...conversation, status: "open" };
           }
@@ -173,13 +177,13 @@ export class ReceiveInboundMessageUseCase {
         let activeCase: Case | null = null;
         if (this.deps.caseRepo) {
           try {
-            if (conversation.activeCaseId) {
+            const cases = await this.deps.caseRepo.listByConversation(conversation.id);
+            activeCase = resolveConversationCases(conversation, cases).activeCase;
+            if (!activeCase && conversation.activeCaseId) {
               const aggregate = await this.deps.caseRepo.findById(conversation.activeCaseId);
-              activeCase = aggregate?.case ?? null;
-            }
-            if (!activeCase) {
-              const cases = await this.deps.caseRepo.listByConversation(conversation.id);
-              activeCase = cases.find((c) => !TERMINAL_CASE_STATUSES.includes(c.status)) ?? null;
+              if (aggregate && !TERMINAL_CASE_STATUSES.includes(aggregate.case.status)) {
+                activeCase = aggregate.case;
+              }
             }
           } catch {
             // No bloquear la ingesta si la lectura del caso falla
@@ -255,42 +259,4 @@ export class ReceiveInboundMessageUseCase {
 
     return { conversation, message, isDuplicate, isEdited: Boolean(isEdited) };
   }
-}
-
-function isPoliteClosingMessage(text: string, type: string): boolean {
-  if (
-    type === "document" ||
-    type === "image" ||
-    type === "audio" ||
-    type === "voice" ||
-    type === "video"
-  ) {
-    return false;
-  }
-  const clean = text.toLowerCase().trim().replace(/[.,!¡?¿\-_]/g, "");
-  if (!clean) return false;
-  const politeKeywords = [
-    "gracias",
-    "muchas gracias",
-    "ok gracias",
-    "listo gracias",
-    "muchisimas gracias",
-    "vale gracias",
-    "gracias a ti",
-    "muchas gracias por tu ayuda",
-    "muchas gracias por la ayuda",
-    "ok",
-    "listo",
-    "perfecto",
-    "entendido",
-    "chao",
-    "hasta luego",
-    "adios",
-    "que tenga buen dia",
-    "buen dia",
-    "buenas noches",
-    "buena tarde",
-    "excelente",
-  ];
-  return politeKeywords.some((kw) => clean === kw) || /^[\p{Emoji}\s]+$/u.test(clean);
 }

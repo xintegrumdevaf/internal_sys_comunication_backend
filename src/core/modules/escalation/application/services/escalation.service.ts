@@ -131,6 +131,9 @@ export class EscalationService {
     // ESCALATED "puro" para el catalogo de respuestas); el resultado que se
     // devuelve si usa el caso ya actualizado (puede quedar HUMAN_ACTIVE).
     const conv = await conversationRepo.findById(caseEntity.conversationId);
+    if (conv && (conv.status === "resolved" || conv.status === "closed")) {
+      await conversationRepo.setStatus(conv.id, "open");
+    }
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: caseEntity.id,
@@ -223,6 +226,9 @@ export class EscalationService {
         : "caso enviado al pool de triage / cola de departamento",
     );
     const conv = await conversationRepo.findById(input.conversationId);
+    if (conv && (conv.status === "resolved" || conv.status === "closed")) {
+      await conversationRepo.setStatus(conv.id, "open");
+    }
     this.deps.broadcaster?.publish({
       type: "CASE_ESCALATED",
       caseId: transitioned.case.id,
@@ -336,6 +342,10 @@ export class EscalationService {
       reason: preservedReason,
     });
     await this.deps.conversationRepo.setActiveCaseId(caseEntity.conversationId, caseEntity.id);
+    const conv = await this.deps.conversationRepo.findById(caseEntity.conversationId);
+    if (conv && (conv.status === "resolved" || conv.status === "closed")) {
+      await this.deps.conversationRepo.setStatus(conv.id, "open");
+    }
     this.deps.broadcaster?.publish({
       type: "AUTOMATION_DISABLED",
       caseId: caseEntity.id,

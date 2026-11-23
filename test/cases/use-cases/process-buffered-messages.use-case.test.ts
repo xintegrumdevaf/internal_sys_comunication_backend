@@ -2048,4 +2048,202 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(whatsappSender.sent[0]!.body).toContain("asesor");
     expect(whatsappSender.sent[0]!.body).not.toContain("por favor envíanos una foto o captura");
   });
+
+  it("tras notificación automática de campaña en conversación cerrada, un agradecimiento semántico guarda silencio, no crea caso de cuentas bancarias y mantiene la conversación cerrada", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen({ status: "closed" });
+
+    // Campaña con cuentas bancarias y luego campaña de aviso de suspensión
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "Puede realizar su pago en Banco Pichincha o Produbanco.",
+      caption: "template:aviso_cuentas_pago",
+      status: "sent",
+    });
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "Estimado/a cliente, la orden de suspensión de su servicio ya ha sido emitida.",
+      caption: "template:aviso_suspension",
+      status: "sent",
+    });
+
+    let capturedInput: Record<string, unknown> | null = null;
+    const interpretationProvider = {
+      interpretMessage: async (input: Record<string, unknown>) => {
+        capturedInput = input;
+        return {
+          type: "CANCEL" as const,
+          intent: "billing.payment_methods", // incluso si NLU arrastra intent de facturación junto al cierre
+          entities: { isClosing: true, isThankYou: true, isCourtesy: true },
+          confidence: 0.95,
+        };
+      },
+    } as any;
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const msg = messageRepo.seedText(conversation.id, "Ok gracias");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-post-campaign-ack",
+      messages: [msg],
+    });
+
+    expect(capturedInput).not.toBeNull();
+    expect((capturedInput as any).conversationStatus).toBe("closed");
+    expect((capturedInput as any).lastOutboundWasTemplate).toBe(true);
+    expect((capturedInput as any).recentMessages[0].author).toBe("system_notification");
+    expect((capturedInput as any).recentMessages[0].body).toContain(
+      "[Notificación/Campaña automática enviada al cliente]",
+    );
+
+    // Silencio absoluto, sin crear casos ni responder sobre cuentas bancarias
+    expect(whatsappSender.sent).toHaveLength(0);
+    expect(await caseRepo.listByConversation(conversation.id)).toHaveLength(0);
+
+    const updatedConv = await conversationRepo.findById(conversation.id);
+    expect(updatedConv?.status).toBe("closed");
+
+    // También debe aplicar a campañas de otros flujos (ej. soporte o ventas) sin arrastrar su intent
+    const convSupport = conversationRepo.createOpen({ status: "closed" });
+    await messageRepo.insertOutbound({
+      conversationId: convSupport.id,
+      author: "agent",
+      body: "Aviso técnico: realizaremos mantenimiento programado en tu sector esta madrugada.",
+      caption: "template:aviso_mantenimiento",
+      status: "sent",
+    });
+
+    const supportCampaignProvider = new QueuedInterpretationProvider([
+      {
+        type: "CANCEL",
+        intent: "support.internet",
+        entities: { isClosing: true, isThankYou: true, isCourtesy: true },
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCaseSupport = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider: supportCampaignProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const ackSupport = messageRepo.seedText(convSupport.id, "Enterado, gracias por avisar");
+    await useCaseSupport.execute({
+      conversationId: convSupport.id,
+      correlationId: "corr-post-campaign-support-ack",
+      messages: [ackSupport],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(0);
+    expect(await caseRepo.listByConversation(convSupport.id)).toHaveLength(0);
+    expect((await conversationRepo.findById(convSupport.id))?.status).toBe("closed");
+  });
+
+  it("si el cliente plantea una nueva consulta real en una conversación cerrada, la reabre a 'open' al activar el caso", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen({ status: "closed" });
+
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "Estimado/a cliente, su servicio presenta una factura pendiente.",
+      caption: "template:aviso_suspension",
+      status: "sent",
+    });
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      {
+        type: "NEW_INTENT",
+        intent: "support.internet",
+        entities: {},
+        confidence: 0.95,
+      },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      logger: silentLogger,
+    });
+
+    const msg = messageRepo.seedText(conversation.id, "No tengo internet desde ayer");
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-reopen-closed-real-query",
+      messages: [msg],
+    });
+
+    expect(whatsappSender.sent).toHaveLength(1);
+    const updatedConv = await conversationRepo.findById(conversation.id);
+    expect(updatedConv?.status).toBe("open");
+    const cases = await caseRepo.listByConversation(conversation.id);
+    expect(cases).toHaveLength(1);
+    expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
+  });
 });

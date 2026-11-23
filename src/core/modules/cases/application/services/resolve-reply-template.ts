@@ -76,15 +76,37 @@ export function resolveReplyTemplate(input: {
       templates[outcome.nextState] ??
       templates.WAITING_USER_CLIENT ??
       CLARIFY_TEMPLATE;
-    const friendlyMissingFields = missingFields?.map(f => {
-      if (f === "nationalId") return "el número de cédula del titular del servicio";
-      if (f === "selectedOption") return "que nos indiques el número de la opción";
-      if (f === "contractCode") return "el código o número de contrato";
-      if (f === "address") return "la dirección del servicio";
-      if (f === "fullName") return "el nombre completo del titular";
-      if (f === "answer") return "una respuesta clara";
-      return f;
-    });
+    if (templateHint.trim() === "{{question}}" && !question.trim()) {
+      templateHint = CLARIFY_TEMPLATE;
+    }
+    if (
+      templateHint.trim() === "{{answer}}" &&
+      !(typeof contextData.answer === "string" && contextData.answer.trim())
+    ) {
+      templateHint = CLARIFY_TEMPLATE;
+    }
+    const friendlyMissingFields = missingFields
+      ?.map((f): string | null => {
+        if (f === "nationalId") return "el número de cédula del titular del servicio";
+        if (f === "selectedOption") return "que nos indiques el número de la opción";
+        if (f === "contractCode") return "el código o número de contrato";
+        if (f === "address") return "la dirección del servicio";
+        if (f === "newAddress") return "la dirección del nuevo domicilio";
+        if (f === "references") return "dos referencias del nuevo domicilio";
+        if (f === "mapLocation" || f === "location" || f === "coordinates") {
+          return "la ubicación en el mapa o link de Google Maps";
+        }
+        if (f === "fullName") return "el nombre completo del titular";
+        if (f === "amount") return "el monto del pago";
+        if (f === "reference") return "el número de referencia del comprobante";
+        if (f === "requestedSpeed") return "la velocidad o plan de internet que te interesa";
+        if (f === "confirm") return "tu confirmación";
+        if (f === "receipt") return "la foto o captura del comprobante";
+        if (f === "answer") return "una respuesta clara";
+        if (f === "action") return null;
+        return "los datos solicitados";
+      })
+      .filter((v): v is string => Boolean(v));
 
     if (
       contextData.purpose === "payment_methods" &&

@@ -2,14 +2,26 @@ import type { Pool } from "pg";
 import type {
   AgentPerformanceDto,
   AIEfficiencyDto,
+  AnalyticsExportEstimateDto,
   AnalyticsOverviewDto,
   CasesDistributionDto,
+  DepartmentSummaryItemDto,
   InfrastructureAlertDto,
+  PaginatedAnalyticsCasesDto,
+  PaginatedAnalyticsCustomersDto,
 } from "../../domain/analytics.types";
 import type {
+  AnalyticsCasesQueryFilter,
+  AnalyticsCustomersQueryFilter,
   AnalyticsFilter,
   AnalyticsRepositoryPort,
 } from "../../application/ports/analytics.repository.port";
+import {
+  queryAttendedCases,
+  queryAttendedCustomers,
+  queryDepartmentsSummary,
+  queryExportEstimate,
+} from "./analytics-detail.queries";
 
 export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
   constructor(private readonly pool: Pool) {}
@@ -384,34 +396,121 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
           AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
         GROUP BY c.assigned_agent_id
       ),
+      participation_raw AS (
+        SELECT c.id AS case_id,
+               c.assigned_agent_id AS agent_id,
+               COALESCE(conv.customer_id::text, conv.wa_phone) AS customer_key,
+               c.updated_at AS touched_at
+        FROM "case" c
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE c.assigned_agent_id IS NOT NULL
+          AND ((c.created_at >= $1 AND c.created_at <= $2) OR (c.updated_at >= $1 AND c.updated_at <= $2))
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+        UNION ALL
+        SELECT c.id AS case_id,
+               (c.context->>'closedByAgentId')::uuid AS agent_id,
+               COALESCE(conv.customer_id::text, conv.wa_phone) AS customer_key,
+               c.updated_at AS touched_at
+        FROM "case" c
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE c.status = 'COMPLETED'
+          AND c.updated_at >= $1 AND c.updated_at <= $2
+          AND c.context->>'closedByAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+        UNION ALL
+        SELECT m.case_id,
+               m.agent_id,
+               COALESCE(conv.customer_id::text, conv.wa_phone) AS customer_key,
+               m.created_at AS touched_at
+        FROM message m
+        JOIN "case" c ON c.id = m.case_id
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE m.author = 'agent'
+          AND m.agent_id IS NOT NULL
+          AND m.case_id IS NOT NULL
+          AND m.created_at >= $1 AND m.created_at <= $2
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+        UNION ALL
+        SELECT we.case_id,
+               COALESCE(
+                 CASE WHEN we.payload->>'agentUserId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN (we.payload->>'agentUserId')::uuid END,
+                 CASE WHEN we.payload->>'assignedAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN (we.payload->>'assignedAgentId')::uuid END,
+                 CASE WHEN we.payload->>'fromAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN (we.payload->>'fromAgentId')::uuid END
+               ) AS agent_id,
+               COALESCE(conv.customer_id::text, conv.wa_phone) AS customer_key,
+               we.occurred_at AS touched_at
+        FROM workflow_event we
+        JOIN "case" c ON c.id = we.case_id
+        JOIN conversation conv ON conv.id = c.conversation_id
+        WHERE we.type IN ('HUMAN_ASSIGNED', 'CASE_ASSIGNED', 'CASE_CLAIMED', 'CASE_TRANSFERRED', 'CASE_COMPLETED')
+          AND we.occurred_at >= $1 AND we.occurred_at <= $2
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+      ),
+      touched_stats AS (
+        SELECT
+          agent_id,
+          COUNT(DISTINCT case_id)::int AS cases_touched,
+          COUNT(DISTINCT customer_key)::int AS unique_customers_count,
+          MAX(touched_at) AS last_case_at
+        FROM participation_raw
+        WHERE agent_id IS NOT NULL
+        GROUP BY agent_id
+      ),
       completed_stats AS (
-        SELECT c.assigned_agent_id AS agent_id,
-               COUNT(*)::int AS cases_completed,
-               AVG(EXTRACT(EPOCH FROM (c.updated_at - c.created_at)) / 60)::float AS avg_handling_minutes,
-               -- FCR: Cuántos casos NO tuvieron reapertura en la misma conversación dentro de las 48h
-               COUNT(*) FILTER (
-                 WHERE NOT EXISTS (
-                   SELECT 1 FROM "case" c2
-                   WHERE c2.conversation_id = c.conversation_id
-                     AND c2.id != c.id
-                     AND c2.created_at > c.updated_at
-                     AND c2.created_at <= c.updated_at + INTERVAL '48 hours'
-                 )
-               )::int AS fcr_resolved_cases
+        SELECT
+          COALESCE(
+            CASE WHEN c.context->>'closedByAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN (c.context->>'closedByAgentId')::uuid END,
+            c.assigned_agent_id
+          ) AS agent_id,
+          COUNT(*)::int AS cases_completed,
+          AVG(EXTRACT(EPOCH FROM (c.updated_at - c.created_at)) / 60)::float AS avg_handling_minutes,
+          -- FCR: Cuántos casos NO tuvieron reapertura en la misma conversación dentro de las 48h
+          COUNT(*) FILTER (
+            WHERE NOT EXISTS (
+              SELECT 1 FROM "case" c2
+              WHERE c2.conversation_id = c.conversation_id
+                AND c2.id != c.id
+                AND c2.created_at > c.updated_at
+                AND c2.created_at <= c.updated_at + INTERVAL '48 hours'
+            )
+          )::int AS fcr_resolved_cases
         FROM "case" c
         WHERE c.status = 'COMPLETED'
-          AND c.assigned_agent_id IS NOT NULL
+          AND COALESCE(
+            CASE WHEN c.context->>'closedByAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN (c.context->>'closedByAgentId')::uuid END,
+            c.assigned_agent_id
+          ) IS NOT NULL
           AND c.updated_at >= $1 AND c.updated_at <= $2
           AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
-        GROUP BY c.assigned_agent_id
+        GROUP BY 1
       ),
-      transferred_counts AS (
-        SELECT (we.payload->>'fromAgentId')::uuid AS agent_id, COUNT(*)::int AS count
+      transferred_events AS (
+        SELECT DISTINCT
+          c.id AS case_id,
+          (we.payload->>'fromAgentId')::uuid AS agent_id,
+          date_trunc('minute', we.occurred_at) AS ts_bucket
         FROM workflow_event we
+        JOIN "case" c ON c.id = we.case_id
         WHERE we.type = 'CASE_TRANSFERRED'
           AND we.occurred_at >= $1 AND we.occurred_at <= $2
-          AND we.payload->>'fromAgentId' IS NOT NULL
-        GROUP BY 1
+          AND we.payload->>'fromAgentId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+        UNION
+        SELECT DISTINCT
+          c.id AS case_id,
+          ae.actor_id AS agent_id,
+          date_trunc('minute', ae.occurred_at) AS ts_bucket
+        FROM audit_event ae
+        JOIN "case" c ON c.id::text = ae.resource_id
+        WHERE ae.action = 'CASE_TRANSFERRED'
+          AND ae.actor_id IS NOT NULL
+          AND ae.occurred_at >= $1 AND ae.occurred_at <= $2
+          AND ($3::uuid[] IS NULL OR COALESCE(c.department_id, (SELECT e.department_id FROM escalation e WHERE e.case_id = c.id LIMIT 1)) = ANY($3::uuid[]))
+      ),
+      transferred_counts AS (
+        SELECT agent_id, COUNT(*)::int AS count
+        FROM transferred_events
+        GROUP BY agent_id
       ),
       first_reply_stats AS (
         SELECT cc.assigned_agent_id AS agent_id,
@@ -482,7 +581,10 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         sa.auto_assign_enabled,
         COALESCE(an.count, 0)::int AS active_cases_now,
         COALESCE(ac.count, 0)::int AS cases_assigned,
+        COALESCE(ts.cases_touched, COALESCE(ac.count, 0))::int AS cases_touched,
         COALESCE(cs.cases_completed, 0)::int AS cases_completed,
+        COALESCE(ts.unique_customers_count, 0)::int AS unique_customers_count,
+        ts.last_case_at,
         cs.avg_handling_minutes,
         cs.fcr_resolved_cases,
         COALESCE(tc.count, 0)::int AS cases_transferred,
@@ -495,11 +597,25 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
       FROM scoped_agents sa
       LEFT JOIN active_now an ON an.agent_id = sa.id
       LEFT JOIN assigned_counts ac ON ac.agent_id = sa.id
+      LEFT JOIN touched_stats ts ON ts.agent_id = sa.id
       LEFT JOIN completed_stats cs ON cs.agent_id = sa.id
       LEFT JOIN transferred_counts tc ON tc.agent_id = sa.id
       LEFT JOIN first_reply_stats frs ON frs.agent_id = sa.id
       LEFT JOIN quality_stats qs ON qs.agent_id = sa.id
       LEFT JOIN unattended_in_progress uip ON uip.agent_id = sa.id
+      WHERE NOT (
+        sa.role = 'admin'
+        AND COALESCE(ts.cases_touched, 0) = 0
+        AND COALESCE(an.count, 0) = 0
+        AND COALESCE(cs.cases_completed, 0) = 0
+      )
+      AND NOT (
+        $3::uuid[] IS NOT NULL
+        AND (sa.primary_department_id IS NULL OR NOT (sa.primary_department_id = ANY($3::uuid[])))
+        AND COALESCE(ts.cases_touched, 0) = 0
+        AND COALESCE(an.count, 0) = 0
+        AND COALESCE(cs.cases_completed, 0) = 0
+      )
       ORDER BY sa.name ASC;
     `;
 
@@ -507,6 +623,8 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
 
     return rows.map((r) => {
       const casesCompleted = Number(r.cases_completed ?? 0);
+      const casesAssigned = Number(r.cases_assigned ?? 0);
+      const casesTouched = Math.max(Number(r.cases_touched ?? 0), casesCompleted);
       const fcrResolved = r.fcr_resolved_cases !== null ? Number(r.fcr_resolved_cases) : 0;
       const fcrRatePercentage = casesCompleted > 0
         ? Math.round((fcrResolved / casesCompleted) * 1000) / 10
@@ -524,6 +642,12 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         ? Math.round(Number(r.avg_cordiality))
         : null;
 
+      const lastCaseAt = r.last_case_at instanceof Date
+        ? r.last_case_at.toISOString()
+        : r.last_case_at
+          ? String(r.last_case_at)
+          : null;
+
       return {
         agentId: r.agent_id,
         agentName: r.agent_name,
@@ -533,9 +657,13 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         autoAssignEnabled: Boolean(r.auto_assign_enabled),
         activeCasesNow: Number(r.active_cases_now ?? 0),
         maxCapacityThreshold,
-        casesAssigned: Number(r.cases_assigned ?? 0),
+        casesAssigned,
+        casesTouched,
         casesCompleted,
+        casesResolved: casesCompleted,
         casesTransferred: Number(r.cases_transferred ?? 0),
+        uniqueCustomersCount: Number(r.unique_customers_count ?? 0),
+        lastCaseAt,
         avgFirstResponseTimeMs,
         avgHandlingTimeMinutes,
         fcrRatePercentage,
@@ -593,5 +721,29 @@ export class AnalyticsRepositoryPg implements AnalyticsRepositoryPort {
         isHighVolumeAlert: activeCasesCount >= 3,
       };
     });
+  }
+
+  async getDepartmentsSummary(
+    filter: AnalyticsFilter,
+    maxCapacityThreshold: number,
+  ): Promise<DepartmentSummaryItemDto[]> {
+    return queryDepartmentsSummary(this.pool, filter, maxCapacityThreshold);
+  }
+
+  async listAttendedCases(filter: AnalyticsCasesQueryFilter): Promise<PaginatedAnalyticsCasesDto> {
+    return queryAttendedCases(this.pool, filter);
+  }
+
+  async listAttendedCustomers(
+    filter: AnalyticsCustomersQueryFilter,
+  ): Promise<PaginatedAnalyticsCustomersDto> {
+    return queryAttendedCustomers(this.pool, filter);
+  }
+
+  async getExportEstimate(
+    filter: AnalyticsFilter & { agentId?: string },
+    maxRowsPerSheet: number,
+  ): Promise<AnalyticsExportEstimateDto> {
+    return queryExportEstimate(this.pool, filter, maxRowsPerSheet);
   }
 }

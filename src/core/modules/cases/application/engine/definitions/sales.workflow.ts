@@ -144,17 +144,22 @@ function extractLocationFromInput(
   }
 
   if (!address && !lat && !lng && !locationUrl && rawText.length >= 4) {
+    const looksLikeQuestionOrInquiry =
+      rawText.includes("?") ||
+      /\b(plan|planes|paquete|paquetes|precio|precios|costo|megas|mbps|velocidad|contratar|info|informaci[oó]n|televisi[oó]n|tv|horario|cu[aá]nto|qu[eé]\s+tienen|beneficios)\b/i.test(
+        rawText,
+      );
+
     const isAddressPattern =
-      /calle|av\b|av\.|avenida|pasaje|barrio|sector|diagonal|manzana|mz\b|villa|casa|conjunto|redondel|parroquia/i.test(rawText) ||
-      /quito|cuenca|chillogallo|pomasqui|calacali|pifo|totoracocha|sinincay|san roque|san sebastian|bellavista|monay|moran|bicentenario|gatazo|trancito/i.test(rawText) ||
-      /([a-z0-9\s]+\s+y\s+[a-z0-9\s]+)/i.test(rawText) ||
-      /vivo\s+en\s+([a-z0-9\s]+)/i.test(rawText) ||
-      /\ben\b\s+(el\s+sector\s+de\s+)?([a-z0-9\s]+)/i.test(rawText);
+      /\b(calle|av|avenida|pasaje|barrio|sector|diagonal|manzana|mz|villa|conjunto|urbanizaci[oó]n|cdla|ciudadela|redondel|parroquia)\b/i.test(
+        rawText,
+      ) ||
+      /\b(quito|cuenca|guayaquil|chillogallo|pomasqui|calacali|pifo|totoracocha|sinincay|san roque|san sebastian|bellavista|monay|moran|bicentenario|gatazo|trancito)\b/i.test(
+        rawText,
+      ) ||
+      /\b(vivo\s+en|estoy\s+en|mi\s+direcci[oó]n(?:\s+es)?)\s+[a-z0-9]/i.test(rawText);
 
-    const isGenericInquiryOnly =
-      /^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|saludos)?[!.\s]*(quiero|deseo|busco|necesito|info|informaci[oó]n|planes|paquetes|internet|megas|contratar)?[!.\s]*$/i.test(rawText);
-
-    if (isAddressPattern && !isGenericInquiryOnly) {
+    if (isAddressPattern && !looksLikeQuestionOrInquiry) {
       address = rawText;
     }
   }
@@ -365,10 +370,27 @@ export function createSalesWorkflow(
   };
 
   const waitingUpgrade: WorkflowStateHandler = async ({ context, entities, text }) => {
+    const denied =
+      entities?.confirm === false ||
+      entities?.confirm === "no" ||
+      entities?.isClosing === true ||
+      entities?.isThankYou === true ||
+      (typeof text === "string" &&
+        /^\s*(?:no\b|no\s+gracias|ya\s+no|no\s+quiero|solo\s+(?:consultaba|preguntaba)|despu[eé]s|luego|d[eé]jalo)/i.test(
+          text.trim(),
+        ));
+
+    if (denied) {
+      return { type: "COMPLETED", context };
+    }
+
     const confirmed =
       entities?.confirm === true ||
       entities?.confirm === "yes" ||
-      (typeof text === "string" && text.trim().length > 0);
+      (typeof text === "string" &&
+        /\b(s[ií]|claro|dale|adelante|confirmo|por\s+favor|de\s+una|acepto|quiero)\b/i.test(
+          text.trim(),
+        ));
 
     if (!confirmed) {
       const waiting = resetWaitingAttempts(context, "WAITING_USER_UPGRADE");

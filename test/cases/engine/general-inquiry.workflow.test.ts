@@ -262,4 +262,38 @@ describe("GENERAL_INQUIRY workflow", () => {
       expect(outcome.context.data.answer).not.toContain("Puedes consultarnos sobre nuestros planes de internet");
     }
   });
+
+  it("en WAITING_USER_SPECIALIST 'Sí, gracias' con confirm: true escala a ventas y 'No gracias' completa sin escalar", async () => {
+    const fakeRagService = { query: async () => ({ answer: "", found: false }) } as unknown as RagService;
+    const workflow = createGeneralInquiryWorkflow(fakeRagService);
+    const handler = workflow.states.WAITING_USER_SPECIALIST!;
+    const context: CaseContext = {
+      workflowType: "GENERAL_INQUIRY",
+      data: { answer: "Plan 500 Mbps", found: true, wantsUpgrade: true },
+    };
+
+    const yesOutcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "WAITING_USER_SPECIALIST",
+      context,
+      text: "Sí, por favor, gracias",
+      entities: { confirm: true },
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+    expect(yesOutcome.type).toBe("ESCALATED");
+
+    const noOutcome = await handler({
+      caseId: "case-1",
+      conversationId: "conv-1",
+      correlationId: "corr-1",
+      currentState: "WAITING_USER_SPECIALIST",
+      context,
+      text: "No gracias",
+      entities: { confirm: false },
+      gateway: { executeAction: async () => ({ success: true, result: {} }) },
+    });
+    expect(noOutcome.type).toBe("COMPLETED");
+  });
 });

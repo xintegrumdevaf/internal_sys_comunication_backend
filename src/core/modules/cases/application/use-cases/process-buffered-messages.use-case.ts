@@ -73,6 +73,8 @@ export class ProcessBufferedMessagesUseCase {
 
     try {
       const conversation = await this.deps.conversationRepo.findById(conversationId);
+      const isConvClosedOrResolved =
+        conversation?.status === "resolved" || conversation?.status === "closed";
       const cases = await this.deps.caseRepo.listByConversation(conversationId);
       const openCases = cases.filter((c) => !TERMINAL_CASE_STATUSES.includes(c.status));
 
@@ -81,7 +83,7 @@ export class ProcessBufferedMessagesUseCase {
         const activeMatch = openCases.find((c) => c.id === conversation.activeCaseId);
         if (activeMatch) targetCase = activeMatch;
       }
-      if (!targetCase) {
+      if (!targetCase && !isConvClosedOrResolved) {
         targetCase =
           openCases.find((c) => Boolean(c.assignedAgentId) || c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
           openCases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
@@ -377,6 +379,11 @@ export class ProcessBufferedMessagesUseCase {
         return;
       }
 
+      const lastOutboundBeforeBatch = [...priorChronological]
+        .reverse()
+        .find((m) => m.direction === "outbound" && m.author !== "system");
+      const lastOutboundWasTemplate = Boolean(lastOutboundBeforeBatch?.caption?.startsWith("template:"));
+
       const recentMessages = priorChronological
         .map((m) => {
           let bodyText = m.body?.trim() ?? "";
@@ -396,8 +403,13 @@ export class ProcessBufferedMessagesUseCase {
               bodyText = "[Audio de voz enviado por el cliente]";
             }
           }
+          const isTemplateOutbound =
+            m.direction === "outbound" && Boolean(m.caption?.startsWith("template:"));
+          if (isTemplateOutbound && bodyText.trim().length > 0) {
+            bodyText = `[Notificación/Campaña automática enviada al cliente]: ${bodyText}`;
+          }
           return {
-            author: m.author,
+            author: isTemplateOutbound ? "system_notification" : m.author,
             body: bodyText,
           };
         })
@@ -423,6 +435,8 @@ export class ProcessBufferedMessagesUseCase {
           : null,
         recentMessages,
         previousCompletedCase,
+        conversationStatus: conversation?.status,
+        lastOutboundWasTemplate,
       });
 
       // Un comprobante visual (aunque falte monto, referencia o fecha) ya es un caso de pago.
@@ -500,7 +514,7 @@ export class ProcessBufferedMessagesUseCase {
         interpretation.type === "CANCEL",
       );
 
-      if (isClosingOrThankYou && interpretation.intent === "billing.balance") {
+      if (isClosingOrThankYou && !activeAggregate && !reportsOutage && !visualReceipt) {
         interpretation = {
           ...interpretation,
           type: "CANCEL",
@@ -509,10 +523,29 @@ export class ProcessBufferedMessagesUseCase {
         };
       }
 
-      // Si no hay un caso activo y el cliente expresa agradecimiento, cortesía o cierre post-atención previa:
-      // 1) Si ya se envió un acuse/despedida previa tras el cierre, guardar silencio absoluto para evitar bucles.
-      // 2) Caso contrario, componer una despedida 100% natural con composeReply (sin plantilla mecánica).
+      // Si no hay un caso activo y el cliente expresa agradecimiento, cortesía o cierre:
+      // 1) Si responde a una notificación automática de campaña (sin caso activo posterior),
+      //    guardar silencio absoluto y no reabrir la conversación cerrada.
+      // 2) Si ya se envió un acuse/despedida previa tras el cierre de un caso, guardar silencio absoluto.
+      // 3) Caso contrario, componer una despedida 100% natural con composeReply (sin plantilla mecánica).
       if (!activeAggregate && isClosingOrThankYou) {
+        const isPostCampaignAck =
+          lastOutboundWasTemplate &&
+          (!lastCompletedCase ||
+            (lastOutboundBeforeBatch !== undefined &&
+              lastOutboundBeforeBatch.createdAt.getTime() >= lastCompletedCase.updatedAt.getTime()));
+
+        if (isPostCampaignAck) {
+          log.info(
+            { conversationId, customerText: text.slice(0, 60) },
+            "Agradecimiento/cortesía tras notificación automática de campaña sin caso activo; guardando silencio",
+          );
+          if (isConvClosedOrResolved) {
+            await this.deps.conversationRepo.resetUnreadCount(conversationId);
+          }
+          return;
+        }
+
         if (hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase)) {
           log.info(
             { conversationId, customerText: text.slice(0, 60) },
@@ -670,6 +703,15 @@ export class ProcessBufferedMessagesUseCase {
       log.info({ decision: decision.action }, "arbitraje de caso decidido");
 
       if (decision.action === "CLARIFY") {
+        if (!activeAggregate && isConvClosedOrResolved && isNonVerbalPostCloseMessage(text, messages)) {
+          log.info(
+            { conversationId, text: text.slice(0, 60) },
+            "Mensaje no verbal en conversación cerrada sin caso activo; guardando silencio sin reabrir",
+          );
+          await this.deps.conversationRepo.resetUnreadCount(conversationId);
+          return;
+        }
+        await this.reopenIfClosed(conversationId, isConvClosedOrResolved, log);
         // Circuit Breaker anti-aturdimiento / anti-bucle:
         // Si el último mensaje del bot hacia el cliente ya fue una aclaración (CLARIFY),
         // no insistir por segunda vez consecutiva: escalar a triage humano.
@@ -748,6 +790,7 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       if (decision.action === "REQUEST_HUMAN") {
+        await this.reopenIfClosed(conversationId, isConvClosedOrResolved, log);
         const escalationReason = decision.reason ?? "REQUEST_HUMAN";
         if (decision.caseId && this.deps.escalationService) {
           const { customerMessage } = await this.deps.escalationService.escalateExistingCase({
@@ -792,12 +835,63 @@ export class ProcessBufferedMessagesUseCase {
         return;
       }
 
+      if (decision.action === "CANCEL_ACTIVE") {
+        const activeToClose = await this.deps.caseRepo.findById(decision.caseId);
+        if (activeToClose && !TERMINAL_CASE_STATUSES.includes(activeToClose.case.status)) {
+          await this.deps.caseRepo.applyTransition({
+            caseId: activeToClose.case.id,
+            expectedCaseVersion: activeToClose.case.version,
+            expectedWorkflowVersion: activeToClose.workflowInstance.version,
+            status: "COMPLETED",
+            context: {
+              ...activeToClose.case.context,
+              closeReason: "RESOLVED",
+            },
+            currentState: activeToClose.workflowInstance.currentState,
+            expiresAt: null,
+          });
+          await this.deps.caseRepo.appendEvent(activeToClose.case.id, "CASE_COMPLETED", {
+            closeReason: "RESOLVED",
+            via: "customer_cancel_or_closing",
+          });
+          await this.deps.conversationRepo.setActiveCaseId(conversationId, null);
+          await this.deps.conversationRepo.setStatus(conversationId, "resolved");
+        }
+
+        const farewellReply = await this.deps.composeReply.execute({
+          caseId: decision.caseId,
+          workflowType: activeToClose?.case.workflowType ?? "GENERAL_INQUIRY",
+          stepOutcome: {
+            action: "CLOSING_ACKNOWLEDGMENT",
+            status: "COMPLETED",
+            result: {
+              priorWorkflowType: activeToClose?.case.workflowType ?? null,
+              serviceConfirmed: Boolean(interpretation.entities?.serviceConfirmed),
+            },
+          },
+          customerText: text,
+        });
+
+        await this.deliverFixedReply({
+          conversationId,
+          correlationId,
+          body: farewellReply,
+          log,
+        });
+        return;
+      }
+
       if (decision.action === "CONTINUE_ACTIVE") {
+        await this.reopenIfClosed(conversationId, isConvClosedOrResolved, log);
         const advanced = await this.deps.advanceCase.execute({
           caseId: decision.caseId,
           correlationId,
           text,
-          entities: seedPurposeEntities(interpretation.intent, interpretation.entities),
+          entities: seedPurposeEntities(
+            interpretation.intent,
+            interpretation.entities,
+            interpretation.type,
+          ),
         });
         await this.notifyCrmAfterSalesStep({
           conversationId,
@@ -821,6 +915,7 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       // ACTIVATE
+      await this.reopenIfClosed(conversationId, isConvClosedOrResolved, log);
       if (decision.pauseCaseId) {
         await this.pauseCase(decision.pauseCaseId, log);
       }
@@ -1053,7 +1148,11 @@ export class ProcessBufferedMessagesUseCase {
         }
       }
 
-      const seededEntities = seedPurposeEntities(interpretation.intent, interpretation.entities);
+      const seededEntities = seedPurposeEntities(
+        interpretation.intent,
+        interpretation.entities,
+        interpretation.type,
+      );
       const advanced = await this.deps.advanceCase.execute({
         caseId: targetCaseId,
         correlationId,
@@ -1298,6 +1397,16 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     return { text: parts.join("\n"), receiptEntities, primaryMessageId };
+  }
+
+  private async reopenIfClosed(
+    conversationId: string,
+    isConvClosedOrResolved: boolean,
+    log: Logger,
+  ): Promise<void> {
+    if (!isConvClosedOrResolved) return;
+    log.info({ conversationId }, "reabriendo conversacion resuelta/cerrada tras evaluacion NLU de nueva consulta");
+    await this.deps.conversationRepo.setStatus(conversationId, "open");
   }
 
   private async deliverFixedReply(input: {
@@ -1711,26 +1820,32 @@ function hasCompleteReceipt(entities: Record<string, unknown>): boolean {
 function seedPurposeEntities(
   intent: string,
   entities: Record<string, unknown>,
+  interpretationType?: string,
 ): Record<string, unknown> {
+  const baseEntities: Record<string, unknown> = { ...entities };
+  if (baseEntities.confirm === undefined) {
+    if (interpretationType === "CONFIRM") baseEntities.confirm = true;
+    else if (interpretationType === "DENY") baseEntities.confirm = false;
+  }
   if (intent === "billing.record_payment") {
-    return { ...entities, billingPurpose: "record_payment" };
+    return { ...baseEntities, billingPurpose: "record_payment" };
   }
   if (intent === "billing.balance") {
-    return { ...entities, billingPurpose: "balance" };
+    return { ...baseEntities, billingPurpose: "balance" };
   }
   if (intent === "billing.payment_methods") {
-    return { ...entities, billingPurpose: "payment_methods" };
+    return { ...baseEntities, billingPurpose: "payment_methods" };
   }
   if (intent === "sales.new_contract") {
-    return { ...entities, salesPurpose: "sales" };
+    return { ...baseEntities, salesPurpose: "sales" };
   }
   if (intent === "sales.plans") {
-    return { ...entities, salesPurpose: "plans" };
+    return { ...baseEntities, salesPurpose: "plans" };
   }
   if (intent === "sales.upgrade") {
-    return { ...entities, wantsUpgrade: true, salesPurpose: "upgrade" };
+    return { ...baseEntities, wantsUpgrade: true, salesPurpose: "upgrade" };
   }
-  return entities;
+  return baseEntities;
 }
 
 function seedInitialContext(workflowType: string, intent: string): CaseContext {

@@ -198,21 +198,32 @@ export function createGeneralInquiryWorkflow(ragService: RagService): WorkflowDe
   };
 
   const waitingUserSpecialist: WorkflowStateHandler = async ({ context, entities, text }) => {
-    // Si el cliente confirma → escalar a ventas
-    const confirmed =
-      entities?.confirm === true ||
-      entities?.confirm === "yes" ||
-      (typeof text === "string" &&
-        /s[ií]|por favor|quiero|dale|adelante|claro|ok|listo/i.test(text.trim()));
+    if (entities?.confirm === false || entities?.confirm === "no") {
+      return { type: "COMPLETED", context };
+    }
+    if (entities?.confirm === true || entities?.confirm === "yes") {
+      return {
+        type: "ESCALATED",
+        reason: "Cliente quiere contratar o mejorar su plan — requiere especialista de ventas",
+        context,
+      };
+    }
 
+    const trimmed = typeof text === "string" ? text.trim() : "";
     const denied =
-      entities?.confirm === false ||
-      entities?.confirm === "no" ||
-      (typeof text === "string" && /no\b|gracias|ya no|no quiero/i.test(text.trim()));
+      entities?.isClosing === true ||
+      entities?.isThankYou === true ||
+      /^\s*(?:no\b|no\s+gracias|ya\s+no|no\s+quiero|solo\s+consultaba|despu[eé]s|luego)\b/i.test(
+        trimmed,
+      );
 
     if (denied) {
       return { type: "COMPLETED", context };
     }
+
+    const confirmed = /\b(s[ií]|por\s+favor|quiero|dale|adelante|claro|confirmo|de\s+una)\b/i.test(
+      trimmed,
+    );
 
     if (confirmed) {
       return {

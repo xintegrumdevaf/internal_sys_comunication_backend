@@ -26,6 +26,7 @@ export type UpdateDepartmentInput = {
     description?: string | null;
     visibility?: DepartmentVisibility;
     maxConcurrentCases?: number;
+    fallbackDepartmentId?: string | null;
     active?: boolean;
     cases?: UpdateDepartmentCaseItem[];
   };
@@ -55,12 +56,28 @@ export class UpdateDepartmentUseCase {
       }
     }
 
+    let resolvedFallbackId = input.patch.fallbackDepartmentId;
+    if (resolvedFallbackId !== undefined) {
+      const cleaned = resolvedFallbackId?.trim() || null;
+      if (cleaned === department.id) {
+        throw validationError("Un departamento no puede ser su propio departamento de respaldo");
+      }
+      if (cleaned) {
+        const fallbackDept = await this.deps.departmentRepo.findById(cleaned);
+        if (!fallbackDept || !fallbackDept.active) {
+          throw validationError("El departamento de respaldo seleccionado no existe o está inactivo");
+        }
+      }
+      resolvedFallbackId = cleaned;
+    }
+
     const updated = await this.deps.departmentRepo.update(department.id, {
       name: input.patch.name,
       slug: input.patch.slug,
       description: input.patch.description,
       visibility: input.patch.visibility,
       maxConcurrentCases: input.patch.maxConcurrentCases,
+      fallbackDepartmentId: resolvedFallbackId,
       active: input.patch.active,
     });
 

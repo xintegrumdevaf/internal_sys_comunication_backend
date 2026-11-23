@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added & Changed
+- **Módulo de Analíticas Gerenciales, Trazabilidad Multi-Agente y Exportación Streaming a Excel (`analytics.repository.pg.ts`, `analytics-detail.queries.ts`, `analytics.router.ts`, `analytics-excel-stream.builder.ts`, `analytics-labels.ts`, `migrations/0052_analytics_performance_indexes.sql`)**:
+  - Agregada atribución en tres planos para asesores (`casesTouched`, `casesResolved`, `casesTransferred`, `uniqueCustomersCount`, `lastCaseAt`), corrección de `fromAgentId` en eventos `CASE_TRANSFERRED` (`transfer-case.use-case.ts`) y filtrado de usuarios sin actividad ajena en reportes por área.
+  - Nuevos endpoints paginados y exportables: `GET /api/analytics/departments-summary`, `GET /api/analytics/cases`, `GET /api/analytics/customers`, `GET /api/analytics/export/estimate` y `GET /api/analytics/export/excel` (streaming real con `exceljs@4.4.0` en 4 hojas con etiquetas en español de negocio y fechas 24h `America/Guayaquil`).
+  - Agregada migración `0052_analytics_performance_indexes.sql` con índices para consultas de rendimiento por departamento, agente y fecha.
+- **Mitigación de Desborde en Cola de Escalaciones y Rescate IA (`escalated-queue-overflow.service.ts`, `ai-waiting-rescue.service.ts`, `department.entity.ts`, `system-settings.entity.ts`, `migrations/0051_case_stale_ai_rescue_index.sql`, `migrations/0053_department_fallback_overflow.sql`)**:
+  - Agregado campo opcional `fallback_department_id` por departamento (migración `0053`, puertos, repositorios Postgres, routers admin y `create/update-department.use-case.ts`) más parámetro global `queueOverflowMinutes` (default `15`) en `SystemSettingsService`.
+  - Implementado `EscalatedQueueOverflowService` conectado al ciclo periódico de `AiWaitingRescueService` para derivar automáticamente casos escalados sin asesor hacia su departamento de respaldo (auto-asignando si hay agente disponible o dejándolo en cola del área de respaldo) y auditar/notificar en tiempo real.
+  - Agregada migración `0051_case_stale_ai_rescue_index.sql` para acelerar la detección de casos estancados esperando respuesta IA/cliente.
+- **Mejoras de Enrutamiento Departamental, Arbitraje de Casos, Workflows y Conversaciones (`department-routing.service.ts`, `case-arbitration.service.ts`, `process-buffered-messages.use-case.ts`, `list-conversations.use-case.ts`, `receive-inbound-message.use-case.ts`)**:
+  - Refinamientos en detección/adopción de departamento, plantillas de respuesta (`resolve-reply-template.ts`), workflows (`sales`, `home-relocation`, `general-inquiry`) y pruebas unitarias correspondientes (`test/`).
 - **Coexistencia SSO JWT con ERP Corporativo (`erp-sso-jwt.verifier.ts`, `auth.router.ts`, `container.ts`, `.env`)**:
   - Agregado `POST /api/auth/sso-exchange` para validar el JWT firmado por `ERP_sys_backend` (`ERP_JWT_SECRET` / `JWT_SECRET`), verificar permiso sobre el módulo `isp` (`isSuperAdmin` o `modules.includes("isp")`), mapear el rol (`admin` / `manager` / `agent`), emitir sesión real en Redis y responder `{ data, token }` + cookie de sesión.
   - Configurado `PORT=4200` en desarrollo para coexistir en la misma suite sin colisión con `CRM_sys_frontend` (`3000`), `ERP_sys_frontend` (`3100`), `CRM_sys_backend` (`4000`) y `ERP_sys_backend` (`4100`).

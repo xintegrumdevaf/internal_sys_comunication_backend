@@ -317,4 +317,74 @@ describe("ListConversationsUseCase - filtrado por caso activo", () => {
     expect(items[0]!.activeCase?.automationEnabled).toBe(false);
     expect(items[0]!.activeCase?.disabledReason).toBe("AI_ERROR");
   });
+
+  it("en conversación resuelta con caso huérfano previo en HUMAN_ACTIVE y activeCaseId null, no lo muestra como atendido por humano y preserva lastAttendedBy", async () => {
+    const conversationRepo = new ConversationRepositoryFake();
+    const messageRepo = new MessageRepositoryFake();
+    const caseRepo = new CaseRepositoryFake();
+
+    const conv = conversationRepo.createOpen({
+      id: "conv-resolved-orphan",
+      waPhone: "+593997922633",
+      status: "resolved",
+    });
+    messageRepo.seedText(conv.id, "cambio listo");
+
+    // Caso huérfano antiguo que quedó en HUMAN_ACTIVE sin cerrarse
+    const { case: orphanCase, workflowInstance: orphanWf } = await caseRepo.create({
+      conversationId: conv.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: "dept-soporte",
+      context: emptyContextFor("SUPPORT_INTERNET"),
+      initialState: "START",
+      expiresAt: null,
+    });
+    await caseRepo.setAssignedAgent(orphanCase.id, "agent-erick");
+    await caseRepo.applyTransition({
+      caseId: orphanCase.id,
+      expectedCaseVersion: orphanCase.version,
+      expectedWorkflowVersion: orphanWf.version,
+      status: "HUMAN_ACTIVE",
+      context: orphanCase.context,
+      currentState: "HUMAN_ACTIVE",
+      expiresAt: null,
+    });
+
+    // Caso completado más reciente
+    const { case: completedCase, workflowInstance: completedWf } = await caseRepo.create({
+      conversationId: conv.id,
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: "dept-soporte",
+      context: emptyContextFor("SUPPORT_INTERNET"),
+      initialState: "START",
+      expiresAt: null,
+    });
+    await caseRepo.setAssignedAgent(completedCase.id, "agent-erick");
+    await caseRepo.applyTransition({
+      caseId: completedCase.id,
+      expectedCaseVersion: completedCase.version,
+      expectedWorkflowVersion: completedWf.version,
+      status: "COMPLETED",
+      context: {
+        ...completedCase.context,
+        closedByAgentId: "agent-erick",
+        closedByAgentName: "Erick Collaguazo",
+        closeReason: "RESOLVED",
+      },
+      currentState: "COMPLETED",
+      expiresAt: null,
+    });
+
+    await conversationRepo.setActiveCaseId(conv.id, null);
+
+    const listUseCase = new ListConversationsUseCase(conversationRepo, messageRepo, caseRepo);
+    const items = await listUseCase.execute({});
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.activeCase).toBeNull();
+    expect(items[0]!.lastAttendedBy).toEqual({
+      agentId: "agent-erick",
+      agentName: "Erick Collaguazo",
+    });
+  });
 });

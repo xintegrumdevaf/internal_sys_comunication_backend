@@ -22,6 +22,7 @@ export type CreateDepartmentInput = {
   description?: string | null;
   visibility?: DepartmentVisibility;
   maxConcurrentCases?: number;
+  fallbackDepartmentId?: string | null;
   actorId: string;
   cases?: CreateDepartmentCaseItem[];
 };
@@ -53,12 +54,21 @@ export class CreateDepartmentUseCase {
       throw businessError(`Ya existe un departamento con el slug ${slug}`);
     }
 
+    const fallbackDepartmentId = input.fallbackDepartmentId?.trim() || null;
+    if (fallbackDepartmentId) {
+      const fallbackDept = await this.deps.departmentRepo.findById(fallbackDepartmentId);
+      if (!fallbackDept || !fallbackDept.active) {
+        throw validationError("El departamento de respaldo seleccionado no existe o está inactivo");
+      }
+    }
+
     const department = await this.deps.departmentRepo.create({
       name,
       slug,
       description: input.description?.trim() || null,
       visibility: input.visibility ?? "shared",
       maxConcurrentCases: input.maxConcurrentCases ?? 6,
+      fallbackDepartmentId,
     });
 
     const createdCases: DepartmentCaseRouting[] = [];

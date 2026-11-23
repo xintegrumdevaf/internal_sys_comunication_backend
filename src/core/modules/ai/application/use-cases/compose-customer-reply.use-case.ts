@@ -83,7 +83,6 @@ function cleanResidualPlaceholders(text: string): string {
     .replace(/\[\s*(?:clientName|clientFirstName|nombre|cliente|name)\s*\]/gi, "")
     .replace(/<\s*(?:clientName|clientFirstName|nombre|cliente|name)\s*>/gi, "")
     .replace(/\bHola\s*,\s*/gi, "Hola, ")
-    .replace(/\bBuenas\s+(?:tardes|noches|días)\s*,\s*/gi, "Buenas, ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

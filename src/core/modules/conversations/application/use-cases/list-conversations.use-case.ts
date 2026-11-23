@@ -7,6 +7,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { Case } from "../../../cases/domain/case.entity";
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
+import { resolveConversationCases } from "../services/resolve-conversation-cases";
 
 export type LastAttendedByDto = {
   agentId: string | null;
@@ -108,20 +109,10 @@ export class ListConversationsUseCase {
 
     for (const conv of rawConversations) {
       const cases = casesByConversation.get(conv.id) ?? [];
-      const activeAggregate =
-        (conv.activeCaseId ? cases.find((item) => item.id === conv.activeCaseId) : null) ??
-        cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
-        cases.find((item) => item.status === "ACTIVE" || item.status === "WAITING_USER") ??
-        null;
-
-      const isClosedRecord = conv.status === "resolved" || conv.status === "closed";
-      const recordCase =
-        !activeAggregate && isClosedRecord
-          ? ([...cases].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null)
-          : null;
-
-      // Con caso vivo se filtra por ese caso. En resueltas/cerradas, por quien atendió el último.
-      const filterCase = activeAggregate ?? recordCase;
+      const { activeCase: activeAggregate, recordCase, filterCase } = resolveConversationCases(
+        conv,
+        cases,
+      );
 
       if (filter.departmentId) {
         if (!filterCase || filterCase.departmentId !== filter.departmentId) {

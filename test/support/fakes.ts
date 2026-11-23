@@ -505,6 +505,7 @@ export class DepartmentRepositoryFake implements DepartmentRepositoryPort {
       description: department.description ?? null,
       visibility: department.visibility ?? "shared",
       maxConcurrentCases: department.maxConcurrentCases ?? 6,
+      fallbackDepartmentId: department.fallbackDepartmentId ?? null,
       active: department.active ?? true,
       createdAt: department.createdAt ?? now,
     };

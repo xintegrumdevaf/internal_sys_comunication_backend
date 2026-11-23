@@ -266,4 +266,65 @@ describe("Cierre manual y agendamiento de casos", () => {
 
     expect(drainedDepts).toContain(support.id);
   });
+
+  it("al completar un caso cancela cualquier otro caso huérfano no terminal en la misma conversación", async () => {
+    const { caseRepo, agentRepo, departmentRepo, completeCase } = buildSetup();
+    const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
+    const agent = agentRepo.seed({
+      name: "Erick Collaguazo",
+      email: "erick@isp.local",
+      role: "agent",
+      primaryDepartmentId: support.id,
+    });
+
+    // Caso huérfano previo en HUMAN_ACTIVE
+    const { case: orphan } = await caseRepo.create({
+      conversationId: "conv-orphan-close",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: orphan.id,
+      expectedCaseVersion: orphan.version,
+      expectedWorkflowVersion: 1,
+      status: "HUMAN_ACTIVE",
+      context: orphan.context,
+      currentState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    // Caso principal que el agente cierra
+    const { case: mainCase } = await caseRepo.create({
+      conversationId: "conv-orphan-close",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: mainCase.id,
+      expectedCaseVersion: mainCase.version,
+      expectedWorkflowVersion: 1,
+      status: "HUMAN_ACTIVE",
+      context: mainCase.context,
+      currentState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+    await caseRepo.setAssignedAgent(mainCase.id, agent.id);
+
+    await completeCase.execute({
+      caseId: mainCase.id,
+      agentUserId: agent.id,
+      closeReason: "RESOLVED",
+    });
+
+    const updatedMain = await caseRepo.findById(mainCase.id);
+    const updatedOrphan = await caseRepo.findById(orphan.id);
+    expect(updatedMain?.case.status).toBe("COMPLETED");
+    expect(updatedOrphan?.case.status).toBe("CANCELLED");
+  });
 });

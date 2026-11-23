@@ -42,6 +42,8 @@ export type InterpretMessageInput = {
     };
     recentMessages?: Array<{ author: string; body: string }>;
     previousCompletedCase?: PreviousCompletedCaseSnapshot | null;
+    conversationStatus?: "open" | "pending" | "resolved" | "closed";
+    lastOutboundWasTemplate?: boolean;
   };
 };
 

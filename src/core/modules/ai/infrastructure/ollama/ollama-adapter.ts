@@ -72,6 +72,9 @@ export class OllamaAdapter implements AIProviderPort {
             text: input.text,
             recentMessages: input.conversationSnapshot?.recentMessages,
             activeCase: input.conversationSnapshot?.activeCase,
+            previousCompletedCase: input.conversationSnapshot?.previousCompletedCase,
+            conversationStatus: input.conversationSnapshot?.conversationStatus,
+            lastOutboundWasTemplate: input.conversationSnapshot?.lastOutboundWasTemplate,
             dynamicIntents: dynamicCatalogText,
             dynamicCatalog: dynamicCatalogText,
           },
@@ -88,6 +91,12 @@ export class OllamaAdapter implements AIProviderPort {
       !effectiveSystemPrompt.includes(dynamicIntents[0].intent)
     ) {
       effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n## Catálogo dinámico de casos y motivos departamentales:\n${dynamicCatalogText}`;
+    }
+    if (
+      resolved.source === "database" &&
+      !effectiveSystemPrompt.includes("Notificación/Campaña automática")
+    ) {
+      effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n## Regla universal post-campaña / chats cerrados:\nSi el historial reciente contiene "[Notificación/Campaña automática enviada al cliente]" o la conversación está cerrada/resuelta sin caso activo, y el cliente solo agradece, confirma recibo o se despide, clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing":true,"isThankYou":true,"isCourtesy":true} sin arrastrar el tema de la campaña.`;
     }
 
     const started = Date.now();
@@ -140,6 +149,7 @@ export class OllamaAdapter implements AIProviderPort {
             templateHint: input.templateHint,
             missingFields: input.missingFields,
             workflowType: input.workflowType,
+            customerText: input.customerText ?? "",
           },
           fallback,
         )

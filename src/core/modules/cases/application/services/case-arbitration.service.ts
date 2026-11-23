@@ -9,6 +9,7 @@ import type { DepartmentRoutingService } from "../../../departments/application/
 
 export type ArbitrationDecision =
   | { action: "CONTINUE_ACTIVE"; caseId: string }
+  | { action: "CANCEL_ACTIVE"; caseId: string }
   | {
     action: "ACTIVATE";
     workflowType: string;
@@ -44,10 +45,12 @@ export class CaseArbitrationService {
 
     if (interpretation.type === "REQUEST_HUMAN") {
       const active = await this.caseRepo.findActiveByConversation(conversationId);
+      const fallbackDepartmentId =
+        dynamicRouting?.departmentId ?? (await this.resolveFallbackDepartmentId(interpretation.intent));
       return {
         action: "REQUEST_HUMAN",
         caseId: active?.case.id ?? null,
-        ...(dynamicRouting?.departmentId ? { departmentId: dynamicRouting.departmentId } : {}),
+        ...(fallbackDepartmentId ? { departmentId: fallbackDepartmentId } : {}),
         ...(dynamicRouting?.label ? { reason: dynamicRouting.label } : {}),
       };
     }
@@ -69,10 +72,12 @@ export class CaseArbitrationService {
 
     if (meetsConfidence && (isHumanDirect || isIntentWithoutWorkflow)) {
       const reason = dynamicRouting?.label || interpretation.intent;
+      const fallbackDepartmentId =
+        dynamicRouting?.departmentId ?? (await this.resolveFallbackDepartmentId(interpretation.intent));
       return {
         action: "REQUEST_HUMAN",
         caseId: activeAggregate?.case.id ?? null,
-        ...(dynamicRouting?.departmentId ? { departmentId: dynamicRouting.departmentId } : {}),
+        ...(fallbackDepartmentId ? { departmentId: fallbackDepartmentId } : {}),
         ...(reason ? { reason } : {}),
       };
     }
@@ -80,20 +85,21 @@ export class CaseArbitrationService {
     if (activeAggregate) {
       const activeCase = activeAggregate.case;
 
-      if (targetWorkflowType && targetWorkflowType === activeCase.workflowType) {
-        return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
+      if (interpretation.type === "CANCEL") {
+        return { action: "CANCEL_ACTIVE", caseId: activeCase.id };
       }
 
-      // Si el intent detectado mapea a un workflowType DISTINTO al activo y la confianza es suficiente,
-      // la intención del cliente cambió: pausar el caso activo y activar el nuevo flujo (ej. pasar de Soporte a Planes/RAG).
-      if (targetWorkflowType && targetWorkflowType !== activeCase.workflowType && meetsConfidence) {
-        const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
-        return {
-          action: "ACTIVATE",
-          workflowType: targetWorkflowType,
-          resumeCaseId,
-          pauseCaseId: activeCase.id,
-        };
+      if (interpretation.type === "DENY") {
+        const currentState = activeAggregate.workflowInstance.currentState;
+        const allowsGracefulDenial =
+          currentState === "WAITING_USER_UPGRADE" ||
+          currentState === "WAITING_USER_SPECIALIST" ||
+          currentState === "WAITING_USER_INQUIRY" ||
+          currentState === "WAITING_USER_DIAGNOSTIC";
+        if (allowsGracefulDenial) {
+          return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
+        }
+        return { action: "REQUEST_HUMAN", caseId: activeCase.id };
       }
 
       if (
@@ -104,14 +110,17 @@ export class CaseArbitrationService {
         return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
       }
 
-      // §7: baja confianza con caso activo → continuar ese caso (no pausar/crear).
-      if (!meetsConfidence) {
+      if (targetWorkflowType && targetWorkflowType === activeCase.workflowType) {
         return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
       }
 
+      // Solo un NEW_INTENT o CHANGE_TOPIC explícito de alta confianza hacia un workflowType distinto
+      // pausa el caso activo y activa el nuevo flujo.
       if (
         (interpretation.type === "NEW_INTENT" || interpretation.type === "CHANGE_TOPIC") &&
-        targetWorkflowType
+        targetWorkflowType &&
+        targetWorkflowType !== activeCase.workflowType &&
+        meetsConfidence
       ) {
         const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
         return {
@@ -122,12 +131,9 @@ export class CaseArbitrationService {
         };
       }
 
-      if (
-        interpretation.type === "DENY" ||
-        interpretation.type === "CANCEL"
-      ) {
-        // Si el cliente niega o cancela mientras hay un caso activo, no insistir ni pedir aclaraciones; transferir a humano.
-        return { action: "REQUEST_HUMAN", caseId: activeCase.id };
+      // §7: baja confianza con caso activo → continuar ese caso (no pausar/crear).
+      if (!meetsConfidence) {
+        return { action: "CONTINUE_ACTIVE", caseId: activeCase.id };
       }
 
       return { action: "CLARIFY" };
@@ -154,6 +160,22 @@ export class CaseArbitrationService {
 
     const resumeCaseId = await this.findResumableCaseId(conversationId, targetWorkflowType);
     return { action: "ACTIVATE", workflowType: targetWorkflowType, resumeCaseId, pauseCaseId: null };
+  }
+
+  private async resolveFallbackDepartmentId(intent: string): Promise<string | undefined> {
+    if (!this.routingService) return undefined;
+    const prefix = intent.split(".")[0]?.toLowerCase();
+    const familyWorkflow =
+      prefix === "billing"
+        ? "BILLING_BALANCE"
+        : prefix === "support"
+          ? "SUPPORT_INTERNET"
+          : prefix === "sales"
+            ? "SALES"
+            : null;
+    if (!familyWorkflow) return undefined;
+    const deptId = await this.routingService.resolveDepartmentId(familyWorkflow);
+    return deptId ?? undefined;
   }
 
   private async findResumableCaseId(conversationId: string, workflowType: string): Promise<string | null> {

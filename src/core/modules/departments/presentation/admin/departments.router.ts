@@ -44,6 +44,7 @@ const createBodySchema = z.object({
   description: z.string().trim().optional(),
   visibility: visibilitySchema.optional(),
   maxConcurrentCases: z.number().int().min(1).max(50).optional(),
+  fallbackDepartmentId: z.string().uuid().nullish(),
   cases: z.array(caseItemSchema).optional(),
 });
 
@@ -53,6 +54,7 @@ const updateBodySchema = z.object({
   description: z.string().trim().optional(),
   visibility: visibilitySchema.optional(),
   maxConcurrentCases: z.number().int().min(1).max(50).optional(),
+  fallbackDepartmentId: z.string().uuid().nullish(),
   active: z.boolean().optional(),
   cases: z.array(caseItemSchema).optional(),
 });

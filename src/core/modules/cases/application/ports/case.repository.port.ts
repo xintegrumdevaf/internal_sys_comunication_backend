@@ -55,6 +55,16 @@ export interface CaseRepositoryPort {
 
   listAutomatableExpiring(now: Date): Promise<Case[]>;
 
+  /**
+   * Lista casos aún en manos de IA (sin agente asignado y con automatización activa)
+   * que superaron el umbral de espera en WAITING_USER o se atascaron en NEW/ACTIVE.
+   */
+  listStaleAiCases?(input: {
+    waitingCutoff: Date;
+    stuckCutoff: Date;
+    limit?: number;
+  }): Promise<Case[]>;
+
   applyTransition(input: ApplyCaseTransitionInput): Promise<CaseAggregate>;
 
   setAssignedAgent(caseId: string, agentId: string | null): Promise<void>;

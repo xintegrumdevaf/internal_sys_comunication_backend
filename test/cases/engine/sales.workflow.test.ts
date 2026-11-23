@@ -301,5 +301,49 @@ describe("salesWorkflow", () => {
       expect(outcome.type).toBe("ESCALATED");
       expect((outcome as any).reason).toContain("CHILLOGALLO");
     });
+
+    it("no confunde frases con 'y' (ej. 'quiero planes y precios') con una dirección ni evalúa cobertura errónea", async () => {
+      const repo = new FakeCoverageRepo([chillogalloZone]);
+      const coverageService = new CoverageService(repo, new KmlParserService());
+      await coverageService.init();
+
+      const workflow = createSalesWorkflow(undefined, coverageService);
+      const engine = new WorkflowEngine([workflow]);
+      const gateway = new N8nGatewayFake({});
+
+      const ctx: CaseContext = {
+        workflowType: "SALES",
+        data: { purpose: "sales" },
+      };
+
+      const outcome = await engine.step(
+        "SALES",
+        baseInput("COLLECT_PREFERENCE", ctx, gateway, "Hola quiero planes y precios de internet y tv"),
+      );
+
+      expect(outcome).toMatchObject({
+        type: "WAITING_USER",
+        nextState: "WAITING_USER_LOCATION",
+      });
+      if (outcome.context.workflowType === "SALES") {
+        expect(outcome.context.data.address).toBeUndefined();
+        expect(outcome.context.data.coverage).toBeUndefined();
+      }
+    });
+
+    it("en WAITING_USER_UPGRADE si el cliente dice 'No gracias' completa el caso sin escalar a ventas", async () => {
+      const engine = new WorkflowEngine([salesWorkflow]);
+      const gateway = new N8nGatewayFake({});
+      const ctx: CaseContext = {
+        workflowType: "SALES",
+        data: { purpose: "upgrade", requestedSpeed: "300 Mbps" },
+      };
+
+      const outcome = await engine.step(
+        "SALES",
+        baseInput("WAITING_USER_UPGRADE", ctx, gateway, "No gracias, solo consultaba"),
+      );
+      expect(outcome.type).toBe("COMPLETED");
+    });
   });
 });

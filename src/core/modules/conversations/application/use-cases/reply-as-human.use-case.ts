@@ -324,7 +324,7 @@ export class ReplyAsHumanUseCase {
         typeof caseRepo.applyTransition === "function"
       ) {
         const currentAggregate = await caseRepo.findById(effectiveCaseId);
-        if (currentAggregate) {
+        if (currentAggregate && input.agentUserId) {
           const agent = await this.deps.agentRepo.findById(input.agentUserId);
           if (agent?.primaryDepartmentId) {
             const isGeneralOrTriage = await isGeneralDepartment(
@@ -356,7 +356,12 @@ export class ReplyAsHumanUseCase {
       const c = await caseRepo.findById(effectiveCaseId);
       if (c?.case?.departmentId) replyDepartmentId = c.case.departmentId;
     }
-    if (!replyDepartmentId && this.deps.agentRepo && typeof this.deps.agentRepo.findById === "function") {
+    if (
+      !replyDepartmentId &&
+      input.agentUserId &&
+      this.deps.agentRepo &&
+      typeof this.deps.agentRepo.findById === "function"
+    ) {
       const ag = await this.deps.agentRepo.findById(input.agentUserId);
       if (ag?.primaryDepartmentId) replyDepartmentId = ag.primaryDepartmentId;
     }

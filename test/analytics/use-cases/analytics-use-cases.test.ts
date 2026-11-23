@@ -64,8 +64,12 @@ class AnalyticsRepositoryFake implements AnalyticsRepositoryPort {
       activeCasesNow: 3,
       maxCapacityThreshold: 6,
       casesAssigned: 30,
+      casesTouched: 34,
       casesCompleted: 28,
+      casesResolved: 28,
       casesTransferred: 2,
+      uniqueCustomersCount: 25,
+      lastCaseAt: "2026-08-30T14:20:00.000Z",
       avgFirstResponseTimeMs: 120000, // 2 min
       avgHandlingTimeMinutes: 18.5,
       fcrRatePercentage: 89.3,
@@ -120,6 +124,31 @@ class AnalyticsRepositoryFake implements AnalyticsRepositoryPort {
   async getInfrastructureAlerts(filter: AnalyticsFilter): Promise<InfrastructureAlertDto[]> {
     this.lastFilter = filter;
     return this.infrastructureAlertsData;
+  }
+
+  async getDepartmentsSummary(filter: AnalyticsFilter) {
+    this.lastFilter = filter;
+    return [];
+  }
+
+  async listAttendedCases() {
+    return { items: [], total: 0, page: 1, pageSize: 25 };
+  }
+
+  async listAttendedCustomers() {
+    return { items: [], total: 0, page: 1, pageSize: 25 };
+  }
+
+  async getExportEstimate(filter: AnalyticsFilter, maxRowsPerSheet: number) {
+    this.lastFilter = filter;
+    return {
+      totalCases: 100,
+      uniqueCustomers: 75,
+      agentsCount: 1,
+      departmentsCount: 1,
+      maxRowsPerSheet,
+      exceedsLimit: false,
+    };
   }
 }
 

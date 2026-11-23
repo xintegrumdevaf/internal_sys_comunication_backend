@@ -20,6 +20,7 @@ type DepartmentRow = {
   visibility: DepartmentVisibility;
   active: boolean;
   max_concurrent_cases: number;
+  fallback_department_id?: string | null;
   created_at: Date;
 };
 
@@ -47,6 +48,7 @@ function mapRow(row: DepartmentRow): Department {
     maxConcurrentCases: row.max_concurrent_cases !== undefined && row.max_concurrent_cases !== null
       ? Number(row.max_concurrent_cases)
       : 6,
+    fallbackDepartmentId: row.fallback_department_id ?? null,
     createdAt: row.created_at,
   };
 }
@@ -94,8 +96,13 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
 
   async create(input: CreateDepartmentInput): Promise<Department> {
     const { rows } = await this.pool.query<DepartmentRow>(
-      `INSERT INTO department (slug, name, description, visibility, max_concurrent_cases) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, max_concurrent_cases = EXCLUDED.max_concurrent_cases
+      `INSERT INTO department (slug, name, description, visibility, max_concurrent_cases, fallback_department_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (slug) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         max_concurrent_cases = EXCLUDED.max_concurrent_cases,
+         fallback_department_id = EXCLUDED.fallback_department_id
        RETURNING *`,
       [
         input.slug,
@@ -103,6 +110,7 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
         input.description ?? null,
         input.visibility ?? "shared",
         input.maxConcurrentCases ?? 6,
+        input.fallbackDepartmentId ?? null,
       ],
     );
     return mapRow(rows[0]!);
@@ -132,6 +140,10 @@ export class DepartmentRepositoryPg implements DepartmentRepositoryPort {
     if (input.maxConcurrentCases !== undefined) {
       values.push(input.maxConcurrentCases);
       fields.push(`max_concurrent_cases = $${values.length}`);
+    }
+    if (input.fallbackDepartmentId !== undefined) {
+      values.push(input.fallbackDepartmentId ?? null);
+      fields.push(`fallback_department_id = $${values.length}`);
     }
     if (input.active !== undefined) {
       values.push(input.active);

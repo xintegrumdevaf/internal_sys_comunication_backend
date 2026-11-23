@@ -177,6 +177,7 @@ import { SyncCaseBalanceUseCase } from "../modules/cases/application/use-cases/s
 import { SyncCaseDataUseCase } from "../modules/cases/application/use-cases/sync-case-data.use-case";
 import { TriggerCaseDiagnosticUseCase } from "../modules/cases/application/use-cases/trigger-case-diagnostic.use-case";
 import { ScheduledReminderNotifierService } from "../modules/cases/application/services/scheduled-reminder-notifier.service";
+import { AiWaitingRescueService } from "../modules/cases/application/services/ai-waiting-rescue.service";
 import { createCasesRouter } from "../modules/cases/presentation/cases.router";
 
 import { EscalationRepositoryPg } from "../modules/escalation/infrastructure/postgres/escalation.repository.pg";
@@ -184,6 +185,7 @@ import { CaseSummaryBuilderService } from "../modules/escalation/application/ser
 import { EscalationService } from "../modules/escalation/application/services/escalation.service";
 import { AutoAssignAgentService } from "../modules/escalation/application/services/auto-assign-agent.service";
 import { DrainDepartmentQueueService } from "../modules/escalation/application/services/drain-department-queue.service";
+import { EscalatedQueueOverflowService } from "../modules/escalation/application/services/escalated-queue-overflow.service";
 import { ClaimCaseUseCase } from "../modules/escalation/application/use-cases/claim-case.use-case";
 import { AssignCaseUseCase } from "../modules/escalation/application/use-cases/assign-case.use-case";
 import {
@@ -247,6 +249,11 @@ import { GetCasesDistributionUseCase } from "../modules/analytics/application/us
 import { GetAIEfficiencyUseCase } from "../modules/analytics/application/use-cases/get-ai-efficiency.use-case";
 import { GetAgentsPerformanceUseCase } from "../modules/analytics/application/use-cases/get-agents-performance.use-case";
 import { GetInfrastructureAlertsUseCase } from "../modules/analytics/application/use-cases/get-infrastructure-alerts.use-case";
+import { GetDepartmentsSummaryUseCase } from "../modules/analytics/application/use-cases/get-departments-summary.use-case";
+import { ListAnalyticsCasesUseCase } from "../modules/analytics/application/use-cases/list-analytics-cases.use-case";
+import { ListAnalyticsCustomersUseCase } from "../modules/analytics/application/use-cases/list-analytics-customers.use-case";
+import { GetAnalyticsExportEstimateUseCase } from "../modules/analytics/application/use-cases/get-analytics-export-estimate.use-case";
+import { ExportAnalyticsExcelUseCase } from "../modules/analytics/application/use-cases/export-analytics-excel.use-case";
 import { createAnalyticsRouter } from "../modules/analytics/presentation/analytics.router";
 
 import { SystemSettingsRepositoryPg } from "../modules/settings/infrastructure/postgres/system-settings.repository.pg";
@@ -754,6 +761,35 @@ export function createContainer(): Container {
   });
   scheduledReminderNotifier.start();
 
+  const escalatedQueueOverflow = new EscalatedQueueOverflowService({
+    escalationRepo,
+    caseRepo,
+    conversationRepo,
+    departmentRepo,
+    agentRepo,
+    autoAssign: autoAssignAgent,
+    messageRepo,
+    auditRepo,
+    broadcaster,
+    settingsService: systemSettingsService,
+    logger: casesLogger,
+    defaultMaxConcurrentCases: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
+
+  const aiWaitingRescue = new AiWaitingRescueService({
+    caseRepo,
+    conversationRepo,
+    escalationService,
+    departmentResolver,
+    departmentRepo,
+    messageRepo,
+    broadcaster,
+    settingsService: systemSettingsService,
+    queueOverflowService: escalatedQueueOverflow,
+    logger: casesLogger,
+  });
+  aiWaitingRescue.start();
+
   const transferCase = new TransferCaseUseCase({
     caseRepo,
     departmentRepo,
@@ -807,6 +843,23 @@ export function createContainer(): Container {
     maxCapacityThreshold: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
   });
   const getInfrastructureAlerts = new GetInfrastructureAlertsUseCase({ analyticsRepo, agentRepo });
+  const getDepartmentsSummary = new GetDepartmentsSummaryUseCase({
+    analyticsRepo,
+    agentRepo,
+    maxCapacityThreshold: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
+  const listAnalyticsCases = new ListAnalyticsCasesUseCase({ analyticsRepo, agentRepo });
+  const listAnalyticsCustomers = new ListAnalyticsCustomersUseCase({ analyticsRepo, agentRepo });
+  const getAnalyticsExportEstimate = new GetAnalyticsExportEstimateUseCase({
+    analyticsRepo,
+    agentRepo,
+  });
+  const exportAnalyticsExcel = new ExportAnalyticsExcelUseCase({
+    analyticsRepo,
+    agentRepo,
+    departmentRepo,
+    maxCapacityThreshold: env.AUTO_ASSIGN_MAX_ACTIVE_CASES_PER_AGENT,
+  });
 
   const inboundBuffer = new InboundBufferService(
     redisClient,
@@ -1435,6 +1488,11 @@ export function createContainer(): Container {
       getAIEfficiency,
       getAgentsPerformance,
       getInfrastructureAlerts,
+      getDepartmentsSummary,
+      listCases: listAnalyticsCases,
+      listCustomers: listAnalyticsCustomers,
+      getExportEstimate: getAnalyticsExportEstimate,
+      exportExcel: exportAnalyticsExcel,
     }),
   );
   app.use(createTagsRouter({ listTags, createTag, updateTag, deleteTag }));
@@ -1458,6 +1516,8 @@ export function createContainer(): Container {
   });
 
   const shutdown = async (): Promise<void> => {
+    scheduledReminderNotifier.stop();
+    aiWaitingRescue.stop();
     telegramAlertWatcher.stop();
     telegramDigestScheduler.stop();
     campaignWorker.stopWorker();

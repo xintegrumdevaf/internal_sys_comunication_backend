@@ -57,8 +57,12 @@ class AnalyticsRepoStub implements AnalyticsRepositoryPort {
         activeCasesNow: 2,
         maxCapacityThreshold: 6,
         casesAssigned: 15,
+        casesTouched: 18,
         casesCompleted: 14,
+        casesResolved: 14,
         casesTransferred: 1,
+        uniqueCustomersCount: 12,
+        lastCaseAt: "2026-08-30T15:00:00.000Z",
         avgFirstResponseTimeMs: 90000,
         avgHandlingTimeMinutes: 15.2,
         fcrRatePercentage: 92.5,
@@ -78,6 +82,29 @@ class AnalyticsRepoStub implements AnalyticsRepositoryPort {
         isHighVolumeAlert: true,
       },
     ];
+  }
+
+  async getDepartmentsSummary(_filter: AnalyticsFilter, _maxCapacityThreshold: number) {
+    return [];
+  }
+
+  async listAttendedCases() {
+    return { items: [], total: 0, page: 1, pageSize: 25 };
+  }
+
+  async listAttendedCustomers() {
+    return { items: [], total: 0, page: 1, pageSize: 25 };
+  }
+
+  async getExportEstimate(_filter: AnalyticsFilter, maxRowsPerSheet: number) {
+    return {
+      totalCases: 50,
+      uniqueCustomers: 40,
+      agentsCount: 1,
+      departmentsCount: 1,
+      maxRowsPerSheet,
+      exceedsLimit: false,
+    };
   }
 }
 

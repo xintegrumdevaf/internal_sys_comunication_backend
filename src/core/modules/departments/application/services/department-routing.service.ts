@@ -70,26 +70,89 @@ export class DepartmentRoutingService {
 
   async resolveByIntent(intentKey: string): Promise<DepartmentCaseRouting | null> {
     await this.ensureLoaded();
-    const exact = this.cache.find((r) => r.intentKey.toLowerCase() === intentKey.toLowerCase());
+    const normalizedKey = intentKey.toLowerCase();
+    const exact = this.cache.find((r) => r.intentKey.toLowerCase() === normalizedKey);
     if (exact) return exact;
+
+    if (
+      normalizedKey === "support.service_cancellation" ||
+      normalizedKey === "support.equipment_return"
+    ) {
+      const semanticMatch = this.findCancellationOrReturnRouting(normalizedKey);
+      if (semanticMatch) return semanticMatch;
+    }
 
     const catalogWorkflow = mapIntentToWorkflowType(intentKey);
 
-    // Fallback por prefijo: ej. support.xxx -> match primer support.* SOLO si coincide el workflowType (para no heredar human_direct de otro intent como support.service_cancellation)
-    const prefix = intentKey.split(".")[0]?.toLowerCase();
-    if (prefix) {
-      const byPrefix = this.cache.find((r) => {
-        if (!r.intentKey.toLowerCase().startsWith(`${prefix}.`)) return false;
-        if (catalogWorkflow && r.workflowType.toUpperCase() !== catalogWorkflow.toUpperCase()) {
-          const isSalesFamily = prefix === "sales" && (r.workflowType === "SALES" || r.workflowType === "GENERAL_INQUIRY" || r.workflowType === "SALES_PACKAGES");
-          if (!isSalesFamily) return false;
-        }
-        return true;
-      });
-      if (byPrefix) return byPrefix;
+    // Fallback por prefijo solo cuando el intent pertenece a un workflow automatizado conocido
+    // (evita que intents sin workflow como support.equipment_return caigan en support.internet).
+    if (catalogWorkflow) {
+      const prefix = intentKey.split(".")[0]?.toLowerCase();
+      if (prefix) {
+        const byPrefix = this.cache.find((r) => {
+          if (!r.intentKey.toLowerCase().startsWith(`${prefix}.`)) return false;
+          if (r.workflowType.toUpperCase() !== catalogWorkflow.toUpperCase()) {
+            const isSalesFamily =
+              prefix === "sales" &&
+              (r.workflowType === "SALES" ||
+                r.workflowType === "GENERAL_INQUIRY" ||
+                r.workflowType === "SALES_PACKAGES");
+            if (!isSalesFamily) return false;
+          }
+          return true;
+        });
+        if (byPrefix) return byPrefix;
+      }
     }
 
     return null;
+  }
+
+  private findCancellationOrReturnRouting(normalizedKey: string): DepartmentCaseRouting | null {
+    const strip = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    const isEquipmentIntent = normalizedKey === "support.equipment_return";
+    const primaryKeywords = isEquipmentIntent
+      ? ["devoluci", "retiro", "retirar", "retiren", "equipo", "router", "ruter", "modem", "baja"]
+      : ["retiro", "retirar", "baja", "cancelaci", "rescisi", "anular", "dar de baja"];
+
+    let best: { routing: DepartmentCaseRouting; score: number } | null = null;
+
+    for (const r of this.cache) {
+      const key = strip(r.intentKey);
+      const label = strip(r.label);
+      const desc = strip(r.description);
+
+      let score = 0;
+      for (const kw of primaryKeywords) {
+        if (label.includes(kw)) score += 6;
+        if (key.includes(kw)) score += 5;
+        if (desc.includes(kw)) score += 2;
+      }
+
+      if (score === 0) continue;
+
+      // Penalizar motivos secundarios (ej. "Última factura posterior a retiro") frente al motivo principal ("Retiro")
+      if (label.includes("posterior") || label.includes("ultima factura")) {
+        score -= 5;
+      }
+      if (/^(retiro|cancelacion|baja|devolucion)/.test(label)) {
+        score += 6;
+      }
+      if (r.handlingMode === "human_direct") {
+        score += 1;
+      }
+
+      if (!best || score > best.score) {
+        best = { routing: r, score };
+      }
+    }
+
+    return best && best.score > 0 ? best.routing : null;
   }
 
   async resolveDepartmentId(workflowType: string): Promise<string | null> {

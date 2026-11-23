@@ -252,6 +252,32 @@ export class CaseRepositoryPg implements CaseRepositoryPort {
     return rows.map(mapCaseRow);
   }
 
+  async listStaleAiCases(input: {
+    waitingCutoff: Date;
+    stuckCutoff: Date;
+    limit?: number;
+  }): Promise<Case[]> {
+    const limit = input.limit ?? 25;
+    const { rows } = await this.pool.query<CaseRow>(
+      `SELECT c.*
+       FROM "case" c
+       JOIN conversation conv ON conv.id = c.conversation_id
+       LEFT JOIN automation_state a ON a.case_id = c.id
+       WHERE c.assigned_agent_id IS NULL
+         AND COALESCE(a.enabled, true) = true
+         AND conv.status IN ('open', 'pending')
+         AND c.context->'schedulingMetadata'->>'scheduledAt' IS NULL
+         AND (
+           (c.status = 'WAITING_USER' AND c.last_activity_at <= $1)
+           OR (c.status IN ('NEW', 'ACTIVE') AND c.last_activity_at <= $2)
+         )
+       ORDER BY c.last_activity_at ASC
+       LIMIT $3`,
+      [input.waitingCutoff, input.stuckCutoff, limit],
+    );
+    return rows.map(mapCaseRow);
+  }
+
   async applyTransition(input: ApplyCaseTransitionInput): Promise<CaseAggregate> {
     return withTransaction(this.pool, async (client) => {
       const { rows: caseRows } = await client.query<CaseRow>(

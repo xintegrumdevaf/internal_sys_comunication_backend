@@ -17,5 +17,10 @@ export interface Department {
    * Al alcanzar este límite, el agente no recibe más casos automáticos hasta que libere cupos.
    */
   maxConcurrentCases: number;
+  /**
+   * Departamento de respaldo opcional al que desbordan casos escalados si este departamento
+   * pasa un umbral de espera sin ningún asesor conectado/en turno.
+   */
+  fallbackDepartmentId?: string | null;
   createdAt: Date;
 }

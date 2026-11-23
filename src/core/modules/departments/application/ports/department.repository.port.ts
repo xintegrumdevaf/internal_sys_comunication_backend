@@ -10,6 +10,7 @@ export type CreateDepartmentInput = {
   description?: string | null;
   visibility?: DepartmentVisibility;
   maxConcurrentCases?: number;
+  fallbackDepartmentId?: string | null;
 };
 
 export type UpdateDepartmentInput = Partial<CreateDepartmentInput> & {

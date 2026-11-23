@@ -28,6 +28,8 @@ export function buildInterpretMessagePrompt(
   const active = input.conversationSnapshot?.activeCase;
   const recentMessages = input.conversationSnapshot?.recentMessages ?? [];
   const previousCompleted = input.conversationSnapshot?.previousCompletedCase;
+  const conversationStatus = input.conversationSnapshot?.conversationStatus;
+  const lastOutboundWasTemplate = input.conversationSnapshot?.lastOutboundWasTemplate;
 
   const staticRelocationAndCatalog = `- support.home_relocation: solicitud de traslado o cambio de domicilio, mudanza, cambiar de casa o cambio de dirección del servicio de internet.
 - support.internet: reporte de falla de internet, luz roja en módem (LOS), corte de fibra, lentitud o caída del servicio, O TAMBIÉN asistencia técnica de equipos, cambio de clave/contraseña de Wi-Fi, nombre de red (SSID), reseteo o configuración de router/módem (ej: "Me pueden ayudar cambiando la clave x favor", "cambiar la clave de mi wifi", "contraseña del router", "no me entra el wifi") (INCLUSO SI EL CLIENTE MENCIONA HABER PAGADO O ADJUNTA COMPROBANTE: si el cliente reporta que no tiene servicio, falla técnica o pide cambio de clave/configuración de router, prima soporte técnico).
@@ -37,7 +39,10 @@ export function buildInterpretMessagePrompt(
 - billing.payment_agreement: solicitud de prórroga, plazo de espera, promesa de pago, o acuerdo para pagar en una fecha futura (ej: "ayúdeme para cancelar hasta el 15 cobrando la quincena", "les cancelo por favor el 15", "puedo pagar a fin de mes", "dame plazo hasta el viernes", "esperen el pago hasta la quincena", "acuerdo de pago"). NUNCA clasificar como billing.record_payment porque el cliente NO ha pagado aún (en Ecuador 'cancelar' significa pagar).`;
 
   const dynamicCatalogSection = dynamicIntents && dynamicIntents.length > 0
-    ? dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") + "\n" + staticRelocationAndCatalog
+    ? "PRIORIDAD ALTA — Catálogo dinámico configurado por área (si el mensaje coincide con uno de estos motivos/ejemplos, usa su intent exacto antes que los genéricos):\n" +
+      dynamicIntents.map((d) => `- ${d.intent} (${d.label || d.intent}): ${d.description}`).join("\n") +
+      "\n" +
+      staticRelocationAndCatalog
     : `- general.inquiry: preguntas generales de la empresa (ubicación de oficinas, agencias, sucursales, horarios, RUC, cobertura por ciudades/sectores, información institucional) Y TAMBIÉN mensajes de agradecimiento, cortesía o despedida.
 - sales.new_contract: el cliente manifiesta intención explícita de contratar, adquirir, solicitar instalación o dar de alta el servicio nuevo de internet (ej: "Hola, me gustaría contratar el servicio", "quiero contratar", "deseo adquirir internet").
 - sales.plans: consulta sobre planes, paquetes, precios, tarifas, promociones o velocidades de internet (ej: "¿Qué planes tienen?", "¿Cuánto cuesta el de 500 megas?", "precios de planes").
@@ -87,9 +92,9 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   → NUNCA clasificar como NEW_INTENT, CHANGE_TOPIC, UNCLEAR ni CANCEL.
 
 - CANCELACIÓN / BAJA DEFINITIVA DE SERVICIO / DEVOLUCIÓN DE EQUIPOS:
-  Si el cliente manifiesta que quiere cancelar el servicio, dar de baja, rescindir contrato, que le corten definitivamente el servicio o devolver los equipos (ej: "quiero cancelar el servicio", "denme de baja", "ya no quiero el servicio", "vengan a retirar el router", "cancélenme el contrato"):
-  → Clasifica SIEMPRE como intent="support.service_cancellation" (o intent="support.equipment_return") con type="NEW_INTENT" o type="REQUEST_HUMAN".
-  → NUNCA clasificar como support.internet. El cliente NO está pidiendo soporte técnico ni pruebas de conexión; está solicitando la baja y debe ser atendido por un asesor humano.
+  Si el cliente manifiesta que quiere cancelar el servicio, dar de baja, rescindir contrato, que le corten definitivamente el servicio o devolver/retirar los equipos (ej: "quiero cancelar el servicio", "denme de baja", "ya no quiero el servicio", "vengan a retirar el router", "deseo que me retiren los ruter", "cancélenme el contrato"):
+  → Si en el catálogo dinámico de departamentos existe un motivo específico para retiros, bajas, cancelaciones o devolución de equipos (ej. \`cartera.retiro\`, \`retention.cancel_service\`, etc.), clasifica SIEMPRE con ese \`intent\` exacto del catálogo dinámico; de lo contrario usa intent="support.service_cancellation" (o intent="support.equipment_return") con type="NEW_INTENT" o type="REQUEST_HUMAN".
+  → NUNCA clasificar como support.internet. El cliente NO está pidiendo soporte técnico ni pruebas de conexión; está solicitando la baja/retiro y debe ser atendido por el área configurada.
 - TRASLADO O CAMBIO DE DOMICILIO:
   Si el cliente menciona que se va a cambiar de casa, mudar, o solicita trasladar/cambiar la dirección de su servicio de internet (ej: "voy a cambiarme de domicilio, como puedo hacer con el servicio", "me voy a cambiar de domicilio", "quiero trasladar mi internet", "cambio de casa", "traslado de servicio"):
   → Clasifica SIEMPRE como intent="support.home_relocation" con type="NEW_INTENT".
@@ -117,7 +122,7 @@ Debes responder ÚNICAMENTE con un objeto JSON válido, sin texto adicional ante
   Si el cliente reclama por valores cobrados incorrectamente, disputas de facturas o cobros indebidos:
   → Clasifica SIEMPRE como intent="billing.dispute".
 - SOLICITUD DE CUENTAS BANCARIAS O DÓNDE PAGAR:
-  Si el cliente pide la cuenta para pagar o depositar (ej: "La cuenta para el depósito muy amable", "Por favor a cual de las dos cuentas hay que depositar", "¿A qué cuenta deposito?"):
+  Si el cliente pide explícitamente la cuenta para pagar o depositar (ej: "La cuenta para el depósito muy amable", "Por favor a cual de las dos cuentas hay que depositar", "¿A qué cuenta deposito?"):
   → Clasifica SIEMPRE como intent="billing.payment_methods" con type="NEW_INTENT" o type="CONTINUE" (entities: { billingPurpose: "payment_methods" }).
   → NUNCA clasificar como billing.balance ni solicitarle cédula: el cliente solo necesita los números de cuenta para pagar.
 - ACUERDOS DE PAGO, PRÓRROGAS O PROMESAS DE PAGO FUTURO:
@@ -178,6 +183,10 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
     Clasifícalo con type="NEW_INTENT", intent="general.inquiry", entities={"isGreeting": true}. NUNCA inventes ni agregues un campo \`question\` si no hubo una pregunta de negocio.
 - ATENCIÓN COMPUESTA O DUDAS POST-CIERRE: Si el cliente envía un saludo ACOMPAÑADO de una consulta o pregunta (ej: "Buenas tardes en qué horario atienden", "Hola quiero información de los planes", "Hola qué tal, cuánto cuesta el plan de 500?", "Hola una pregunta, ¿y si se vuelve a apagar la luz roja qué hago?"):
   → NUNCA clasifiques como \`isGreeting: true\`. Asigna el intent correspondiente a la consulta considerando el contexto del caso previo y del historial reciente, e incluye en \`entities.question\` la pregunta completa y contextualizada.
+- REGLA UNIVERSAL PARA CAMPAÑAS, NOTIFICACIONES AUTOMÁTICAS Y CHATS CERRADOS/RESUELTOS (APLICA A TODOS LOS FLUJOS):
+  Si \`estado de conversación\` es "closed" o "resolved" sin caso activo, O si \`último envío fue notificación automática\` es true / el historial reciente muestra un mensaje marcado como \`[Notificación/Campaña automática enviada al cliente]\` (sin importar el tema: cobros, cortes, mantenimiento técnico, promociones o avisos generales), y el cliente solo responde acusando recibo, agradeciendo, confirmando o despidiéndose en cualquiera de sus formas naturales (ej: "Ok gracias", "Listo entendido", "Gracias por avisar", "Enterado", "Muchas gracias", "Bendiciones", "👍", stickers):
+  → Clasifica SIEMPRE como type="CANCEL", intent="general.inquiry", entities={"isClosing": true, "isThankYou": true, "isCourtesy": true}.
+  → NUNCA arrastres ni infieras un intent de flujo (billing.*, support.*, sales.*, etc.) solo por el contenido de la notificación o campaña previa. Solo usa un intent de negocio si el CLIENTE hace una consulta, reporte o solicitud explícita.
 - ANÁLISIS DE SEGUIMIENTO Y CONFIRMACIÓN DE SERVICIO (POST-CIERRE):
   Cuando no hay un caso activo pero hay un "caso previo resuelto" o mensajes previos en el historial:
   1. Si el cliente escribe agradeciendo, confirmando que el servicio ya funciona, despidiéndose, o enviando stickers, emojis o reacciones de confirmación o cortesía (ej: "[Sticker enviado por el cliente]", "[sticker]", "👍", "👌", "🙏", "❤️", "🙌", "muchas gracias ya me sirvió", "ya quedó bien amigo", "ya valió el internet", "ya tengo servicio", "ya prendió verde", "Dios le pague", "todo bien gracias", "ok gracias", "muchas gracias") — incluso minutos u horas después:
@@ -260,6 +269,8 @@ Número entre 0 y 1. Si el cliente hace una pregunta entendible (como "¿Dónde 
 
   const userPayload: Record<string, unknown> = {
     texto: input.text,
+    "estado de conversación": conversationStatus ?? null,
+    "último envío fue notificación automática": Boolean(lastOutboundWasTemplate),
     "historial reciente": recentMessages && recentMessages.length > 0 ? recentMessages : null,
     "caso activo": active
       ? { workflowType: active.workflowType, pendingQuestion: active.pendingQuestion ?? null }

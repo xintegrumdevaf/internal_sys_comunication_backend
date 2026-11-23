@@ -24,6 +24,7 @@ import {
   proxyMediaRequest,
 } from "./media-proxy.helper";
 import { executeReplyOrMediaRequest } from "./reply-request.helper";
+import { resolveConversationCases } from "../application/services/resolve-conversation-cases";
 
 export type ConversationsRouterDeps = {
   listConversations: ListConversationsUseCase;
@@ -106,11 +107,7 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
         let activeCaseDto = null;
         if (caseRepo) {
           const cases = await caseRepo.listByConversation(conv.id);
-          const active =
-            (conv.activeCaseId ? cases.find((c) => c.id === conv.activeCaseId) : null) ??
-            cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
-            cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
-            null;
+          const { activeCase: active } = resolveConversationCases(conv, cases);
           if (active) {
             const autoState = await caseRepo.getAutomationState(active.id);
             activeCaseDto = {
@@ -191,10 +188,15 @@ export function createConversationsRouter(deps: ConversationsRouterDeps): Router
   router.get("/api/conversations/:id/automation", async (req, res, next) => {
     try {
       requireAuth(req);
+      const conv = deps.conversationRepo
+        ? await deps.conversationRepo.findById(req.params.id)
+        : null;
       const cases = await caseRepo.listByConversation(req.params.id);
-      const active =
-        cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
-        cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
+      const active = conv
+        ? resolveConversationCases(conv, cases).activeCase
+        : (cases.find((c) => c.status === "ACTIVE" || c.status === "WAITING_USER") ??
+            cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
+            null);
       if (!active) {
         res.json({ data: null });
         return;

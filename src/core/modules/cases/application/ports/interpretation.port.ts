@@ -40,6 +40,8 @@ export type InterpretMessageInput = {
   } | null;
   recentMessages?: Array<{ author: string; body: string }>;
   previousCompletedCase?: PreviousCompletedCaseContext | null;
+  conversationStatus?: "open" | "pending" | "resolved" | "closed";
+  lastOutboundWasTemplate?: boolean;
 };
 
 export interface InterpretationPort {

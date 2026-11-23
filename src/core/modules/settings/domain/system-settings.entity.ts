@@ -75,6 +75,11 @@ export const AiProviderSettingsSchema = z.object({
   // Parámetros operativos
   aiCallTimeoutMs: z.number().int().positive().default(45000),
   aiQualityTimeoutMs: z.number().int().positive().default(600000),
+  // Rescate automático de casos estancados en atención con IA (minutos)
+  aiWaitingRescueMinutes: z.number().int().min(5).max(1440).default(45),
+  aiStuckRescueMinutes: z.number().int().min(1).max(120).default(5),
+  // Desborde automático de colas escaladas cuando el departamento tiene 0 asesores conectados (minutos)
+  queueOverflowMinutes: z.number().int().min(5).max(1440).default(15),
 });
 
 export type AiProviderSettings = z.infer<typeof AiProviderSettingsSchema>;

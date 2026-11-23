@@ -35,6 +35,7 @@ export interface EscalationRepositoryPort {
     },
   ): Promise<Escalation>;
   findNextPendingForDepartment(departmentId: string, limit: number): Promise<Escalation[]>;
+  findPendingOlderThan?(cutoff: Date, limit?: number): Promise<Escalation[]>;
   findPendingDelayedEscalations?(minWaitMinutes: number, limit?: number): Promise<PendingDelayedEscalationItem[]>;
 }
 

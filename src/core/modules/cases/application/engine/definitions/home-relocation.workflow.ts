@@ -241,26 +241,35 @@ export function createHomeRelocationWorkflow(ragService: RagService): WorkflowDe
     const rawText = typeof text === "string" ? text.trim() : "";
 
     if (!rawQuestion) {
-      if (!newAddress && rawText.length >= 5 && /direccion|dirección|calle|av|avenida|caras|barrio|sector|casa|norte|sur|quito|guayaquil/i.test(rawText)) {
+      if (
+        !newAddress &&
+        rawText.length >= 5 &&
+        /\b(direcci[oó]n|calle|av|avenida|pasaje|barrio|sector|ciudadela|cdla|conjunto|quito|cuenca|guayaquil)\b/i.test(
+          rawText,
+        )
+      ) {
         newAddress = rawText;
       }
 
-      if (!references && rawText.length >= 10) {
-        if (/frente|junto|cerca|metros|escuela|bazar|lado|diagonal|detras|casa|esquina|referencia/i.test(rawText)) {
-          references = rawText;
-        } else if (newAddress && newAddress.length >= 25 && /frente|junto|cerca|metros|escuela|bazar|lado|diagonal|detras|casa|esquina|referencia/i.test(newAddress)) {
-          references = newAddress;
-        }
+      if (
+        !references &&
+        rawText.length >= 10 &&
+        /\b(frente\s+a|junto\s+a|cerca\s+de|a\s+\d+\s*metros|escuela|bazar|al\s+lado|diagonal|detr[aá]s\s+de|esquina|referencia)\b/i.test(
+          rawText,
+        )
+      ) {
+        references = rawText;
       }
 
       if (!mapLocation) {
         const urlMatch = rawText.match(/(https?:\/\/[^\s]+)/i);
+        const coordMatch = rawText.match(/([-+]?\d{1,2}\.\d+)\s*,\s*([-+]?\d{1,3}\.\d+)/);
         if (urlMatch) {
           mapLocation = urlMatch[1];
-        } else if (/mapa|ubicacion|ubicación|coordenadas|gps|pin|maps|google/i.test(rawText)) {
-          mapLocation = "Ubicación compartida en chat";
-        } else if (newAddress && references && rawText.length >= 35) {
-          mapLocation = `Ver dirección: ${newAddress}`;
+        } else if (coordMatch) {
+          mapLocation = `${coordMatch[1]}, ${coordMatch[2]}`;
+        } else if (/^Ubicaci[oó]n GPS:/i.test(rawText)) {
+          mapLocation = rawText;
         }
       }
     }
@@ -329,14 +338,14 @@ export function createHomeRelocationWorkflow(ragService: RagService): WorkflowDe
       },
     },
     replyTemplates: {
-      "VALIDATE_CLIENT:WAITING_USER_CLIENT":
+      WAITING_USER_CLIENT:
         "Para proceder con tu solicitud de traslado de servicio, por favor indícanos el número de cédula o RUC del titular del contrato.",
-      "GATHER_RELOCATION_DETAILS:WAITING_USER":
+      GATHER_RELOCATION_DETAILS:
         "¡Excelente, cliente verificado! 🏠 Para continuar con tu traslado de domicilio, necesitamos que nos proporciones la siguiente información:\n\n" +
         "▪️ Dirección del nuevo domicilio\n" +
         "▪️ Dos referencias del nuevo domicilio\n" +
         "▪️ Ubicación del nuevo domicilio en el mapa (link o coordenadas de Google Maps / WhatsApp)",
-      "CREATE_TICKET_AND_ESCALATE:ESCALATED":
+      ESCALATED:
         "¡Gracias! Hemos recopilado toda la información para tu traslado de domicilio:\n\n" +
         "👤 *Titular:* {{client.fullName}} ({{client.nationalId}})\n" +
         "📍 *Nueva dirección:* {{relocationDetails.newAddress}}\n" +

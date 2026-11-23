@@ -34,6 +34,8 @@ export class AiInterpretationAdapter implements InterpretationPort {
           : undefined,
         recentMessages: input.recentMessages,
         previousCompletedCase: input.previousCompletedCase,
+        conversationStatus: input.conversationStatus,
+        lastOutboundWasTemplate: input.lastOutboundWasTemplate,
       },
     });
 

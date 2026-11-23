@@ -119,6 +119,9 @@ export class SystemSettingsService {
         ollamaEmbeddingDimension: this.env.OLLAMA_EMBEDDING_DIMENSION || 2560,
         aiCallTimeoutMs: this.env.AI_CALL_TIMEOUT_MS || 45000,
         aiQualityTimeoutMs: this.env.AI_QUALITY_TIMEOUT_MS || 600000,
+        aiWaitingRescueMinutes: 45,
+        aiStuckRescueMinutes: 5,
+        queueOverflowMinutes: 15,
       };
 
       const resolved = AiProviderSettingsSchema.parse({
@@ -142,6 +145,9 @@ export class SystemSettingsService {
         ollamaEmbeddingDimension: this.env.OLLAMA_EMBEDDING_DIMENSION || 2560,
         aiCallTimeoutMs: this.env.AI_CALL_TIMEOUT_MS || 45000,
         aiQualityTimeoutMs: this.env.AI_QUALITY_TIMEOUT_MS || 600000,
+        aiWaitingRescueMinutes: 45,
+        aiStuckRescueMinutes: 5,
+        queueOverflowMinutes: 15,
       };
     }
   }
@@ -179,6 +185,27 @@ export class SystemSettingsService {
       ...raw,
       geminiApiKey: maskSecret(raw.geminiApiKey),
     };
+  }
+
+  /**
+   * Umbrales en minutos para rescatar casos estancados en atención con IA
+   * y desbordar colas de departamentos sin asesores conectados.
+   */
+  async getAiRescueThresholds(): Promise<{
+    waitingMinutes: number;
+    stuckMinutes: number;
+    queueOverflowMinutes: number;
+  }> {
+    try {
+      const s = await this.getAiSettings();
+      return {
+        waitingMinutes: s.aiWaitingRescueMinutes ?? 45,
+        stuckMinutes: s.aiStuckRescueMinutes ?? 5,
+        queueOverflowMinutes: s.queueOverflowMinutes ?? 15,
+      };
+    } catch {
+      return { waitingMinutes: 45, stuckMinutes: 5, queueOverflowMinutes: 15 };
+    }
   }
 
   async updateChannelSettings(
@@ -230,6 +257,9 @@ export class SystemSettingsService {
       ollamaEmbeddingDimension: input.ollamaEmbeddingDimension ?? current.ollamaEmbeddingDimension,
       aiCallTimeoutMs: input.aiCallTimeoutMs ?? current.aiCallTimeoutMs,
       aiQualityTimeoutMs: input.aiQualityTimeoutMs ?? current.aiQualityTimeoutMs,
+      aiWaitingRescueMinutes: input.aiWaitingRescueMinutes ?? current.aiWaitingRescueMinutes,
+      aiStuckRescueMinutes: input.aiStuckRescueMinutes ?? current.aiStuckRescueMinutes,
+      queueOverflowMinutes: input.queueOverflowMinutes ?? current.queueOverflowMinutes,
     };
 
     const validated = AiProviderSettingsSchema.parse(merged);

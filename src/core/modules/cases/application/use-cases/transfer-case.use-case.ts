@@ -109,6 +109,8 @@ export class TransferCaseUseCase {
     await this.deps.caseRepo.appendEvent(aggregate.case.id, "CASE_TRANSFERRED", {
       toDepartmentId: targetDeptId,
       fromDepartmentId: aggregate.case.departmentId,
+      fromAgentId: aggregate.case.assignedAgentId ?? input.agentUserId,
+      initiatedByAgentId: input.agentUserId,
       reason,
       assignedAgentId: assignedAgent ? assignedAgent.id : null,
     });

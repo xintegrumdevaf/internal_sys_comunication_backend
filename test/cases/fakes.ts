@@ -129,6 +129,30 @@ export class CaseRepositoryFake implements CaseRepositoryPort {
     );
   }
 
+  async listStaleAiCases(input: {
+    waitingCutoff: Date;
+    stuckCutoff: Date;
+    limit?: number;
+  }): Promise<Case[]> {
+    const limit = input.limit ?? 25;
+    return [...this.cases.values()]
+      .filter((c) => {
+        if (c.assignedAgentId !== null) return false;
+        const auto = this.automationStates.get(c.id);
+        if (auto && !auto.enabled) return false;
+        if (c.context?.schedulingMetadata?.scheduledAt) return false;
+        if (c.status === "WAITING_USER") {
+          return c.lastActivityAt.getTime() <= input.waitingCutoff.getTime();
+        }
+        if (c.status === "NEW" || c.status === "ACTIVE") {
+          return c.lastActivityAt.getTime() <= input.stuckCutoff.getTime();
+        }
+        return false;
+      })
+      .sort((a, b) => a.lastActivityAt.getTime() - b.lastActivityAt.getTime())
+      .slice(0, limit);
+  }
+
   async applyTransition(input: ApplyCaseTransitionInput): Promise<CaseAggregate> {
     const caseEntity = this.cases.get(input.caseId);
     const workflowInstance = this.workflowInstances.get(input.caseId);

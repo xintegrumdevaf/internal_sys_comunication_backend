@@ -276,4 +276,71 @@ describe("CaseArbitrationService (docs/spec/02_STATE_MACHINE.md §4)", () => {
       reason: "Auditoría de Reclamos",
     });
   });
+
+  it("CANCEL sobre un caso activo devuelve CANCEL_ACTIVE en vez de escalar a humano", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const { case: active } = await caseRepo.create({
+      conversationId: "conv-cancel-active",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: null,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "WAITING_USER_DIAGNOSTIC",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: active.id,
+      expectedCaseVersion: active.version,
+      expectedWorkflowVersion: 1,
+      status: "WAITING_USER",
+      context: active.context,
+      currentState: "WAITING_USER_DIAGNOSTIC",
+      expiresAt: null,
+    });
+
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
+    const decision = await service.decide({
+      conversationId: "conv-cancel-active",
+      interpretation: interpretation({
+        type: "CANCEL",
+        intent: "general.inquiry",
+        entities: { isClosing: true, isThankYou: true },
+        confidence: 0.95,
+      }),
+    });
+
+    expect(decision).toEqual({ action: "CANCEL_ACTIVE", caseId: active.id });
+  });
+
+  it("DENY en pasos de confirmación (WAITING_USER_UPGRADE / WAITING_USER_SPECIALIST) continúa el flujo para cerrar limpiamente", async () => {
+    const caseRepo = new CaseRepositoryFake();
+    const { case: active } = await caseRepo.create({
+      conversationId: "conv-deny-upgrade",
+      workflowType: "SALES",
+      departmentId: null,
+      context: { workflowType: "SALES", data: { purpose: "upgrade" } },
+      initialState: "WAITING_USER_UPGRADE",
+      expiresAt: null,
+    });
+    await caseRepo.applyTransition({
+      caseId: active.id,
+      expectedCaseVersion: active.version,
+      expectedWorkflowVersion: 1,
+      status: "WAITING_USER",
+      context: active.context,
+      currentState: "WAITING_USER_UPGRADE",
+      expiresAt: null,
+    });
+
+    const service = new CaseArbitrationService(caseRepo, silentLogger);
+    const decision = await service.decide({
+      conversationId: "conv-deny-upgrade",
+      interpretation: interpretation({
+        type: "DENY",
+        intent: "general.inquiry",
+        confidence: 0.92,
+      }),
+    });
+
+    expect(decision).toEqual({ action: "CONTINUE_ACTIVE", caseId: active.id });
+  });
 });

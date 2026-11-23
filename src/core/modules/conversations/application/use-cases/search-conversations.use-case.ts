@@ -5,6 +5,7 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import type { ConversationDto } from "./list-conversations.use-case";
+import { resolveConversationCases } from "../services/resolve-conversation-cases";
 
 export type ConversationSearchResultDto = ConversationDto & {
   matchedMessage?: {
@@ -54,19 +55,10 @@ export class SearchConversationsUseCase {
 
     for (const { conversation: conv, matchedMessage } of matches) {
       const cases = this.caseRepo ? await this.caseRepo.listByConversation(conv.id) : [];
-      const activeAggregate =
-        (conv.activeCaseId ? cases.find((item) => item.id === conv.activeCaseId) : null) ??
-        cases.find((item) => item.status === "HUMAN_ACTIVE" || item.status === "ESCALATED") ??
-        cases.find((item) => item.status === "ACTIVE" || item.status === "WAITING_USER") ??
-        null;
-
-      const isClosedRecord = conv.status === "resolved" || conv.status === "closed";
-      const recordCase =
-        !activeAggregate && isClosedRecord
-          ? [...cases].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
-          : null;
-
-      const filterCase = activeAggregate ?? recordCase;
+      const { activeCase: activeAggregate, recordCase, filterCase } = resolveConversationCases(
+        conv,
+        cases,
+      );
 
       if (input.departmentId) {
         if (!filterCase || filterCase.departmentId !== input.departmentId) {
