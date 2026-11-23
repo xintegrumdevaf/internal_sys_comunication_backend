@@ -55,17 +55,15 @@ export class TransferCaseUseCase {
 
     if (input.toAgentId && this.deps.agentRepo) {
       assignedAgent = await this.deps.agentRepo.findById(input.toAgentId);
-      if (!assignedAgent || !assignedAgent.active) {
-        throw notFound(`Agente destino ${input.toAgentId} no encontrado o inactivo`);
+      if (!assignedAgent) {
+        throw notFound(`Agente destino ${input.toAgentId} no encontrado`);
       }
       if (!input.toDepartmentId && assignedAgent.primaryDepartmentId) {
         targetDeptId = assignedAgent.primaryDepartmentId;
       }
     } else if (targetDeptId && this.deps.autoAssign) {
-      // Intentar auto-asignar a un agente elegible del nuevo departamento
-      assignedAgent = await this.deps.autoAssign.pickAgentForDepartment(targetDeptId, {
-        fallbackToAnyActive: true,
-      });
+      // Intentar auto-asignar a un agente elegible del nuevo departamento (solo si está disponible y conectado)
+      assignedAgent = await this.deps.autoAssign.pickAgentForDepartment(targetDeptId);
     }
 
     let dept = null;
@@ -76,9 +74,10 @@ export class TransferCaseUseCase {
       }
     }
 
-    const nextStatus = assignedAgent
-      ? (aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED" ? aggregate.case.status : "HUMAN_ACTIVE")
-      : aggregate.case.status;
+    const isTerminal = aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED";
+    const nextStatus = isTerminal
+      ? aggregate.case.status
+      : (assignedAgent ? "HUMAN_ACTIVE" : "ESCALATED");
 
     const result = await this.deps.caseRepo.applyTransition({
       caseId: aggregate.case.id,
@@ -114,20 +113,22 @@ export class TransferCaseUseCase {
       assignedAgentId: assignedAgent ? assignedAgent.id : null,
     });
 
-    if (assignedAgent) {
-      await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
-        reason: input.toAgentId ? "MANUAL_TRANSFER" : "TRANSFER_AUTO_ASSIGN",
-        changedBy: input.agentUserId,
-      });
-      await this.deps.caseRepo.appendEvent(aggregate.case.id, "AUTOMATION_DISABLED", {
-        reason: input.toAgentId ? "MANUAL_TRANSFER" : "TRANSFER_AUTO_ASSIGN",
-      });
-      this.deps.broadcaster?.publish({
-        type: "AUTOMATION_DISABLED",
-        caseId: aggregate.case.id,
-        conversationId: aggregate.case.conversationId,
-      });
-    }
+    const disableReason = input.toAgentId
+      ? "MANUAL_TRANSFER"
+      : (assignedAgent ? "TRANSFER_AUTO_ASSIGN" : "TRANSFER_QUEUE");
+
+    await this.deps.caseRepo.setAutomationEnabled(aggregate.case.id, false, {
+      reason: disableReason,
+      changedBy: input.agentUserId,
+    });
+    await this.deps.caseRepo.appendEvent(aggregate.case.id, "AUTOMATION_DISABLED", {
+      reason: disableReason,
+    });
+    this.deps.broadcaster?.publish({
+      type: "AUTOMATION_DISABLED",
+      caseId: aggregate.case.id,
+      conversationId: aggregate.case.conversationId,
+    });
 
     if (this.deps.conversationRepo) {
       await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, aggregate.case.id);
@@ -175,19 +176,31 @@ export class TransferCaseUseCase {
         : null;
       const actorName = actor?.name || "Agente";
 
-      let destinationText = "";
-      if (dept && assignedAgent) {
-        destinationText = `al área ${dept.name} (${assignedAgent.name})`;
-      } else if (assignedAgent) {
-        destinationText = `a ${assignedAgent.name}`;
-      } else if (dept) {
-        destinationText = `al área ${dept.name}`;
-      } else {
-        destinationText = "a otra área";
-      }
-
+      let systemMessageText = "";
       const reasonPart = reason ? `. Motivo: ${reason}` : "";
-      const systemMessageText = `Caso transferido ${destinationText} por ${actorName}${reasonPart}`;
+
+      if (input.toAgentId) {
+        // Transferencia explícita a un agente seleccionado manualmente
+        let destinationText = "";
+        if (dept && assignedAgent) {
+          destinationText = `al área ${dept.name} (${assignedAgent.name})`;
+        } else if (assignedAgent) {
+          destinationText = `a ${assignedAgent.name}`;
+        } else if (dept) {
+          destinationText = `al área ${dept.name}`;
+        } else {
+          destinationText = "a otra área";
+        }
+        systemMessageText = `Caso transferido ${destinationText} por ${actorName}${reasonPart}`;
+      } else {
+        // Transferencia al área/departamento (sin selección manual de agente)
+        const areaName = dept ? `al área ${dept.name}` : "a otra área";
+        if (assignedAgent) {
+          systemMessageText = `Caso transferido ${areaName} por ${actorName}. Asignado automáticamente a ${assignedAgent.name}${reasonPart}`;
+        } else {
+          systemMessageText = `Caso transferido ${areaName} por ${actorName} (en cola de espera)${reasonPart}`;
+        }
+      }
 
       const sysMessage = await this.deps.messageRepo.insertOutbound({
         conversationId: aggregate.case.conversationId,
@@ -220,6 +233,21 @@ export class TransferCaseUseCase {
           caseId: aggregate.case.id,
           conversationId: aggregate.case.conversationId,
         });
+        if (nextStatus === "ESCALATED") {
+          const conv = this.deps.conversationRepo
+            ? await this.deps.conversationRepo.findById(aggregate.case.conversationId)
+            : null;
+          this.deps.broadcaster.publish({
+            type: "CASE_ESCALATED",
+            caseId: aggregate.case.id,
+            conversationId: aggregate.case.conversationId,
+            departmentId: targetDeptId,
+            at: new Date().toISOString(),
+            customerName: conv?.waProfileName ?? null,
+            customerPhone: conv?.waPhone ?? null,
+            reason,
+          });
+        }
       }
     }
 

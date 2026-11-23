@@ -183,9 +183,9 @@ o en error:
 
 | Endpoint | Efecto |
 |---|---|
-| `POST /api/conversations/:id/reply` `{ body }` | Respuesta humana (agente = sesión actual); fuerza `automation.enabled=false` si no lo estaba |
-| `POST /api/conversations/:id/take-control` | Un agente toma la conversación |
-| `POST /api/cases/:id/claim` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño |
+| `POST /api/conversations/:id/reply` `{ body }` | Respuesta humana (agente = sesión actual); fuerza `automation.enabled=false` si no lo estaba; adopta el departamento primario del asesor si el caso estaba en General o Triage |
+| `POST /api/conversations/:id/take-control` | Un agente toma la conversación (reclama el caso activo adoptando departamento si estaba en General/Triage y deshabilita automatización) |
+| `POST /api/cases/:id/claim` | Reclama un caso sin asignar (`assigned_agent_id IS NULL`) — falla si ya tiene dueño; adopta el departamento primario del asesor si el caso estaba en General o Triage |
 | `POST /api/cases/:id/assign` `{ agentUserId }` | Asigna/reasigna el caso (requiere `manager`/`admin` del departamento del caso, o ser el pool de triage) |
 | `POST /api/cases/:id/reassign` `{ agentUserId }` | Reasigna (alias semántico de `assign` sobre un caso ya asignado) |
 | `POST /api/cases/:id/complete` `{ resolutionNote?, closeReason?: 'RESOLVED' \| 'CLIENT_NO_RESPONSE' }` | `COMPLETED` (Cierre manual con motivo: Cierre normal o Cierre por falta de respuesta) |
@@ -559,4 +559,30 @@ Persistidos en `workflow_event` y re-emitidos por el canal de §C.3.
 - Corrección de aislamiento operativo: los filtros `departmentId` y `userId` ahora evalúan exclusivamente el **caso activo actual** (`conversation.activeCaseId` o el caso en curso más reciente: `HUMAN_ACTIVE`, `ESCALATED`, `ACTIVE`, `WAITING_USER`), en lugar de cualquier caso histórico asociado a la conversación.
 - Evita que conversaciones con casos históricos cerrados en un departamento (ej. Cartera) se filtren indebidamente en bandejas de esa área cuando el cliente tiene un caso activo abierto en otra (ej. Soporte).
 - Optimización de consulta: resolución del caso activo en una sola pasada para filtrado y construcción del `ConversationDto.activeCase`.
+
+**v9 → v10**: Control Forense de Turnos y Resiliencia en Auditoría & Transferencias:
+- **Trazabilidad de Turnos (Switch ON / OFF)**:
+  - Nuevas acciones formales en `audit_event`: `AGENT_SHIFT_STARTED` (cuando `agent.auto_assign_enabled` pasa a `true`) y `AGENT_SHIFT_ENDED` (cuando pasa a `false`).
+  - Persistencia de `before_state`, `after_state` y metadatos estructurados (`switch: "ON" | "OFF"`, `shiftStatus: "OPEN" | "CLOSED"`, `description`, `changedByAdmin: boolean`, `targetAgentId`, `targetAgentName`).
+  - Al cerrar sesión (`POST /api/auth/logout`), se desactiva el turno automáticamente emitiendo `AGENT_SHIFT_ENDED` antes de `AGENT_LOGOUT`.
+  - Cuando un administrador modifica el turno de un asesor desde `PUT /api/agents/:id`, se audita como `AGENT_SHIFT_STARTED`/`AGENT_SHIFT_ENDED` con el `actorId` del admin responsable.
+- **Resolución Jerárquica y Corrección SQL en Auditoría (`GET /api/audit`, `GET /api/audit/stats`)**:
+  - `COALESCE(a.department_id, ag.primary_department_id)`: si un evento operativo carece de `department_id` explícito, se resuelve al departamento del asesor que lo ejecutó, garantizando que el filtro por departamento traiga todas las actividades de su personal.
+  - Corrección de sintaxis en `AuditRepositoryPg.getStats`: unificación limpia de condiciones con `AND` eliminando cláusulas `WHERE` duplicadas.
+  - Registro de `departmentId` explícito en `CONVERSATION_REPLY` y `CASE_COMPLETED`.
+- **Eliminación de Asignación Forzada a Asesores Desconectados en Transferencias**:
+  - Supresión definitiva de `fallbackToAnyActive` en `AutoAssignAgentService` y `TransferCaseUseCase`.
+  - La asignación automática exige estrictamente `active === true && autoAssignEnabled === true`. Si ningún asesor del área destino tiene turno abierto, el caso se transfiere en cola (`ESCALATED` / `PENDING`) sin asignar a personal ausente.
+
+**v10 → v11**: Flexibilización de Transferencia Manual Departamental, Resiliencia CORS y Robustez de Despliegue:
+- **Transferencia Manual en Mismo Departamento (`POST /api/cases/:id/transfer`)**:
+  - Eliminación de la validación restrictiva `!assignedAgent.active` en transferencias manuales directas con `toAgentId`. Si un asesor o supervisor transfiere directamente a un agente existente de su mismo departamento, el caso de uso lo permite sin lanzar HTTP 404, permitiendo reasignaciones de cartera o seguimiento hacia cuentas inactivas.
+- **Middleware CORS Universal (`src/shared/http/middlewares/cors.middleware.ts`, `container.ts`)**:
+  - Validación dinámica mediante expresión regular de cualquier origen local (`localhost` o `127.0.0.1` en cualquier puerto).
+  - Incorporación de `FRONTEND_URL` al conjunto de orígenes permitidos.
+  - Envío automático de `Access-Control-Allow-Credentials: true`, `Access-Control-Max-Age: 86400` y respuesta inmediata `204 No Content` para solicitudes preflight `OPTIONS`, eliminando bloqueos de login desde `localhost:8080`.
+- **Corrección de Entrypoint en Build de Producción (`package.json`)**:
+  - Actualización de `"main"` y `"start"` apuntando a `dist/src/index.js` en concordancia con la salida generada por `tsc`.
+
+
 

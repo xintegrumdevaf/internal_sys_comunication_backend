@@ -199,6 +199,8 @@ export class ProcessCampaignBatchUseCase {
                 body: finalSentBody || (campaign.templateName ? `[Plantilla: ${campaign.templateName}]` : "[Campaña]"),
                 externalId: result.externalId,
                 status: "sent",
+                caseId: conv.activeCaseId ?? undefined,
+                caption: campaign.templateName ? `template:${campaign.templateName}` : undefined,
               });
             }
 
@@ -208,9 +210,20 @@ export class ProcessCampaignBatchUseCase {
             const targetStatus: ConversationStatus =
               rawStatus === "OPEN" ? "open" : rawStatus === "PENDING" ? "pending" : "closed";
 
-            // Se aplica el estado configurado en la campaña (por defecto "closed" para que no llene la bandeja de abiertos)
-            if (routing?.forceChatUpdate || !conv.activeCaseId || targetStatus === "closed") {
+            // Si el contacto ya tiene un caso activo o está siendo atendido (activeCaseId),
+            // la campaña NO debe cerrar la conversación ni interrumpir al asesor, a menos que
+            // forceChatUpdate sea explícitamente true.
+            const hasActiveCase = Boolean(conv.activeCaseId);
+
+            if (routing?.forceChatUpdate) {
               await this.conversationRepo.setStatus(conv.id, targetStatus);
+            } else if (!hasActiveCase) {
+              await this.conversationRepo.setStatus(conv.id, targetStatus);
+            } else {
+              this.logger.info(
+                { conversationId: conv.id, activeCaseId: conv.activeCaseId, phone: recipient.phone, campaignId },
+                "Mensaje de campaña enviado a contacto con caso activo: se preserva la atención y estado actual",
+              );
             }
           } catch (convErr) {
             this.logger.warn(

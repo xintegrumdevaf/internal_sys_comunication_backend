@@ -65,7 +65,7 @@ function mapCampaignRow(row: CampaignRow): Campaign {
     quickMode: row.quick_mode,
     quickModeIntervalSeconds: Number(row.quick_mode_interval_seconds),
     chatRouting: row.chat_routing ?? {
-      initialStatus: "OPEN",
+      initialStatus: "CLOSED",
       departmentId: null,
       assignedAgentId: null,
       keepAssignedToUser: false,
@@ -111,7 +111,7 @@ export class CampaignRepositoryPg implements CampaignRepositoryPort {
 
   async create(input: CreateCampaignInput): Promise<Campaign> {
     const defaultChatRouting: CampaignChatRouting = {
-      initialStatus: "OPEN",
+      initialStatus: "CLOSED",
       departmentId: null,
       assignedAgentId: null,
       keepAssignedToUser: false,

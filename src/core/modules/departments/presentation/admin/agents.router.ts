@@ -81,6 +81,9 @@ export function createAgentsAdminRouter(deps: AgentsAdminRouterDeps): Router {
         agentId: req.params.id!,
         patch: parsed.data,
         actorId: admin.id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string,
+        correlationId: (req as unknown as { correlationId?: string }).correlationId,
       });
       res.json({ data: toPublicAgentDto(agent) });
     } catch (error) {

@@ -130,6 +130,7 @@ Cuando la interpretación de IA es `UNCLEAR` de forma sostenida (reintento agota
 
 `case.assigned_agent_id` determina quién puede escribir (responder, ejecutar acciones de agente) sobre un caso una vez que pasó a `HUMAN_ACTIVE`/`ESCALATED`:
 - `NULL` → cualquier agente con visibilidad sobre ese caso puede **reclamarlo** (`POST /api/cases/:id/claim`, `03_API_CONTRACT.md` §C.2), lo que fija `assigned_agent_id`.
+  - **Adopción de departamento en Triage / General**: Si el caso se encuentra en el pool de triage (`department_id IS NULL`) o en el departamento de fallback `General`, al ser reclamado o respondido por un asesor especializado (con `primary_department_id` definido, ej. Facturación), el caso adopta automáticamente el departamento primario del asesor (`departmentId = agent.primaryDepartmentId`), actualizando tanto la entidad del caso como el registro de escalación. Si el caso ya pertenecía a un área técnica especializada (ej. `Soporte Técnico`), la asignación no altera dicho departamento; para moverlo entre áreas técnicas debe usarse la acción explícita de transferencia (`POST /api/cases/:id/transfer`).
 - Asignado → solo ese agente (o un `manager`/`admin` de su departamento, vía `reassign`) puede actuar; el resto de agentes lo ve en modo lectura si `department.visibility='shared'`.
 - Un caso puede ser visible sin estar asignado (bandeja compartida); la asignación es lo que bloquea la edición, no la visibilidad.
 
@@ -228,6 +229,19 @@ Cuando los casos escalan a atención humana (`status = 'ESCALATED'`) sin disponi
    * Al completarse o cancelarse un caso humano (`CompleteCaseUseCase` / `CancelCaseUseCase`), el asesor libera 1 slot y se drena de inmediato el siguiente caso en cola del departamento.
 3. **Concurrencia Segura y Tolerancia a Fallos:**
    * La extracción de casos pendientes en PostgreSQL se ejecuta con `FOR UPDATE OF e SKIP LOCKED`, garantizando que múltiples conexiones o workers paralelos jamás asignen el mismo caso por condición de carrera.
+
+## 16. Guardarraíles de Transferencia y Disponibilidad Estricta de Asesores
+
+1. **Prohibición de Asignación Forzada a Asesores Desconectados:**
+   * La auto-asignación por menor carga (`AutoAssignAgentService`) exige estrictamente que el agente esté activo y con turno abierto (`active === true && autoAssignEnabled === true`), además de contar con cupo disponible por debajo de `department.max_concurrent_cases`.
+   * Se prohíbe el mecanismo de fallback forzado hacia agentes desconectados (`fallbackToAnyActive = false`). Si ningún asesor del departamento destino tiene el turno abierto al momento de la transferencia, el caso permanece encolado de forma segura en `ESCALATED` con escalación en `PENDING` para ser asignado en cuanto un agente inicie turno o sea reclamado conscientemente.
+2. **Separación de Responsabilidad en Transferencias:**
+   * Si un caso es transferido automáticamente a un área sin agente específico, el mensaje de sistema indica exclusivamente la derivación departamental realizada por el operador actuante. La auto-asignación posterior genera su propio evento de sistema `HUMAN_ASSIGNED`, preservando la autoría real y evitando atribuciones falsas de derivación directa.
+3. **Transferencia Directa vs Auto-Asignación y Visibilidad Departamental:**
+   * **Transferencia dentro del propio departamento**: Un asesor o líder puede transferir manualmente de forma directa (`toAgentId`) a cualquier compañero de su mismo departamento, esté activo o no (ej. reasignación interna de cartera o casos asignados a usuarios inactivos). El backend permite la asignación siempre que el agente exista en el catálogo.
+   * **Transferencia hacia departamentos externos**: Al transferir hacia otra área, la interfaz restringe la lista de selección manual únicamente a los agentes activos con turno de asignación automática abierto (`active !== false && autoAssignEnabled === true`), impidiendo derivar casos manualmente a personal desconectado de otras áreas.
+   * **Auto-asignación inter-departamental**: Si no se selecciona un agente puntual ("Auto-asignar automáticamente (menor carga)"), el backend evalúa únicamente al personal en turno del área destino; si ninguno está disponible, el caso queda encolado como `ESCALATED` / `PENDING` a la espera de que alguien abra turno o lo reclame.
+
 
 
 

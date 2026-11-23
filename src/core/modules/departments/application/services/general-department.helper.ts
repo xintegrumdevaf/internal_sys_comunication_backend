@@ -44,3 +44,26 @@ export async function resolveGeneralDepartment(
   }
 }
 
+/**
+ * Determina si un departmentId corresponde a General / pool de triage o fallback.
+ * Si departmentId es null o undefined, se considera triage (pool general sin clasificar).
+ */
+export async function isGeneralDepartment(
+  departmentRepo: DepartmentRepositoryPort,
+  departmentId: string | null | undefined,
+): Promise<boolean> {
+  if (!departmentId) return true;
+  if (!departmentRepo || typeof departmentRepo.findById !== "function") return false;
+  const dept = await departmentRepo.findById(departmentId);
+  if (!dept) return false;
+  const normSlug = (dept.slug || "").toLowerCase().trim();
+  const normName = (dept.name || "").toLowerCase().trim();
+  return (
+    GENERAL_FALLBACK_SLUGS.includes(normSlug) ||
+    normSlug.includes("general") ||
+    normName.includes("general") ||
+    normSlug.includes("atencion") ||
+    normName.includes("recepcion")
+  );
+}
+

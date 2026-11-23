@@ -7,6 +7,7 @@ import type { CrmBridgePort } from "../../../crm-bridge/application/ports/crm-br
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { DepartmentRepositoryPort } from "../../../departments/application/ports/department.repository.port";
 import { assertCanWriteCase, resolveActingAgent } from "../../../escalation/application/use-cases/agent-case-auth";
+import { isGeneralDepartment } from "../../../departments/application/services/general-department.helper";
 import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
 import type { Message } from "../../domain/message.entity";
 import type { ConversationRepositoryPort } from "../ports/conversation.repository.port";
@@ -120,7 +121,13 @@ export class ReplyAsHumanUseCase {
       throw notFound(`Conversacion ${input.conversationId} no encontrada`);
     }
 
-    if (input.agentUserId && caseRepo && this.deps.agentRepo && this.deps.departmentRepo) {
+    if (
+      input.agentUserId &&
+      caseRepo &&
+      typeof caseRepo.listByConversation === "function" &&
+      this.deps.agentRepo &&
+      this.deps.departmentRepo
+    ) {
       const cases = await caseRepo.listByConversation(conversation.id);
       const humanCase = cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED");
       if (humanCase) {
@@ -231,7 +238,7 @@ export class ReplyAsHumanUseCase {
     }
 
     let effectiveCaseId = conversation.activeCaseId;
-    if (!effectiveCaseId && caseRepo) {
+    if (!effectiveCaseId && caseRepo && typeof caseRepo.listByConversation === "function") {
       const cases = await caseRepo.listByConversation(conversation.id);
       const active =
         cases.find((c) => c.status === "HUMAN_ACTIVE" || c.status === "ESCALATED") ??
@@ -307,6 +314,51 @@ export class ReplyAsHumanUseCase {
           ...(input.actorName ? { actorName: input.actorName } : {}),
         });
       }
+
+      // Si el caso está en General/Triage y el asesor que responde pertenece a un departamento
+      // especializado (ej: Facturación, Soporte), el caso adopta automáticamente su departamento.
+      if (
+        this.deps.agentRepo &&
+        this.deps.departmentRepo &&
+        typeof caseRepo.findById === "function" &&
+        typeof caseRepo.applyTransition === "function"
+      ) {
+        const currentAggregate = await caseRepo.findById(effectiveCaseId);
+        if (currentAggregate) {
+          const agent = await this.deps.agentRepo.findById(input.agentUserId);
+          if (agent?.primaryDepartmentId) {
+            const isGeneralOrTriage = await isGeneralDepartment(
+              this.deps.departmentRepo,
+              currentAggregate.case.departmentId,
+            );
+            if (
+              isGeneralOrTriage &&
+              currentAggregate.case.departmentId !== agent.primaryDepartmentId
+            ) {
+              await caseRepo.applyTransition({
+                caseId: currentAggregate.case.id,
+                expectedCaseVersion: currentAggregate.case.version,
+                expectedWorkflowVersion: currentAggregate.workflowInstance.version,
+                status: currentAggregate.case.status,
+                context: currentAggregate.case.context,
+                currentState: currentAggregate.workflowInstance.currentState,
+                departmentId: agent.primaryDepartmentId,
+                expiresAt: currentAggregate.case.expiresAt,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    let replyDepartmentId: string | null = null;
+    if (caseRepo && typeof caseRepo.findById === "function" && effectiveCaseId) {
+      const c = await caseRepo.findById(effectiveCaseId);
+      if (c?.case?.departmentId) replyDepartmentId = c.case.departmentId;
+    }
+    if (!replyDepartmentId && this.deps.agentRepo && typeof this.deps.agentRepo.findById === "function") {
+      const ag = await this.deps.agentRepo.findById(input.agentUserId);
+      if (ag?.primaryDepartmentId) replyDepartmentId = ag.primaryDepartmentId;
     }
 
     await auditRepo.record({
@@ -314,6 +366,7 @@ export class ReplyAsHumanUseCase {
       resourceType: "conversation",
       resourceId: conversation.id,
       actorId: input.agentUserId ?? null,
+      departmentId: replyDepartmentId,
       metadata: {
         messageId: message.id,
         type: messageType,

@@ -344,7 +344,8 @@ export function createContainer(): Container {
   const metaSender = new WhatsAppSenderHttp(env, conversationsLogger, systemSettingsService);
   // No inyectamos fallbackSender (metaSender) para evitar falsos positivos cuando
   // la API de Meta está bloqueada o inactiva y Zernio es el proveedor configurado.
-  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, undefined, systemSettingsService);
+  const zernioSender = new ZernioSenderHttp(env, conversationsLogger, undefined, systemSettingsService, redisClient);
+  void zernioSender.preloadRecentConversations().catch(() => {});
   const whatsappSender = new DynamicWhatsAppSender(systemSettingsService, metaSender, zernioSender);
   const mediaStorage: MediaStoragePort = new LocalMediaStorageAdapter({
     env,
@@ -1029,7 +1030,7 @@ export function createContainer(): Container {
 
   // --- HTTP (presentation) ---
   const app = express();
-  app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV));
+  app.use(createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV, env.FRONTEND_URL));
   app.use(
     express.json({
       limit: "50mb",

@@ -21,7 +21,9 @@ export function is24HourWindowError(
     lower.includes("24-hour") ||
     lower.includes("customer service window") ||
     lower.includes("re-engagement") ||
-    (lower.includes("template") && lower.includes("required"))
+    (lower.includes("template") &&
+      lower.includes("required") &&
+      (lower.includes("24") || lower.includes("window") || lower.includes("expire") || lower.includes("reopen") || lower.includes("re-engage")))
   );
 }
 
@@ -46,7 +48,16 @@ export function translateDeliveryError(
 
   // 2. Error 131047: Ventana de 24 horas cerrada
   if (is24HourWindowError(raw, codeStr)) {
-    return "Ventana de 24 horas cerrada: Han transcurrido más de 24h desde el último mensaje del cliente. WhatsApp requiere una plantilla oficial (Template) aprobada para iniciar la conversación (Error Meta 131047).";
+    return "Ventana de 24 horas cerrada: Han transcurrido más de 24h desde el último mensaje del cliente. WhatsApp requiere una plantilla oficial (Template) aprobada para reabrir la conversación (Error Meta 131047).";
+  }
+
+  // 2.b. Plantilla obligatoria al iniciar nueva conversación (o chat no indexado en Zernio)
+  if (
+    lower.includes("template_required") ||
+    lower.includes("must start with an approved template") ||
+    (lower.includes("template") && lower.includes("required"))
+  ) {
+    return "Plantilla requerida: WhatsApp exige una plantilla oficial (Template) aprobada para iniciar una conversación nueva con este número, o no se indexó la conversación activa en Zernio (TEMPLATE_REQUIRED).";
   }
 
   // 3. Error 131026: Número no disponible o sin WhatsApp

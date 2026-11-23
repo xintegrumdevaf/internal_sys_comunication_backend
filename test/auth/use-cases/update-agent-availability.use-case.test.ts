@@ -7,7 +7,7 @@ import { DepartmentRepositoryFake } from "../../support/fakes";
 import { silentLogger } from "../../support/silent-logger";
 
 describe("UpdateAgentAvailabilityUseCase & Auto-Assign Load Balancer", () => {
-  it("permite a un agente cambiar su disponibilidad (autoAssignEnabled) y registra audit_event", async () => {
+  it("permite a un agente cambiar su disponibilidad (autoAssignEnabled) y registra audit_event de turno (ON/OFF)", async () => {
     const agentRepo = new AgentRepositoryFake();
     const auditRepo = new AuditRepositoryFake();
     const useCase = new UpdateAgentAvailabilityUseCase({ agentRepo, auditRepo, logger: silentLogger });
@@ -18,17 +18,35 @@ describe("UpdateAgentAvailabilityUseCase & Auto-Assign Load Balancer", () => {
       autoAssignEnabled: true,
     });
 
-    const updated = await useCase.execute({
+    // Desactivar turno (switch OFF)
+    const updatedOff = await useCase.execute({
       agentId: agent.id,
       autoAssignEnabled: false,
     });
 
-    expect(updated.autoAssignEnabled).toBe(false);
+    expect(updatedOff.autoAssignEnabled).toBe(false);
     expect(auditRepo.events).toContainEqual(
       expect.objectContaining({
-        action: "AGENT_AVAILABILITY_CHANGED",
+        action: "AGENT_SHIFT_ENDED",
         resourceId: agent.id,
         actorId: agent.id,
+        metadata: expect.objectContaining({ switch: "OFF", shiftStatus: "CLOSED" }),
+      }),
+    );
+
+    // Activar turno (switch ON)
+    const updatedOn = await useCase.execute({
+      agentId: agent.id,
+      autoAssignEnabled: true,
+    });
+
+    expect(updatedOn.autoAssignEnabled).toBe(true);
+    expect(auditRepo.events).toContainEqual(
+      expect.objectContaining({
+        action: "AGENT_SHIFT_STARTED",
+        resourceId: agent.id,
+        actorId: agent.id,
+        metadata: expect.objectContaining({ switch: "ON", shiftStatus: "OPEN" }),
       }),
     );
   });

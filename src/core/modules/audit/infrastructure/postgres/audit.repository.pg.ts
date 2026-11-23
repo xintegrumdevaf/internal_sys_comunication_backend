@@ -129,10 +129,10 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
 
     if (filter.departmentId) {
       values.push(filter.departmentId);
-      whereClauses.push(`a.department_id = $${values.length}`);
+      whereClauses.push(`COALESCE(a.department_id, ag.primary_department_id) = $${values.length}`);
     } else if (filter.departmentIds && filter.departmentIds.length > 0) {
       values.push(filter.departmentIds);
-      whereClauses.push(`a.department_id = ANY($${values.length}::uuid[])`);
+      whereClauses.push(`COALESCE(a.department_id, ag.primary_department_id) = ANY($${values.length}::uuid[])`);
     }
 
     if (filter.from) {
@@ -156,7 +156,8 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
         a.action ILIKE $${values.length} OR 
         a.resource_id ILIKE $${values.length} OR 
         ag.name ILIKE $${values.length} OR 
-        ag.email ILIKE $${values.length}
+        ag.email ILIKE $${values.length} OR
+        a.metadata::text ILIKE $${values.length}
       )`);
     }
 
@@ -177,8 +178,8 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
          ag.name AS actor_name,
          ag.email AS actor_email,
          ag.role AS actor_role,
-         a.department_id,
-         d.name AS department_name,
+         COALESCE(a.department_id, ag.primary_department_id) AS department_id,
+         COALESCE(d.name, ag_d.name) AS department_name,
          a.metadata,
          a.before_state,
          a.after_state,
@@ -189,6 +190,7 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
        FROM audit_event a
        LEFT JOIN agent ag ON ag.id = a.actor_id
        LEFT JOIN department d ON d.id = a.department_id
+       LEFT JOIN department ag_d ON ag_d.id = ag.primary_department_id
        ${whereSql}
        ORDER BY a.occurred_at DESC
        LIMIT $${limitParam}`,
@@ -213,30 +215,31 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
 
     if (filter.departmentId) {
       values.push(filter.departmentId);
-      whereClauses.push(`department_id = $${values.length}`);
+      whereClauses.push(`COALESCE(a.department_id, ag.primary_department_id) = $${values.length}`);
     } else if (filter.departmentIds && filter.departmentIds.length > 0) {
       values.push(filter.departmentIds);
-      whereClauses.push(`department_id = ANY($${values.length}::uuid[])`);
+      whereClauses.push(`COALESCE(a.department_id, ag.primary_department_id) = ANY($${values.length}::uuid[])`);
     }
 
     if (filter.from) {
       values.push(filter.from);
-      whereClauses.push(`occurred_at >= $${values.length}`);
+      whereClauses.push(`a.occurred_at >= $${values.length}`);
     }
 
     if (filter.to) {
       values.push(filter.to);
-      whereClauses.push(`occurred_at <= $${values.length}`);
+      whereClauses.push(`a.occurred_at <= $${values.length}`);
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     // 1. Total and by category
     const catQuery = await this.pool.query<{ category: AuditCategory; count: string }>(
-      `SELECT category, COUNT(*) AS count
-       FROM audit_event
+      `SELECT a.category, COUNT(*) AS count
+       FROM audit_event a
+       LEFT JOIN agent ag ON ag.id = a.actor_id
        ${whereSql}
-       GROUP BY category`,
+       GROUP BY a.category`,
       values
     );
 
@@ -258,10 +261,11 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
 
     // 2. Top actions
     const actQuery = await this.pool.query<{ action: string; count: string }>(
-      `SELECT action, COUNT(*) AS count
-       FROM audit_event
+      `SELECT a.action, COUNT(*) AS count
+       FROM audit_event a
+       LEFT JOIN agent ag ON ag.id = a.actor_id
        ${whereSql}
-       GROUP BY action
+       GROUP BY a.action
        ORDER BY count DESC
        LIMIT 5`,
       values
@@ -273,12 +277,14 @@ export class AuditRepositoryPg implements AuditRepositoryPort {
     }));
 
     // 3. Top actors
+    const actorWhereClauses = [...whereClauses, "a.actor_id IS NOT NULL"];
+    const actorWhereSql = `WHERE ${actorWhereClauses.join(" AND ")}`;
+
     const actorQuery = await this.pool.query<{ actor_id: string; actor_name: string; count: string }>(
       `SELECT a.actor_id, COALESCE(ag.name, 'Sistema') AS actor_name, COUNT(*) AS count
        FROM audit_event a
        LEFT JOIN agent ag ON ag.id = a.actor_id
-       ${whereSql}
-       WHERE a.actor_id IS NOT NULL
+       ${actorWhereSql}
        GROUP BY a.actor_id, ag.name
        ORDER BY count DESC
        LIMIT 5`,

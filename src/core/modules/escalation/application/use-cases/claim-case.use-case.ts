@@ -8,6 +8,7 @@ import type { EscalationRepositoryPort } from "../ports/escalation.repository.po
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import { assertCanWriteCase, resolveActingAgent } from "./agent-case-auth";
+import { isGeneralDepartment } from "../../../departments/application/services/general-department.helper";
 
 export type ClaimCaseDeps = {
   caseRepo: CaseRepositoryPort;
@@ -47,7 +48,16 @@ export class ClaimCaseUseCase {
 
     await this.deps.caseRepo.setAssignedAgent(aggregate.case.id, agent.id);
 
-    const targetDepartmentId = aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;
+    // Si el caso está en el pool de triage (sin departamento) o asignado a General/fallback,
+    // y el agente pertenece a un departamento especializado, adopta el departamento del agente.
+    const isGeneralOrTriage = await isGeneralDepartment(
+      this.deps.departmentRepo,
+      aggregate.case.departmentId,
+    );
+    const targetDepartmentId =
+      isGeneralOrTriage && agent.primaryDepartmentId
+        ? agent.primaryDepartmentId
+        : aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;
 
     const nextStatus =
       aggregate.case.status === "COMPLETED" || aggregate.case.status === "CANCELLED"
@@ -56,7 +66,7 @@ export class ClaimCaseUseCase {
 
     if (
       aggregate.case.status !== nextStatus ||
-      (aggregate.case.departmentId === null && targetDepartmentId !== null)
+      aggregate.case.departmentId !== targetDepartmentId
     ) {
       await this.deps.caseRepo.applyTransition({
         caseId: aggregate.case.id,

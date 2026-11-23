@@ -207,11 +207,12 @@ export class ZernioHistoryGatewayHttp implements ZernioHistoryPort {
 
       const pageItems = body.data || [];
       for (const item of pageItems) {
+        const convId = item.id || (item as { _id?: string })._id || "";
         const phone = (item.participantId || item.participantUsername || "").replace(/\D/g, "");
-        if (!phone) continue;
+        if (!convId || !phone) continue;
 
         conversations.push({
-          id: item.id,
+          id: convId,
           participantId: phone,
           participantName: item.participantName || item.participantUsername || null,
           lastMessage: item.lastMessage || null,

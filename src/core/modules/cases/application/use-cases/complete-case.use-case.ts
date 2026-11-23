@@ -123,6 +123,7 @@ export class CompleteCaseUseCase {
       resourceType: "case",
       resourceId: aggregate.case.id,
       actorId: input.agentUserId,
+      departmentId: aggregate.case.departmentId,
       metadata: { closeReason, resolutionNote: input.resolutionNote ?? null },
     });
     this.deps.logger.info({ caseId: result.case.id, closeReason }, "caso completado por agente");

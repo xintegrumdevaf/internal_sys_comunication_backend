@@ -228,11 +228,11 @@ describe("TransferCaseUseCase - Auto-asignación al transferir de área", () => 
     expect(escalation?.status).toBe("ASSIGNED");
   });
 
-  it("asigna al agente activo mediante fallbackToAnyActive si nadie tiene autoAssignEnabled activo", async () => {
-    const { caseRepo, agentRepo, transferCase, support, billing } = buildTestStack();
+  it("no asigna a agentes con autoAssignEnabled=false; deja el caso en cola (ESCALATED, assignedAgentId=null)", async () => {
+    const { caseRepo, agentRepo, messageRepo, escalationRepo, transferCase, support, billing } = buildTestStack();
 
-    // Agente activo en facturación pero con autoAssignEnabled: false
-    const fallbackAgent = agentRepo.seed({
+    // Agente en facturación pero con autoAssignEnabled: false (no disponible en turno)
+    agentRepo.seed({
       name: "Sara Terán",
       email: "sara@isp.local",
       role: "agent",
@@ -253,11 +253,18 @@ describe("TransferCaseUseCase - Auto-asignación al transferir de área", () => 
     const transferred = await transferCase.execute({
       caseId: currentCase.id,
       toDepartmentId: billing.id,
-      reason: "Transferencia con fallback",
+      reason: "Transferencia a facturación",
       agentUserId: "user-admin",
     });
 
-    expect(transferred.assignedAgentId).toBe(fallbackAgent.id);
+    // No debe forzar asignación a Sara Terán si no tiene autoAssignEnabled activo
+    expect(transferred.assignedAgentId).toBeNull();
+    expect(transferred.status).toBe("ESCALATED");
+
+    const messages = await messageRepo.listByConversation("conv-fallback-1");
+    const systemMsg = messages.find((m) => m.author === "system");
+    expect(systemMsg?.body).toContain("al área Facturación por Agente (en cola de espera)");
+    expect(systemMsg?.body).not.toContain("Sara Terán");
   });
 
   it("queda sin asignar (null) de forma segura si el nuevo departamento no tiene ningún agente activo", async () => {
@@ -358,6 +365,81 @@ describe("TransferCaseUseCase - Auto-asignación al transferir de área", () => 
     });
 
     expect(transferred.assignedAgentId).toBe(specificAgent.id);
+    expect(transferred.departmentId).toBe(billing.id);
+  });
+
+  it("diferencia claramente el mensaje si se transfiere solo al área y el sistema auto-asigna por disponibilidad", async () => {
+    const { caseRepo, agentRepo, messageRepo, transferCase, support, billing } = buildTestStack();
+
+    const actor = agentRepo.seed({
+      name: "Admin Global",
+      email: "admin@isp.local",
+      role: "admin",
+      primaryDepartmentId: support.id,
+      active: true,
+    });
+
+    const onlineAgent = agentRepo.seed({
+      name: "Sara Terán",
+      email: "sara@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+      active: true,
+      autoAssignEnabled: true,
+    });
+
+    const { case: currentCase } = await caseRepo.create({
+      conversationId: "conv-auto-msg-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: support.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    await transferCase.execute({
+      caseId: currentCase.id,
+      toDepartmentId: billing.id,
+      reason: "Requiere atención del área destino",
+      agentUserId: actor.id,
+    });
+
+    const messages = await messageRepo.listByConversation("conv-auto-msg-1");
+    const systemMsg = messages.find((m) => m.author === "system");
+    expect(systemMsg).toBeDefined();
+    expect(systemMsg?.body).toBe(
+      "Caso transferido al área Facturación por Admin Global. Asignado automáticamente a Sara Terán. Motivo: Requiere atención del área destino",
+    );
+  });
+
+  it("permite transferir directamente a un usuario del departamento aunque esté inactivo (active: false)", async () => {
+    const { caseRepo, agentRepo, transferCase, support, billing } = buildTestStack();
+
+    const inactiveAgent = agentRepo.seed({
+      name: "Agente Inactivo",
+      email: "inactivo@isp.local",
+      role: "agent",
+      primaryDepartmentId: billing.id,
+      active: false,
+    });
+
+    const { case: currentCase } = await caseRepo.create({
+      conversationId: "conv-inactive-1",
+      workflowType: "SUPPORT_INTERNET",
+      departmentId: billing.id,
+      context: { workflowType: "SUPPORT_INTERNET", data: {} },
+      initialState: "VALIDATE_CLIENT",
+      expiresAt: null,
+    });
+
+    const transferred = await transferCase.execute({
+      caseId: currentCase.id,
+      toAgentId: inactiveAgent.id,
+      reason: "Transferencia a agente inactivo en mi departamento",
+      agentUserId: "user-admin",
+    });
+
+    expect(transferred.assignedAgentId).toBe(inactiveAgent.id);
     expect(transferred.departmentId).toBe(billing.id);
   });
 });

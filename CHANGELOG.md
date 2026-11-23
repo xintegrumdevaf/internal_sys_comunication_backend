@@ -9,6 +9,197 @@ All notable changes to this project will be documented in this file.
   - Agregado `POST /api/auth/sso-exchange` para validar el JWT firmado por `ERP_sys_backend` (`ERP_JWT_SECRET` / `JWT_SECRET`), verificar permiso sobre el módulo `isp` (`isSuperAdmin` o `modules.includes("isp")`), mapear el rol (`admin` / `manager` / `agent`), emitir sesión real en Redis y responder `{ data, token }` + cookie de sesión.
   - Configurado `PORT=4200` en desarrollo para coexistir en la misma suite sin colisión con `CRM_sys_frontend` (`3000`), `ERP_sys_frontend` (`3100`), `CRM_sys_backend` (`4000`) y `ERP_sys_backend` (`4100`).
 
+## [0.2.19] - 2026-11-18
+
+### Fixed & Improved
+- **Transferencia Directa de Casos a Personal del Mismo Departamento (`transfer-case.use-case.ts`, `test/cases/use-cases/transfer-case.use-case.test.ts`)**:
+  - *Contexto y Requerimiento*:
+    Los operadores y supervisores de área requieren transferir casos manualmente a compañeros de su mismo departamento (por ejemplo, reasignación de casos en Facturación o Cartera para seguimiento histórico o continuidad de atención), aun cuando la cuenta del asesor destino se encuentre temporalmente inactiva (`active: false`).
+  - *Problema Previo*:
+    `TransferCaseUseCase` evaluaba `if (!assignedAgent || !assignedAgent.active)` arrojando una excepción HTTP 404 (`Agente destino ${input.toAgentId} no encontrado o inactivo`), bloqueando transferencias manuales intencionales dentro del propio equipo.
+  - *Resolución y Justificación*:
+    1. **Eliminación de Restricción Restrictiva**: Se modificó la validación para exigir únicamente que el agente exista en base de datos (`if (!assignedAgent)`), permitiendo derivar el caso al asesor especificado independientemente de su estado de activación.
+    2. **Pruebas Automatizadas**: Se incorporó el test unitario `"permite transferir directamente a un usuario del departamento aunque esté inactivo (active: false)"` en `test/cases/use-cases/transfer-case.use-case.test.ts`, asegurando la asignación del `assignedAgentId` y la preservación del `departmentId` con 8/8 pruebas en verde.
+
+- **Middleware CORS Universal y Soporte de Credenciales en Entornos Locales (`cors.middleware.ts`, `container.ts`, `.env`)**:
+  - *Contexto y Problema*:
+    Al acceder al frontend desde puertos locales alternativos (como `http://localhost:8080`), las solicitudes HTTP del navegador (`/api/auth/me`, `/api/departments`, `/api/auth/login`) eran bloqueadas por CORS con el error: `Response to preflight request doesn't pass access control check: The value of the 'Access-Control-Allow-Credentials' header in the response is '' which must be 'true' when the request's credentials mode is 'include'`.
+  - *Causas Raíz*:
+    1. La lista blanca estricta de orígenes no contemplaba puertos de desarrollo dinámicos distintos a `5173`.
+    2. Las peticiones preflight `OPTIONS` no emitían de manera consistente `Access-Control-Allow-Credentials: true` ni `Access-Control-Max-Age` al reflejar el origen, provocando que el navegador abortara la petición previa a la autenticación.
+    3. `FRONTEND_URL` no se propagaba dinámicamente desde el contenedor de inyección de dependencias hacia el middleware CORS.
+  - *Resolución y Justificación*:
+    1. **Soporte Dinámico de Orígenes Locales**: Se implementó la verificación regex `isLocalOrigin` (`/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i`), permitiendo cualquier puerto local de forma segura en entornos de desarrollo y pruebas.
+    2. **Propagación de `FRONTEND_URL`**: En `container.ts`, se actualizó la invocación a `createCors(env.CORS_ALLOWED_ORIGINS, env.NODE_ENV, env.FRONTEND_URL)`.
+    3. **Preflight y Credenciales Robustas**: Se garantiza la emisión de `Access-Control-Allow-Credentials: true`, `Access-Control-Max-Age: 86400` y respuesta `204 No Content` para cualquier solicitud `OPTIONS`.
+
+- **Corrección de Entrypoint para Ejecución de Producción (`package.json`)**:
+  - *Problema*: `package.json` referenciaba `"main": "dist/index.js"` y `"start": "node dist/index.js"`. Debido a la presencia de `test` y `scripts` en el proyecto TypeScript, `tsc` compila manteniendo la estructura bajo `dist/src/index.js`, lo que provocaba un fallo fatal `Cannot find module` al iniciar en modo compilado.
+  - *Resolución*: Se ajustaron `"main"` y `"start"` a `dist/src/index.js`.
+
+## [0.2.18] - 2026-11-16
+
+### Fixed & Improved
+- **Adopción Automática de Departamento Especializado al Reclamar o Responder Casos de General / Triage (`claim-case.use-case.ts`, `reply-as-human.use-case.ts`, `general-department.helper.ts`, `test/escalation/claim-triage-case.test.ts`)**:
+  - *Contexto y Problema*:
+    Cuando una conversación era derivada a la bandeja general por falta de clasificación o por mensajes no procesables (ej. notas de voz sin transcripción o fallbacks de triage), el ticket quedaba etiquetado con la pastilla naranja `GENERAL`. Al ser tomado o respondido por un asesor especializado (por ejemplo, Emilie Matiz del departamento de `Facturación`), el sistema asignaba al asesor pero mantenía permanentemente la pastilla `GENERAL` en lugar de mostrar `FACTURACIÓN`, lo que generaba confusión visual y descuadraba las métricas y filtros por área.
+  - *Causas Raíz*:
+    1. En `ClaimCaseUseCase`, la resolución del departamento utilizaba el operador de coalescencia nula: `const targetDepartmentId = aggregate.case.departmentId ?? agent.primaryDepartmentId ?? null;`. Como `departmentId` ya apuntaba al UUID del departamento `General` (resuelto por el fallback de escalación), el `primaryDepartmentId` del asesor era ignorado por completo.
+    2. La condición para invocar `applyTransition` exigía `aggregate.case.status !== nextStatus || (aggregate.case.departmentId === null && targetDepartmentId !== null)`. Si el caso ya tenía departamento General (no `null`) o el estado ya era `HUMAN_ACTIVE`, no se aplicaba ninguna transición de departamento en base de datos.
+    3. `ReplyAsHumanUseCase` no verificaba si el caso activo se encontraba en `General` o `Triage` al momento de enviar una respuesta de agente humano.
+  - *Resolución y Justificación*:
+    1. **Helper de Detección de General/Triage (`isGeneralDepartment`)**: Se introdujo una función en `general-department.helper.ts` que identifica si un `departmentId` es nulo (pool de triage) o si corresponde a cualquiera de los slugs y nombres de fallback general (`general`, `atencion`, `atencion-al-cliente`, `recepcion`).
+    2. **Adopción Inmediata en Claim**: En `ClaimCaseUseCase`, si el caso se encuentra en triage o en `General` y el agente posee un departamento primario especializado, `targetDepartmentId` adopta inmediatamente `agent.primaryDepartmentId`. Además, se actualiza la condición a `aggregate.case.departmentId !== targetDepartmentId` para persistir la transición en la tabla `case` y actualizar el registro en `escalation`.
+    3. **Adopción al Responder**: En `ReplyAsHumanUseCase`, al enviar una respuesta humana se evalúa el caso activo; si aún reside en General o Triage, se actualiza de forma automática al departamento primario del asesor actuante.
+    4. **Protección de Departamentos Técnicos**: Si el caso ya se encontraba clasificado en un área técnica específica (por ejemplo, `Soporte Técnico`), la asignación directa o respuesta no lo sobrescribe, reservando el cambio de área técnica exclusivamente a la acción explícita de `Transferir / Delegar` (`TransferCaseUseCase`).
+    5. **Pruebas Automatizadas**: Se ampliaron los tests en `test/escalation/claim-triage-case.test.ts` validando la adopción de Facturación desde General al reclamar, la adopción al responder, y la preservación de departamentos técnicos legítimos.
+
+- **Soporte Multi-Línea y Acumulación de Deudas en Estados Anulados, Cortados y Retirados en Consulta de Saldo (`n8n/check-balance.json`)**:
+  - *Contexto y Problema*:
+    En el flujo de consulta de saldo (`check-balance`), cuando un cliente con el mismo número de cédula poseía múltiples contratos o registros con estados distintos a `ACTIVO` (por ejemplo contratos `CORTADO`, `ANULADO` o `RETIRADO` con saldo pendiente en la columna `DEBE`), el sistema solo tomaba la primera fila que cumpliera una condición restrictiva o devolvía 0.00, omitiendo deudas acumuladas de contratos previos.
+  - *Resolución y Justificación*:
+    Se actualizó el nodo de consolidación de datos del workflow de n8n para iterar la totalidad de filas devueltas (`$input.all()`), sumando de forma acumulativa todo saldo pendiente (`DEBE > 0`) sin importar si el contrato se encuentra en estado `ACTIVO`, `CORTADO`, `ANULADO` o `RETIRADO`, garantizando que el saldo final informado al cliente y a los asesores refleje la deuda total real consolidada.
+
+- **Corrección de Error 500 por Mocks Parciales de `CaseRepositoryPort` en CI/CD (`reply-as-human.use-case.ts`, `general-department.helper.ts`, `local-media-storage.test.ts`, `campaign-file-parser.service.ts`, `campaign-use-cases.spec.ts`)**:
+  - *Contexto y Problema*:
+    Durante la ejecución del pipeline automatizado de GitHub Actions (`test-and-deploy`) en la rama `develop`, la suite de pruebas unitarias falló con `exit code 1` debido a la aserción:
+    `AssertionError: expected 500 to be 201 > test/conversations/local-media-storage.test.ts:269:27`.
+    671 pruebas pasaron en verde y únicamente falló el test de envío de adjuntos multimedia desde la bandeja de asesor.
+  - *Causas Raíz*:
+    1. En `test/conversations/local-media-storage.test.ts`, la prueba utilizaba un mock parcial de `CaseRepositoryPort` que incluía únicamente `getAutomationState`, `setAutomationEnabled` y `appendEvent`, pero no definía los métodos `findById` ni `listByConversation`.
+    2. Al invocarse `reply-as-human.use-case.ts`, el nuevo flujo de adopción de departamento intentaba ejecutar `caseRepo.findById(effectiveCaseId)`. Al ser indefinido en el mock, se produjo una excepción no controlada (`TypeError: caseRepo.findById is not a function`), resultando en una respuesta HTTP `500 Internal Server Error` capturada por Express.
+  - *Resolución y Justificación*:
+    1. **Blindaje Defensivo en Casos de Uso (`reply-as-human.use-case.ts`)**: Se incorporaron validaciones estrictas con `typeof caseRepo.findById === "function"`, `typeof caseRepo.listByConversation === "function"`, `typeof caseRepo.applyTransition === "function"` y `typeof agentRepo.findById === "function"` antes de invocar cualquier método opcional sobre los repositorios inyectados, garantizando total resiliencia frente a mocks parciales en pruebas y llamadas desacopladas.
+    2. **Blindaje en Helper de Departamento (`general-department.helper.ts`)**: Se añadió protección defensiva en `isGeneralDepartment` para verificar que `departmentRepo` cuente con el método `findById` antes de consultarlo.
+    3. **Completitud del Mock en Pruebas (`local-media-storage.test.ts`)**: Se añadieron `findById: vi.fn().mockResolvedValue(null)` y `listByConversation: vi.fn().mockResolvedValue([])` al mock del repositorio de casos.
+    4. **Depuración de Warnings de Linter**: Se corrigió el escape redundante `\.` dentro de la clase de caracteres en `campaign-file-parser.service.ts` y se removieron importaciones sin uso en `campaign-use-cases.spec.ts`.
+
+## [0.2.17] - 2026-11-16
+
+### Fixed & Improved
+- **Auditoría Forense de Turnos de Asesores (Switch ON / OFF) y Trazabilidad Administrativa (`update-agent-availability.use-case.ts`, `update-agent.use-case.ts`, `auth.router.ts`, `agents.router.ts`, frontend `audit-event.ts`, `AuditLogView.tsx`)**:
+  - *Contexto y Problema*:
+    En el panel de supervisión y control operativo (`/auditoria`), no existía un registro explícito e identificable cuando un asesor abría su turno (switch de asignación automática en ON) o lo cerraba/pausaba (switch en OFF). Cuando un asesor cambiaba su disponibilidad, se emitía una acción genérica sin indicación de estado, y cuando un administrador modificaba el switch desde el directorio de agentes (`/usuarios`), únicamente se registraba `AGENT_UPDATED` con metadatos genéricos de cambio de campos (`changed: ["autoAssignEnabled"]`), impidiendo auditorías de cumplimiento horario y control laboral.
+  - *Causas Raíz*:
+    1. `UpdateAgentAvailabilityUseCase` registraba la acción genérica `AGENT_AVAILABILITY_CHANGED` sin indicar el estado del switch ni los diferenciales de estado estructurados (`beforeState` / `afterState`).
+    2. `UpdateAgentUseCase` no detectaba la transición de `autoAssignEnabled` al ser modificado por administradores, omitiendo un evento de inicio o fin de turno asociado al agente objetivo.
+    3. `auth.router.ts` y `agents.router.ts` no propagaban los datos de red del actor (`ipAddress`, `userAgent`, `correlationId`) en estas operaciones de disponibilidad.
+  - *Resolución y Justificación*:
+    1. **Acciones Explícitas de Turno**: Se crearon y registraron las acciones de auditoría `AGENT_SHIFT_STARTED` (cuando `autoAssignEnabled` pasa a `true` / Switch ON) y `AGENT_SHIFT_ENDED` (cuando pasa a `false` / Switch OFF), categorizadas como `operational`.
+    2. **Metadatos y State Diff Enriquecidos**: Cada evento registra `switch: "ON" | "OFF"`, `shiftStatus: "OPEN" | "CLOSED"`, `previousAutoAssign`, `currentAutoAssign`, descripción legible en lenguaje natural, y los estados completos `beforeState` y `afterState` para el visor de diferencias.
+    3. **Trazabilidad de Cierre por Cierre de Sesión**: En `auth.router.ts`, el cierre de sesión (`POST /api/auth/logout`) desactiva automáticamente la disponibilidad del asesor registrando `AGENT_SHIFT_ENDED` antes de `AGENT_LOGOUT`, evitando que agentes desconectados queden con turno abierto en base de datos.
+    4. **Auditoría de Modificación por Administrador**: En `UpdateAgentUseCase`, cuando un admin cambia el switch de un agente desde la tabla de usuarios, se genera un evento `AGENT_SHIFT_STARTED` o `AGENT_SHIFT_ENDED` asociando al administrador como `actorId`, con `changedByAdmin: true` y el nombre y correo del asesor objetivo en los metadatos.
+    5. **Trazabilidad de Red**: Se agregaron `ipAddress`, `userAgent` y `correlationId` en la invocación de `updateAvailability` y `updateAgent`.
+
+- **Corrección de Error 500 (Doble Cláusula `WHERE`) y Resolución de Departamentos en Filtro de Auditoría (`audit.repository.pg.ts`, `reply-as-human.use-case.ts`, `complete-case.use-case.ts`, `test/audit/audit-repository-pg.unit.test.ts`)**:
+  - *Contexto y Problema*:
+    Al aplicar un filtro por área/departamento (por ejemplo, "Facturación") en la sección de Auditoría & Logs (`/auditoria`), la petición HTTP fallaba con un error `500 Internal Server Error`, disparando la notificación toast roja *"Error interno inesperado"* y no mostrando información del área. Adicionalmente, casi todos los eventos históricos de atención y respuestas figuraban en la tabla con departamento `Global / N/A`, y al filtrar por área no aparecían las actividades realizadas por los asesores de dicho departamento.
+  - *Causas Raíz*:
+    1. **Sintaxis SQL Inválida en Estadísticas (`AuditRepositoryPg.getStats`)**: Al filtrar por `departmentId`, `from` o `to`, la variable `whereSql` generaba `WHERE a.department_id = $1`. Posteriormente, la consulta de `topActors` concatenaba literalmente `WHERE a.actor_id IS NOT NULL` a continuación de `${whereSql}`, resultando en dos cláusulas `WHERE` contiguas (`... WHERE department_id = $1 WHERE a.actor_id IS NOT NULL ...`). PostgreSQL rechazaba la consulta con `syntax error at or near "WHERE"`.
+    2. **Eventos con `department_id` Nulo**: Casos de uso como `ReplyAsHumanUseCase` (`CONVERSATION_REPLY`) y `CompleteCaseUseCase` (`CASE_COMPLETED`) no enviaban el `departmentId` a `auditRepo.record`, guardando `department_id = null` en la base de datos a pesar de que el caso o el asesor pertenecían a un área específica.
+  - *Resolución y Justificación*:
+    1. **Unificación de Condiciones `WHERE`**: En `getStats()`, las cláusulas condicionales se consolidan en un único arreglo (`actorWhereClauses = [...whereClauses, "a.actor_id IS NOT NULL"]`) unidas mediante `AND`, garantizando sintaxis SQL válida en todos los escenarios de filtrado.
+    2. **Resolución Jerárquica con `COALESCE`**: En `list()` y `getStats()`, se implementó `COALESCE(a.department_id, ag.primary_department_id)` junto con `LEFT JOIN department ag_d ON ag_d.id = ag.primary_department_id`. Si un evento no tiene departamento explícito, el sistema lo asocia automáticamente al área del asesor actuante (`primaryDepartmentId`), mostrando el nombre del departamento (ej. "Facturación") en la tabla y permitiendo que el filtro por área devuelva todas las actividades de su personal.
+    3. **Persistencia Directa de Departamento**: Se actualizó `reply-as-human.use-case.ts` y `complete-case.use-case.ts` para resolver e insertar siempre el `departmentId` del caso o del asesor al registrar eventos en `audit_event`.
+    4. **Pruebas Unitarias de Repositorio**: Se creó la suite `test/audit/audit-repository-pg.unit.test.ts` con mock de `Pool` que valida que las consultas generadas por `getStats` y `list` con filtros de departamento no tengan doble `WHERE` y contengan los `JOIN` y `COALESCE` requeridos.
+
+- **Eliminación de Asignación Forzada a Asesores Desconectados en Transferencias (`transfer-case.use-case.ts`, `auto-assign-agent.service.ts`, `test/cases/use-cases/transfer-case.use-case.test.ts`)**:
+  - *Contexto y Problema*:
+    Al transferir un caso a otra área con la opción por defecto *"Auto-asignar automáticamente (menor carga)"* o sin seleccionar asesor específico, el caso se asignaba forzosamente a personal que se encontraba fuera de turno o desconectado (por ejemplo, Sara Terán en Facturación con `autoAssignEnabled = false`). Además, el mensaje de sistema en la conversación afirmaba falsamente que el operador que realizó la transferencia había derivado personalmente el caso a ese asesor específico (`"Caso transferido al área Facturación (Sara Terán) por Admin Global..."`), confundiendo a los clientes y al equipo.
+  - *Causas Raíz*:
+    1. En `AutoAssignAgentService`, existía la opción `fallbackToAnyActive: true`, que ante la falta de asesores con turno abierto (`autoAssignEnabled === true`), seleccionaba a cualquier agente activo del área sin importar si estaba disponible para recibir casos.
+    2. En `TransferCaseUseCase`, se pasaba `fallbackToAnyActive: true` incondicionalmente, obligando la asignación a un agente desconectado en lugar de dejar el ticket en cola para el personal en turno.
+    3. El mensaje de sistema concatenaba el nombre del agente auto-asignado en la misma oración de la transferencia ejecutada por el operador.
+  - *Resolución y Justificación*:
+    1. **Eliminación Definitiva de `fallbackToAnyActive`**: Se removió el parámetro y la lógica de fallback en `AutoAssignAgentService`. La auto-asignación exige estrictamente `active === true && autoAssignEnabled === true`. Si ningún asesor del área tiene el turno abierto, el servicio retorna `null`.
+    2. **Encolamiento Seguro de Casos Transferidos**: En `TransferCaseUseCase`, si ningún asesor del área destino está en turno, el caso se transfiere de forma segura manteniéndose en estado `ESCALATED` con escalación en `PENDING` para ser asignado en cuanto un asesor active su turno o lo reclame.
+    3. **Desacoplamiento de Mensajes de Sistema**: El mensaje generado para el operador transfiere formalmente el caso al área (`"Caso transferido al área Facturación por Admin Global. Motivo: ..."`). Si el sistema auto-asigna a un asesor en turno, se emite el evento de asignación correspondiente sin atribuir la elección al operador.
+
+## [0.2.16] - 2026-11-13
+
+### Fixed & Improved
+- **Resolución Definitiva de Normalización de Teléfonos y Extracción de `_id` de MongoDB en Zernio (`zernio-sender.http.ts`, `container.ts`, `zernio-webhook.router.ts`, `zernio-history.gateway.http.ts`, frontend `customer-service-window.ts`, `delivery-error.ts`)**:
+  - *Contexto y Problema*:
+    A pesar de las mejoras previas, los asesores humanos continuaban recibiendo el error HTTP `400 Bad Request`: `{"error":"WhatsApp conversations must start with an approved template...","code":"TEMPLATE_REQUIRED"}` al responder a clientes cuyas conversaciones se habían originado horas antes (por ejemplo, clientes que escribieron a las 05:52 a.m. o 07:50 a.m. y recibieron respuesta a las 11:56 a.m., con solo 4-6 horas transcurridas). Además, la interfaz continuaba bloqueando el chat mostrando el banner *"VENTANA DE 24H INACTIVA"* y la tarjeta de error *"Ventana de WhatsApp (24h) cerrada (Requiere plantilla)"*, impidiendo enviar texto libre a pesar de que la ventana de Meta estaba 100% activa.
+  - *Causas Raíz Identificadas*:
+    1. **Discrepancia en Formatos de Teléfono (Claves Desalineadas)**: En Ecuador, los números móviles poseen 3 representaciones: internacional (`593995848829`, 12 dígitos), nacional (`995848829`, 9 dígitos) y local con 0 (`0995848829`, 10 dígitos). Si Zernio o el webhook registraban el chat bajo un formato (ej. `995848829`) pero el sistema buscaba el número internacional (`593995848829`), la coincidencia de clave en memoria y Redis resultaba nula (`undefined`), provocando que `resolveConversationId` retornara `null`.
+    2. **Identificadores `_id` de MongoDB vs `id` Virtual**: Los endpoints de la API de Zernio devuelven documentos de MongoDB serializados directamente en JSON donde la clave primaria es `_id` y no `id`. Al invocar `item.id`, este valor era `undefined`, por lo que la función `registerConversation(participant, item.id)` no guardaba nada en caché ni en Redis.
+    3. **Búsqueda sin Paginación en Zernio (`searchConversationInZernio`)**: Al fallar la coincidencia exacta de la búsqueda directa, el listado general consultaba una única página de 100 conversaciones sin utilizar el cursor de paginación (`nextCursor`). En un sistema con más de 2,300 conversaciones, cualquier cliente fuera de los primeros 100 registros nunca era indexado.
+    4. **Falta de Precarga en Arranque**: Tras un reinicio o despliegue del backend, las conversaciones previas no estaban en Redis hasta que llegara un nuevo webhook entrante. Si el operador respondía antes de un nuevo mensaje del cliente, la caché estaba vacía.
+    5. **Falso Positivo de Ventana 24h en Frontend (`customer-service-window.ts`)**: En el frontend, la función `isWhatsAppSessionWindowError` catalogaba cualquier error que contuviera la palabra `"template"` o `"plantilla"` como una expiración de 24 horas (`131047`). Al fallar el envío con `TEMPLATE_REQUIRED`, el frontend marcaba el mensaje como fallido por 24h, lo que a su vez activaba `isCustomerServiceWindowClosed = true` y bloqueaba la interfaz con el banner amarillo.
+  - *Resolución y Justificación*:
+    1. **Normalización Multi-Variante (`getPhoneVariations`)**: Se implementó una función que descompone y genera simultáneamente todas las variantes válidas de un número (`593...`, `09...`, `9...`). Tanto `registerConversation` como `resolveConversationId` almacenan e indexan todas las variantes en memoria y en Redis (`zernio:conv:${v}`), garantizando un match exacto sin importar el formato enviado por Zernio o ingresado en la base de datos.
+    2. **Soporte Universal de Identificadores y Participantes**: Se incorporaron los extractores robustos `extractConversationId` (que evalúa `item.id`, `item._id` y `item.conversationId`) y `extractParticipantPhone` (que recorre `participantId`, `participantPhone`, `participant.phone`, `recipient.phone`, `phone`, `metadata.phone`, etc.), asegurando que ningún dato devuelto por la API de Zernio se pierda.
+    3. **Búsqueda Paginada con Cursor en Zernio**: Se rediseñó `searchConversationInZernio` para recorrer con cursor hasta 5 páginas consecutivas (`limit=100`, hasta 500 conversaciones escaneadas), indexando en caliente todas las conversaciones encontradas y retornando de inmediato el ID tan pronto se produce la coincidencia con cualquiera de las variantes del teléfono.
+    4. **Precarga Proactiva al Iniciar (`preloadRecentConversations`)**: Al inicializar el contenedor del backend (`container.ts`), se dispara en segundo plano la precarga de las conversaciones más recientes de Zernio hacia Redis y memoria, de modo que cualquier chat activo queda listo para recibir respuestas humanas sin demoras ni llamadas síncronas bloqueantes.
+    5. **Alineación de Reglas de Ventana de 24h en Frontend**: Se ajustó `customer-service-window.ts` y `delivery-error.ts` en el frontend para que únicamente los errores que contengan marcadores reales de tiempo (`131047`, `24 hours`, `customer service window`, `re-engagement`) sean tratados como ventana cerrada, distinguiendo claramente los requerimientos de plantilla en creación de chat sin alterar el cómputo de la ventana de atención activa.
+
+- **Corrección de Rama Duplicada en Cadena Condicional de `sendMedia` en CI/CD (`zernio-sender.http.ts`)**:
+  - *Contexto y Problema*:
+    Durante la ejecución del pipeline automatizado de GitHub Actions (`test-and-deploy`), la etapa de compilación y verificación estricta de TypeScript falló con `exit code 1`, reportando el error `src/core/modules/conversations/infrastructure/zernio/zernio-sender.http.ts#L786: This branch can never execute. Its condition is a duplicate or covered by previous conditions in the if-else-if chain`.
+  - *Causa Raíz*:
+    Al incorporar el reintento de auto-recuperación ante `TEMPLATE_REQUIRED` dentro de `sendMedia`, la cláusula condicional `else if (!existingConversationId && response.status === 400 && ...)` quedó replicada dos veces dentro de la misma estructura `if-else-if` (una tras el bloque de *conversación no encontrada* y otra tras el de *cuenta no encontrada*), originando una rama inalcanzable (dead code) detectada por el linter.
+  - *Resolución y Justificación*:
+    Se depuró la estructura de control en `sendMedia`, removiendo la rama redundante y dejando una secuencia estrictamente unificada: 1) reintento por `404 conversation not found`, 2) auto-recuperación de ID y reintento por `400 TEMPLATE_REQUIRED`, y 3) refresco de credenciales por `404 account not found`. Esto garantiza la aprobación del build en el CI/CD preservando la resiliencia del envío de archivos adjuntos.
+
+- **Persistencia en Redis y Auto-Recuperación de Conversaciones en Zernio ante Falso Positivo de Ventana Cerrada (`zernio-sender.http.ts`, `container.ts`, `zernio-webhook.router.ts`, `meta-delivery-error.ts`)**:
+  - *Contexto y Problema*:
+    Al intentar responder un asesor humano (o enviar texto o archivos multimedia) a un cliente en WhatsApp vía Zernio dentro de la ventana de atención activa (por ejemplo, habiendo transcurrido apenas 3 horas desde el último mensaje entrante del cliente), la entrega fallaba con un error HTTP `400 Bad Request`: `{"error":"WhatsApp conversations must start with an approved template, or with a Direct Send utility message...","code":"TEMPLATE_REQUIRED"}`. En la interfaz web, el sistema alertaba erróneamente *"Ventana de WhatsApp (24h) cerrada (Requiere plantilla)"* con el banner amarillo *"VENTANA DE 24H INACTIVA"*, impidiendo la comunicación a pesar de que la ventana de 24 horas estaba completamente abierta y de que en el panel oficial de Zernio la conversación figuraba sin ningún error.
+  - *Causa Raíz*:
+    1. En `zernio-sender.http.ts`, el mapa de asociación entre el número de teléfono del cliente (`waPhone`) y el identificador de conversación de Zernio (`conversationId`) se guardaba exclusivamente en memoria RAM volátil (`private readonly conversationIdCache = new Map()`). Ante cualquier reinicio, despliegue o reciclaje del proceso Node.js, dicha caché se borraba.
+    2. Al ocurrir un fallo de caché en memoria, `resolveConversationId` intentaba consultar las conversaciones a Zernio vía `GET /inbox/conversations?platform=whatsapp` sin enviar el identificador de cuenta `accountId`, sin parámetro de búsqueda `search`, y sin paginación (limitándose a la primera página de 10-20 resultados). Al existir cientos de chats, el contacto no figuraba en esa primera página.
+    3. Al no encontrar el `conversationId`, el remitente asumía erróneamente que la conversación no existía en Zernio y ejecutaba una petición a `POST /inbox/conversations` (endpoint para *crear e iniciar* un chat nuevo desde cero). Dado que las políticas de Meta exigen que todo inicio de conversación nueva por parte de la empresa se realice mediante plantillas aprobadas, Zernio rechazaba la llamada con `400 TEMPLATE_REQUIRED`.
+    4. En `meta-delivery-error.ts`, la función `is24HourWindowError` consideraba erróneamente cualquier mensaje que contuviera `"template"` y `"required"` como una expiración de la ventana de 24 horas (error Meta 131047), traduciéndolo como *"Ventana de 24 horas cerrada: Han transcurrido más de 24h..."*, generando una falsa alarma que confundía a los operadores.
+  - *Resolución y Justificación*:
+    1. **Persistencia Distribuida en Redis (`zernio-sender.http.ts`, `container.ts`)**: Se inyectó `redisClient` en el constructor de `ZernioSenderHttp` y se implementó almacenamiento bidireccional (`zernio:conv:${cleanPhone}` y `zernio:phone:${conversationId}`) con retención TTL de 30 días (`2592000s`). Cualquier reinicio del backend preserva ahora el identificador de la conversación en Zernio.
+    2. **Búsqueda Activa por Teléfono en Zernio (`searchConversationInZernio`)**: Se implementó una consulta que envía `accountId` y el término de búsqueda `search`, evaluando variantes del número con y sin prefijo internacional (ej. `593990931770`, `990931770` y `0990931770`), con fallback automático a listado ampliado (`limit=100`) si el buscador no indexó el contacto de inmediato.
+    3. **Mecanismo de Auto-Recuperación y Reintento Transparente (`sendText` y `sendMedia`)**: Si al despachar texto o adjuntos Zernio responde `400 TEMPLATE_REQUIRED` en un intento de creación de chat, el adaptador no falla de inmediato; ejecuta una búsqueda profunda en Zernio para localizar la conversación existente y reintenta de forma automática la entrega a través del endpoint correcto (`POST /inbox/conversations/:id/messages`), entregando el mensaje sin requerir plantilla ni generar errores al asesor.
+    4. **Enriquecimiento del Webhook de Zernio (`zernio-webhook.router.ts`)**: Se amplió la extracción del `conversationId` y `participant` abarcando todas las propiedades posibles del payload (`message.conversationId`, `data.conversationId`, `senderPhoneNumber`, `recipient.phone`, `participantId`, etc.) para registrar la conversación en Redis y memoria desde el primer mensaje entrante o saliente.
+    5. **Desambiguación de Errores de Entrega (`meta-delivery-error.ts`)**: Se ajustó `is24HourWindowError` para exigir menciones explícitas de tiempo o ventana (`131047`, `24 hours`, `customer service window`, `re-engagement`), y se creó una categoría separada para `TEMPLATE_REQUIRED` en inicio de conversación, eliminando falsas alarmas de ventana de 24 horas cerrada cuando la ventana sigue abierta.
+- **Corrección de Error 400 Bad Request en Guardado de Departamentos y Sanitización de Casos Mock (`departments.router.ts`, `update-department.use-case.ts`, frontend `DepartmentsDirectoryPanel.tsx`, `department-mocks.ts`, `department-routing.test.ts`)**:
+  - *Contexto y Problema*:
+    Al intentar modificar o guardar cambios en un departamento desde el panel de administración (por ejemplo, en el área de "Facturación"), la petición HTTP `PUT /api/departments/:id` era rechazada con un error `400 Bad Request` (`VALIDATION_ERROR`, 510 bytes de respuesta), imposibilitando la configuración de límites, visibilidad o casos del área.
+  - *Causa Raíz*:
+    1. En el frontend, el módulo `department-mocks.ts` precargaba una plantilla estática de 33 motivos de atención con identificadores ficticios de cadena (`"mock-case-1"` a `"mock-case-33"`).
+    2. Al guardar el departamento, `DepartmentsDirectoryPanel.tsx` enviaba esos 33 casos dentro del arreglo `cases` del cuerpo de la petición.
+    3. En el backend, el validador Zod `caseItemSchema` exigía estrictamente `id: z.string().uuid().optional()`. Al recibir identificadores no UUID, Zod acumulaba 33 fallos `"Invalid uuid"` concatenados en el error de validación (510 bytes).
+    4. Adicionalmente, si el frontend omitía el `id`, el caso de uso `UpdateDepartmentUseCase` borraba y recreaba todos los casos en PostgreSQL sin reconciliar por clave de intención, lo que generaba saltos de IDs y pérdida de referencias relacionales.
+  - *Resolución y Justificación*:
+    1. En `departments.router.ts`, se flexibilizó la validación del `id` con un transformador tolerante: `z.string().nullish().transform(val => (val && UUID_REGEX.test(val) ? val : undefined))`. Cualquier cadena que no cumpla el estándar UUIDv4 es saneada automáticamente a `undefined` sin rechazar la solicitud HTTP.
+    2. En `caseItemSchema`, se agregó un valor por defecto seguro a `description` (`.default("Sin descripción").pipe(z.string().min(1))`) para prevenir rechazos si un caso nuevo no contiene texto descriptivo aún.
+    3. En `update-department.use-case.ts`, se implementó la reconciliación por `intentKey`: si un caso enviado carece de `id` válido, el caso de uso busca si ya existe un registro con la misma clave de intención (`toIntentKey(item.label)`) en `existingCases`. Si coincide, se reutiliza su `id` existente de PostgreSQL, evitando ciclos innecesarios de eliminación y recreación.
+    4. En el frontend (`DepartmentsDirectoryPanel.tsx` y `department-mocks.ts`), se eliminaron los IDs ficticios quemados (`"mock-case-X"`), se filtraron los IDs no UUID en `handleSubmit` y `toCaseItemForms`, y se priorizó la carga de casos reales persistidos en base de datos (`casesCache` o `dept.cases`) antes de mostrar la plantilla de respaldo.
+    5. Se añadieron pruebas unitarias en `test/departments/department-routing.test.ts` para verificar la sincronización y resolución de casos por `intentKey`.
+
+- **Enrutamiento por Defecto a "Cerradas" y Protección de Clientes en Atención Activa en Campañas Masivas (`campaign.repository.pg.ts`, `campaigns.router.ts`, `process-campaign-batch.use-case.ts`, frontend `CampaignWizardDialog.tsx`)**:
+  - *Contexto y Problema*:
+    1. Al despachar una campaña masiva por WhatsApp (por ejemplo, avisos de corte o facturación a más de 600 clientes), todas las conversaciones resultantes se creaban o actualizaban en estado `open`, abarrotando la "Bandeja de Abiertos" de los asesores con cientos de chats donde el destinatario aún no había respondido.
+    2. Faltaba una política explícita para contactos incluidos en la campaña que ya contaban con una conversación en curso: existía el riesgo de cerrar intempestivamente la atención de un asesor o alterar el estado de un caso en proceso.
+  - *Causa Raíz*:
+    1. En `campaign.repository.pg.ts`, tanto el método de mapeo de filas (`mapCampaignRow`) como los valores por defecto (`defaultChatRouting`) tenían hardcodeado `initialStatus: "OPEN"`.
+    2. El diálogo de creación de campañas del frontend (`CampaignWizardDialog.tsx`) enviaba el objeto `routingConfig: { chatStatus: "closed" }`, mientras que el backend esperaba exclusivamente `chatRouting: { initialStatus: "CLOSED" }`. Al no coincidir las claves, el backend caía en el valor por defecto erróneo (`"OPEN"`).
+    3. En el worker de despacho de campañas (`process-campaign-batch.use-case.ts`), no se evaluaba la existencia de casos activos (`conv.activeCaseId`) antes de forzar el estado de la conversación.
+  - *Resolución y Justificación*:
+    1. En `campaign.repository.pg.ts`, se cambió el valor por defecto absoluto de `chatRouting.initialStatus` de `"OPEN"` a `"CLOSED"`.
+    2. En `campaigns.router.ts`, se actualizó `createCampaignBodySchema` y la creación de campañas `POST /api/campaigns` para aceptar y normalizar tanto `chatRouting` como `routingConfig` (`chatStatus: "closed"` -> `initialStatus: "CLOSED"`), forzando `"CLOSED"` por defecto si no se especifica.
+    3. **Protección de Clientes con Atención Activa (`activeCaseId`)**: En `process-campaign-batch.use-case.ts`, antes de alterar el estado de la conversación, el worker verifica si el cliente tiene un caso activo en curso (`conv.activeCaseId`):
+       - **Cliente en Atención Activa**: Si el contacto está siendo atendido por un asesor humano o por la IA, el mensaje de la campaña se entrega normalmente en su WhatsApp y se anexa al historial de la conversación vinculándolo a su `activeCaseId`. **No se modifica el estado de la conversación a `"closed"`**, preservando intacta la sesión de atención y el trabajo del asesor (salvo que la campaña tenga encendido explícitamente `forceChatUpdate: true`).
+       - **Cliente sin Caso Activo o con Caso Resuelto (`COMPLETED`/`CANCELLED`)**: La conversación se enruta limpiamente a la pestaña de **"Cerradas"** (`status: "closed"`), manteniendo despejada la bandeja operativa.
+       - **Respuesta Posterior del Cliente**: Si el cliente contesta al mensaje de la campaña en WhatsApp, `ReceiveInboundMessageUseCase` detecta el mensaje entrante, traslada automáticamente la conversación a `"open"` en tiempo real y la IA interpreta su solicitud tomando en cuenta el texto previo de la campaña.
+    4. En el frontend (`CampaignWizardDialog.tsx`), se garantizó el envío explícito de `chatRouting: { initialStatus: "CLOSED" }` y `routingConfig: { chatStatus: "closed" }`.
+
+- **Atribución y Trazabilidad del Asesor en Envío Manual de Plantillas de WhatsApp (`conversations.router.ts`, `process-buffered-messages.use-case.ts`, frontend `ChatMessageItem.tsx`)**:
+  - *Contexto y Problema*:
+    Cuando un asesor enviaba manualmente una plantilla de Meta desde el chat de una conversación (por ejemplo, para reanudar la ventana de 24 horas o enviar una notificación formal), la cabecera de la burbuja mostraba la etiqueta genérica *"📢 PLANTILLA / CAMPAÑA"*, sin mostrar el nombre de la persona que estaba atendiendo.
+  - *Causa Raíz*:
+    1. En `conversations.router.ts` (`POST /api/conversations/:id/template`), el registro del mensaje saliente se insertaba con `agentId: null`.
+    2. En `ChatMessageItem.tsx`, cualquier mensaje que tuviera un pie de plantilla (`caption?.startsWith("template:")`) se catalogaba incondicionalmente como una campaña automatizada sin asesor.
+    3. Si se agregaba `agentId` sin precauciones, el detector de inactividad de asesores (`process-buffered-messages.use-case.ts`) podía interpretar el envío de la plantilla como una conversación humana activa y silenciar al bot de IA por 24 horas (`HANDOFF_INACTIVITY_HOURS`) si el cliente respondía horas después.
+  - *Resolución y Justificación*:
+    1. En `conversations.router.ts`, se asignó `agentId: agent.id` a partir de la sesión autenticada del asesor (`req.agent`).
+    2. En `process-buffered-messages.use-case.ts`, se incorporó la regla `!isTemplateMessage` en la verificación de `isRealHumanAgent`. De este modo, una plantilla oficial enviada para contactar al cliente no silencia la capacidad de la IA de intervenir si el cliente formula una consulta posterior.
+    3. En el frontend (`ChatMessageItem.tsx`), si el mensaje fue enviado por un asesor humano (`hasHumanAgent`), la cabecera muestra claramente el nombre del asesor que realizó el envío junto con una insignia sutil `🏷️ Plantilla`, reservando la etiqueta de `📢 Campaña Masiva` exclusivamente para despachos desatendidos del sistema.
+
 ## [0.2.15] - 2026-11-12
 
 ### Added & Improved

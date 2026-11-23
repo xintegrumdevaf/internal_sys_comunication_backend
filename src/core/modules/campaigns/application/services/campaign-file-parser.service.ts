@@ -186,7 +186,7 @@ export class CampaignFileParserService {
   }
 
   private normalizePhone(phone: string): string {
-    let clean = phone.replace(/[\s\-\(\)\.]/g, "");
+    let clean = phone.replace(/[\s\-().]/g, "");
     if (clean.startsWith("00")) {
       clean = "+" + clean.slice(2);
     }

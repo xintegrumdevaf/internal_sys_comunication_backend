@@ -228,6 +228,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         agentId: agent.id,
         autoAssignEnabled: parsed.data.autoAssignEnabled,
         activeDepartmentIds: parsed.data.activeDepartmentIds,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string,
+        correlationId: (req as unknown as { correlationId?: string }).correlationId,
       });
       res.json({ data: toPublicAgentDto(updated) });
     } catch (error) {

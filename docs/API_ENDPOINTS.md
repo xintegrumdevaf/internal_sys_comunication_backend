@@ -59,11 +59,16 @@ No está bajo `/api`.
 ### Modelo de Casos por Departamento (`cases`)
 Cada departamento puede declarar qué motivos o solicitudes atiende:
 - **`label`**: Nombre amigable para el operador (ej. *"Cancelación de Contrato"*).
-- **`description`**: Frases o ejemplos de lo que dice el cliente (ej. *"cuando el cliente pide cancelar el contrato o darse de baja"*). Se inyecta en el prompt de la IA en tiempo real.
+- **`description`**: Frases o ejemplos de lo que dice el cliente (ej. *"cuando el cliente pide cancelar el contrato o darse de baja"*). Se inyecta en el prompt de la IA en tiempo real. Fallback automático a `"Sin descripción"` si no se especifica.
 - **`handlingMode`**:
   - `"ai_assisted"`: La IA atiende primero con RAG y escala si no se resuelve.
   - `"human_direct"`: Escala de inmediato al departamento y notifica al cliente sin preguntas de bot.
 - **`workflowType`**: Flujo base asignado (por defecto `"GENERAL_INQUIRY"`).
+
+> [!NOTE]
+> **Sanitización y Persistencia Robusta de Casos (`PUT /api/departments/:id`)**:
+> - **Tolerancia a IDs no-UUID**: Si el cliente envía identificadores temporales o mock (ej. `"mock-case-1"` o cadenas vacías), el backend los sanea automáticamente a `undefined`, eliminando errores `400 Bad Request` por `VALIDATION_ERROR`.
+> - **Reconciliación por `intentKey`**: Al actualizar el catálogo de un departamento, si un ítem no posee `id`, el backend verifica si ya existe un registro con el mismo `intentKey` (`toIntentKey(label)`). Si existe, reutiliza el `id` original de PostgreSQL en lugar de borrar y recrear el registro, conservando claves foráneas e integridad referencial.
 
 ---
 
@@ -76,12 +81,20 @@ Cada departamento puede declarar qué motivos o solicitudes atiende:
 | `GET` | `/api/conversations/:id/automation` | — | Automation del caso activo (o `null`) |
 | `POST` | `/api/conversations/:id/read` | — | Marca todos los mensajes de la conversación como leídos (pone `unreadCount` en 0) |
 | `POST` | `/api/conversations/:id/reply` | `{ "body" }` → `201` | Respuesta humana a WhatsApp (el agente es el de la sesión); desactiva automation si hacía falta |
+| `POST` | `/api/conversations/:id/template` | `{ "templateName", "templateLanguage?", "parameters?", "components?" }` → `201` | Envío manual de plantilla oficial de WhatsApp/Meta por parte del asesor. Asigna `agentId: agent.id` de la sesión activa para trazabilidad del asesor. No silencia a la IA por inactividad si el cliente responde posteriormente |
 | `POST` | `/api/conversations/:id/take-control` | — | El agente de la sesión toma la conversación |
 | `POST` | `/api/conversations/sync-history` | sesión de `role=admin` | Encola en Redis la sincronización de mensajes históricos de Zernio. Body opcional: `{ "days": 30, "limit": 100 }` |
 | `GET` | `/api/conversations/sync-history/status` | sesión (`admin` o `manager`) | Consulta el estado del worker de sincronización (`idle`, `running`, `completed`, `failed`), total sincronizado y errores |
 | `GET` | `/api/media/*` o `?url=` | wildcard o query `?url=` | Proxy de streaming y persistencia local de adjuntos (`LocalMediaStorageAdapter`). Desempaqueta URLs recursivamente, soporta Range Requests (`Accept-Ranges: bytes`) para streaming continuo de audio/video y reintento con accountId |
 
 Todas requieren sesión (§1) — el agente que responde/toma control es siempre el de la cookie, nunca uno declarado en el body.
+
+> [!NOTE]
+> **Resiliencia de Envío en WhatsApp vía Zernio y Manejo de Ventana de 24 Horas**:
+> - **Rutas de Envío en Zernio**: Cuando un asesor responde vía `POST /api/conversations/:id/reply` (o envía adjuntos vía `/media` o `/attachments`), el adaptador `ZernioSenderHttp` entrega tanto texto plano como archivos en `POST /inbox/conversations/:id/messages` (conversación existente). Si no posee el `conversationId` y llamase a `POST /inbox/conversations` (crear chat nuevo), Meta rechaza mensajes de texto o multimedia con `400 TEMPLATE_REQUIRED`. Ambos flujos (`sendText` y `sendMedia`) cuentan con auto-recuperación activa por teléfono si la caché local no tuviese el identificador.
+> - **Persistencia en Redis (`zernio:conv:*`)**: Para evitar pérdidas de IDs ante reinicios del backend, la correspondencia `teléfono <-> zernio_conversation_id` se persiste en Redis con TTL de 30 días, además de registrarse desde los webhooks entrantes y salientes.
+> - **Búsqueda Activa y Auto-Recuperación**: Si la caché fallase y Zernio respondiera `TEMPLATE_REQUIRED`, el adaptador consulta automáticamente a Zernio por teléfono (`search=${cleanPhone}`, con y sin prefijo internacional `593`), recupera el `conversationId` existente y reintenta la entrega de inmediato por el endpoint de conversación existente, entregando el mensaje sin requerir plantilla.
+> - **Desambiguación de Errores de Entrega**: La función normalizadora `is24HourWindowError` (`meta-delivery-error.ts`) solo marca la ventana como cerrada ante reportes explícitos de expiración de tiempo (código Meta `131047` o `"24 hours elapsed"`), previniendo falsos positivos de chat inactivo cuando la ventana de 24h del cliente sigue vigente.
 
 ### Postman — reply
 
@@ -363,9 +376,19 @@ Endpoints para la gestión, importación de destinatarios y despacho progresivo 
 | `POST` | `/api/campaigns/:id/resume` | sesión | Reanuda una campaña suspendida reencolando los pendientes |
 | `DELETE` | `/api/campaigns/:id` | sesión | Elimina una campaña (únicamente permitido si está en estado `DRAFT`) |
 
-### Enrutamiento de Chat (`chatRouting`) y Ciclo de Vida:
+### Enrutamiento de Chat (`chatRouting`), Casos Activos y Ciclo de Vida:
 * **Bandeja de Cerrados por Defecto (`initialStatus: "CLOSED"`)**:
-  Al enviar cada mensaje de campaña, el backend registra la conversación y el mensaje saliente en la base de datos local y aplica `status: 'closed'`. Esto evita saturar la **Bandeja de abiertos** de los asesores con cientos de mensajes mientras los destinatarios aún no responden.
+  Al crear y despachar una campaña, la configuración por defecto de `chatRouting.initialStatus` es estrictamente `"CLOSED"` (tanto si el frontend envía `chatRouting` como si envía `routingConfig: { chatStatus: "closed" }`). Al entregar cada mensaje masivo, la conversación se posiciona en la pestaña **"Cerradas"** (`status: 'closed'`), evitando inundar la **Bandeja de Abiertos** de los asesores con cientos de mensajes salientes sin interacción del cliente.
+* **Protección de Clientes con Atención Humana o Caso Activo (`activeCaseId`)**:
+  ¿Qué sucede si un cliente incluido en la campaña masiva está siendo atendido actualmente por un asesor o bot?
+  - Si la conversación tiene un caso activo en curso (`activeCaseId` no nulo, ej. `HUMAN_ACTIVE` o `ACTIVE`):
+    - El mensaje de la campaña se entrega exitosamente al WhatsApp del cliente y se añade al historial del chat vinculándolo al `activeCaseId`.
+    - **NO se modifica el estado de la conversación a `"closed"`**: la conversación permanece abierta (`open`), protegiendo la sesión del asesor para que el chat no se mueva de su bandeja ni se interrumpa la conversación en curso (salvo que la campaña declare explícitamente `forceChatUpdate: true`).
+* **Clientes con Casos Resueltos (`COMPLETED`) o sin Caso Activo**:
+  - Si el cliente tenía un caso previo que ya fue cerrado o resuelto (o no tenía casos previos), el envío del mensaje de campaña ubica la conversación en **"Cerradas"** (`status: 'closed'`). El caso resuelto se mantiene cerrado en su historial y no se reabre.
+* **Diferenciación entre Campaña Masiva y Envío Manual de Plantilla**:
+  - **Campaña Masiva**: Despachada por el motor de campañas en lotes automatizados; se enruta por defecto a "Cerradas", no tiene asesor asignado (`agentId: null`) y en la interfaz muestra la etiqueta `📢 Campaña Masiva`.
+  - **Plantilla Manual (`POST /api/conversations/:id/template`)**: Enviada por un asesor desde el chat individual (ej. para reabrir ventana de 24h o notificar individualmente); **no altera el estado del chat a cerrado**, registra la autoría con `agentId: agent.id` y muestra en pantalla el nombre real del asesor con la etiqueta `🏷️ Plantilla`.
 * **Reapertura y Análisis con IA al Recibir Respuesta**:
   Cuando un cliente responde al mensaje de la campaña en WhatsApp:
   1. `ReceiveInboundMessageUseCase` reabre automáticamente la conversación (`status: 'open'`), trasladándola a la bandeja de Abiertos en tiempo real.
@@ -406,7 +429,28 @@ Gestión ejecutiva por Telegram Bot API (alertas reactivas de SLA/OLT/cola, puls
 
 ---
 
-## 19. Qué **no** es HTTP en esta API
+## 20. Integración con Zernio & Resolución de Conversaciones de WhatsApp
+
+Mecanismo de comunicación con WhatsApp Business Cloud vía el gateway oficial de Zernio:
+
+* **Resolución de `conversationId` vs. Inicio de Conversación (`POST /inbox/conversations/:id/messages` vs `POST /inbox/conversations`)**:
+  - En la API de Zernio, `POST /inbox/conversations` se utiliza exclusivamente para *iniciar un chat nuevo*. De acuerdo con las políticas oficiales de Meta, las empresas no pueden iniciar chats nuevos con texto libre, exigiendo una plantilla aprobada (`TEMPLATE_REQUIRED`).
+  - Para enviar mensajes libres dentro de una conversación ya iniciada por el cliente dentro de las últimas 24 horas, la API debe llamar a `POST /inbox/conversations/:conversationId/messages`.
+* **Caché Distribuido y Normalización Multi-Variante en Redis (`zernio:conv:*`)**:
+  - Para evitar falsos positivos de `TEMPLATE_REQUIRED`, `ZernioSenderHttp` normaliza cualquier número ecuatoriano en sus tres variantes oficiales: internacional con código de país (`593995848829`), formato nacional (`995848829`) y local con cero (`0995848829`).
+  - Todas las variantes se registran simultáneamente tanto en memoria como en Redis con una vigencia de 30 días (`EX 2592000s`). Cualquier reinicio del servidor recupera de inmediato la conversación sin depender del estado en memoria.
+* **Soporte de Identificadores `_id` de MongoDB**:
+  - La extracción de identificadores soporta indistintamente `id`, `_id` y `conversationId`, previniendo valores `undefined` al interactuar con documentos serializados de MongoDB.
+* **Búsqueda Paginada con Cursor en Zernio (`searchConversationInZernio`)**:
+  - Si un chat no figura en el caché de Redis, el backend consulta a Zernio mediante el parámetro de búsqueda `search` y recorre hasta 5 páginas consecutivas con cursor (`limit=100`, hasta 500 chats), indexando en caliente todas las conversaciones activas.
+* **Precarga Proactiva al Iniciar el Servidor (`preloadRecentConversations`)**:
+  - Al arrancar el proceso del backend, se ejecuta en segundo plano una sincronización de los chats recientes de Zernio para precargar las claves en Redis, garantizando respuestas inmediatas de los asesores.
+* **Desambiguación de Ventana de 24 Horas**:
+  - Los requerimientos de plantilla en inicio de chat (`TEMPLATE_REQUIRED`) quedan diferenciados de los verdaderos cierres de ventana de 24 horas (error Meta `131047`), evitando bloqueos indebidos en la interfaz de atención cuando el cliente escribió pocas horas antes.
+
+---
+
+## 21. Qué **no** es HTTP en esta API
 
 - Interpretación IA / compose reply → interno (`AIProviderPort`), no endpoints.
 - Llamadas a n8n (`VALIDATE_CLIENT`, `CHECK_BALANCE`, `DIAGNOSTIC`, …) → las hace la API hacia n8n; el frontend no las invoca.

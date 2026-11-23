@@ -9,6 +9,9 @@ export type UpdateAgentAvailabilityInput = {
   agentId: string;
   autoAssignEnabled?: boolean;
   activeDepartmentIds?: string[];
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  correlationId?: string | null;
 };
 
 export type UpdateAgentAvailabilityDeps = {
@@ -55,17 +58,43 @@ export class UpdateAgentAvailabilityUseCase {
     const updated = await this.deps.agentRepo.update(current.id, patch);
 
     if (this.deps.auditRepo) {
+      const switchChanged = current.autoAssignEnabled !== updated.autoAssignEnabled;
+      const isSwitchOn = updated.autoAssignEnabled;
+      const action = switchChanged
+        ? (isSwitchOn ? "AGENT_SHIFT_STARTED" : "AGENT_SHIFT_ENDED")
+        : "AGENT_AVAILABILITY_CHANGED";
+
       await this.deps.auditRepo.record({
-        action: "AGENT_AVAILABILITY_CHANGED",
+        action,
+        category: "operational",
         resourceType: "agent",
         resourceId: updated.id,
+        actorType: "agent",
         actorId: updated.id,
+        departmentId: updated.primaryDepartmentId,
+        beforeState: {
+          autoAssignEnabled: current.autoAssignEnabled,
+          activeDepartmentIds: current.activeDepartmentIds,
+        },
+        afterState: {
+          autoAssignEnabled: updated.autoAssignEnabled,
+          activeDepartmentIds: updated.activeDepartmentIds,
+        },
         metadata: {
+          switch: isSwitchOn ? "ON" : "OFF",
+          shiftStatus: isSwitchOn ? "OPEN" : "CLOSED",
+          switchChanged,
           previousAutoAssign: current.autoAssignEnabled,
           currentAutoAssign: updated.autoAssignEnabled,
           previousActiveDepartments: current.activeDepartmentIds,
           currentActiveDepartments: updated.activeDepartmentIds,
+          description: switchChanged
+            ? (isSwitchOn ? "Turno activado (switch ON)" : "Turno cerrado / pausa (switch OFF)")
+            : "Colas de atención actualizadas",
         },
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        correlationId: input.correlationId,
       });
     }
 
