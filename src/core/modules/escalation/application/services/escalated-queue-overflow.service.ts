@@ -222,6 +222,8 @@ export class EscalatedQueueOverflowService {
             caseContext: currentCase.context,
             expiresAt: currentCase.expiresAt,
             conversationId: conv.id,
+            customerName: conv.waProfileName ?? null,
+            customerPhone: conv.waPhone ?? null,
             sourceDeptId,
             sourceName,
             targetDeptId: fallbackDept.id,
@@ -251,6 +253,8 @@ export class EscalatedQueueOverflowService {
       caseContext: currentCase.context,
       expiresAt: currentCase.expiresAt,
       conversationId: conv.id,
+      customerName: conv.waProfileName ?? null,
+      customerPhone: conv.waPhone ?? null,
       sourceDeptId,
       sourceName,
       targetDeptId: sourceDeptId,
@@ -271,6 +275,8 @@ export class EscalatedQueueOverflowService {
     caseContext: CaseContext;
     expiresAt: Date | null;
     conversationId: string;
+    customerName: string | null;
+    customerPhone: string | null;
     sourceDeptId: string | null;
     sourceName: string;
     targetDeptId: string | null;
@@ -351,6 +357,9 @@ export class EscalatedQueueOverflowService {
         type: "HUMAN_ASSIGNED",
         caseId: input.escalation.caseId,
         agentUserId: input.assignedAgent.id,
+        conversationId: input.conversationId,
+        customerName: input.customerName ?? null,
+        customerPhone: input.customerPhone ?? null,
       });
     }
 

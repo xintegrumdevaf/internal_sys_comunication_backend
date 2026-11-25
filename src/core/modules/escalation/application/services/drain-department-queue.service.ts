@@ -146,6 +146,10 @@ export class DrainDepartmentQueueService {
         reason: "AUTO_ASSIGNED",
       });
 
+      const conv = aggregate
+        ? await this.deps.conversationRepo.findById(aggregate.case.conversationId)
+        : null;
+
       if (aggregate) {
         await this.deps.conversationRepo.setActiveCaseId(aggregate.case.conversationId, escalation.caseId);
         this.deps.broadcaster?.publish({
@@ -177,6 +181,9 @@ export class DrainDepartmentQueueService {
         type: "HUMAN_ASSIGNED",
         caseId: escalation.caseId,
         agentUserId: chosenAgent.id,
+        conversationId: aggregate?.case.conversationId,
+        customerName: conv?.waProfileName ?? null,
+        customerPhone: conv?.waPhone ?? null,
       });
 
       // Actualizar contadores locales para el siguiente caso en el bucle

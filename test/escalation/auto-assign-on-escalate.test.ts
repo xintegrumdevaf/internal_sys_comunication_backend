@@ -33,12 +33,21 @@ function buildStack(maxActiveCasesPerAgent = 6) {
     auditRepo,
   });
 
-  return { caseRepo, escalationRepo, departmentRepo, agentRepo, auditRepo, broadcaster, escalationService };
+  return {
+    caseRepo,
+    escalationRepo,
+    conversationRepo,
+    departmentRepo,
+    agentRepo,
+    auditRepo,
+    broadcaster,
+    escalationService,
+  };
 }
 
 describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => {
   it("asigna automaticamente el caso al agente disponible del departamento y pasa a HUMAN_ACTIVE", async () => {
-    const { caseRepo, departmentRepo, agentRepo, auditRepo, broadcaster, escalationService } = buildStack();
+    const { caseRepo, conversationRepo, departmentRepo, agentRepo, auditRepo, broadcaster, escalationService } = buildStack();
     const support = departmentRepo.seed({ slug: "support", name: "Soporte" });
     const agent = agentRepo.seed({
       name: "Ana",
@@ -47,7 +56,10 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
       primaryDepartmentId: support.id,
       autoAssignEnabled: true,
     });
-    const conversation = { id: "conv-1" };
+    const conversation = conversationRepo.createOpen({
+      waPhone: "593991112233",
+      waProfileName: "Carlos Perez",
+    });
     const { case: created } = await caseRepo.create({
       conversationId: conversation.id,
       workflowType: "SUPPORT_INTERNET",
@@ -75,7 +87,14 @@ describe("Auto-asignacion al escalar (docs/spec/06_BACKEND_GAPS.md §2)", () => 
       expect.objectContaining({ action: "CASE_AUTO_ASSIGNED", resourceId: created.id, actorId: null }),
     );
     expect(received).toContainEqual(
-      expect.objectContaining({ type: "HUMAN_ASSIGNED", caseId: created.id, agentUserId: agent.id }),
+      expect.objectContaining({
+        type: "HUMAN_ASSIGNED",
+        caseId: created.id,
+        agentUserId: agent.id,
+        conversationId: conversation.id,
+        customerName: "Carlos Perez",
+        customerPhone: "593991112233",
+      }),
     );
   });
 

@@ -177,11 +177,6 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         caseId: req.params.id,
         agentUserId: agent.id,
       });
-      deps.broadcaster?.publish({
-        type: "HUMAN_ASSIGNED",
-        caseId: req.params.id,
-        agentUserId: agent.id,
-      });
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -200,11 +195,6 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         actorAgentId: actor.id,
         agentUserId: parsed.data.agentUserId,
         departmentId: parsed.data.departmentId,
-      });
-      deps.broadcaster?.publish({
-        type: "HUMAN_ASSIGNED",
-        caseId: req.params.id,
-        agentUserId: parsed.data.agentUserId,
       });
       res.status(204).send();
     } catch (error) {
@@ -225,11 +215,6 @@ export function createCasesRouter(deps: CasesRouterDeps): Router {
         agentUserId: parsed.data.agentUserId,
         departmentId: parsed.data.departmentId,
         reassign: true,
-      });
-      deps.broadcaster?.publish({
-        type: "HUMAN_ASSIGNED",
-        caseId: req.params.id,
-        agentUserId: parsed.data.agentUserId,
       });
       res.status(204).send();
     } catch (error) {

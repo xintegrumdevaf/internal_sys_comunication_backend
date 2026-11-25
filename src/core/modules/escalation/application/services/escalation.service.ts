@@ -384,6 +384,9 @@ export class EscalationService {
       type: "HUMAN_ASSIGNED",
       caseId: caseEntity.id,
       agentUserId: agent.id,
+      conversationId: caseEntity.conversationId,
+      customerName: conv?.waProfileName ?? null,
+      customerPhone: conv?.waPhone ?? null,
     });
 
     log.info({ agentId: agent.id }, "caso auto-asignado a agente humano");

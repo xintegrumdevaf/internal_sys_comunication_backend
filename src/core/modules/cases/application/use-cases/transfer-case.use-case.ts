@@ -222,12 +222,20 @@ export class TransferCaseUseCase {
     }
 
     if (this.deps.broadcaster) {
+      const shouldResolveConv = Boolean(assignedAgent) || nextStatus === "ESCALATED";
+      const conv =
+        shouldResolveConv && this.deps.conversationRepo
+          ? await this.deps.conversationRepo.findById(aggregate.case.conversationId)
+          : null;
+
       if (assignedAgent) {
         this.deps.broadcaster.publish({
           type: "HUMAN_ASSIGNED",
           caseId: aggregate.case.id,
           agentUserId: assignedAgent.id,
           conversationId: aggregate.case.conversationId,
+          customerName: conv?.waProfileName ?? null,
+          customerPhone: conv?.waPhone ?? null,
         });
       } else {
         this.deps.broadcaster.publish({
@@ -236,9 +244,6 @@ export class TransferCaseUseCase {
           conversationId: aggregate.case.conversationId,
         });
         if (nextStatus === "ESCALATED") {
-          const conv = this.deps.conversationRepo
-            ? await this.deps.conversationRepo.findById(aggregate.case.conversationId)
-            : null;
           this.deps.broadcaster.publish({
             type: "CASE_ESCALATED",
             caseId: aggregate.case.id,

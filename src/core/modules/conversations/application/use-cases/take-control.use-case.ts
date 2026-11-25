@@ -136,6 +136,8 @@ export class TakeControlUseCase {
       caseId,
       agentUserId: input.agentUserId,
       conversationId: conversation.id,
+      customerName: conversation.waProfileName ?? null,
+      customerPhone: conversation.waPhone ?? null,
     });
     this.deps.broadcaster?.publish({
       type: "AUTOMATION_DISABLED",

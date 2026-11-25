@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added & Changed
+- **Enriquecimiento y deduplicación de eventos `HUMAN_ASSIGNED` en tiempo real (`cases.router.ts`, `escalation.service.ts`, `drain-department-queue.service.ts`, `escalated-queue-overflow.service.ts`, `take-control.use-case.ts`, `transfer-case.use-case.ts`)**:
+  - Se eliminaron las emisiones duplicadas de `HUMAN_ASSIGNED` sin datos de cliente en `/api/cases/:id/claim`, `/assign` y `/reassign`.
+  - Se enriquecieron todos los publicadores de `HUMAN_ASSIGNED` (`tryAutoAssign`, `DrainDepartmentQueueService`, `EscalatedQueueOverflowService`, `TakeControlUseCase` y `TransferCaseUseCase`) con `conversationId`, `customerName` y `customerPhone` para evitar notificaciones vacías en la campana.
 - **Diferenciación y escalación contextual de mensajes `unsupported` de WhatsApp (`unsupported-message.ts`, `parse-zernio-webhook.ts`, `parse-whatsapp-webhook.ts`, `zernio-history-sync.worker.ts`, `interpret-message.prompt.ts`, `process-buffered-messages.use-case.ts`, `escalation.service.ts`, `business-reply-catalog.ts`)**:
   - Se normalizan los eventos `unsupported` de Meta Cloud API / Zernio (p. ej. códigos `131051`, `131052`, `131060` o `text: "[Unsupported message]"` sin adjuntos) con `type: "unsupported"`, `body: "[unsupported]"` y detalle saneado en `caption`, evitando que se mezclen como texto del cliente o disparen cierres erróneos.
   - Se descarta el stub `[unsupported]` cuando en el mismo lote llegan adjuntos multimedia válidos.
