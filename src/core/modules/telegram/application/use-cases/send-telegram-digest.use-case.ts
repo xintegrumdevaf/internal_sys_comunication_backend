@@ -5,6 +5,13 @@ import type { CaseRepositoryPort } from "../../../cases/application/ports/case.r
 import type { AgentRepositoryPort } from "../../../departments/application/ports/agent.repository.port";
 import type { SendTelegramAlertUseCase } from "./send-telegram-alert.use-case";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
+import {
+  DEFAULT_TELEGRAM_DRIVE_MONITOR,
+  computeDriveFileStaleness,
+  formatDriveTimestamp,
+  formatElapsedHoursLabel,
+} from "../../domain/drive-file-sync.entity";
+import type { DriveFileSyncStorePort } from "../ports/drive-file-sync.store.port";
 import type { TelegramMessageResult } from "../../domain/telegram-message.types";
 import {
   escapeTelegramHtml,
@@ -20,6 +27,7 @@ export interface SendTelegramDigestDeps {
   getSettings: () => Promise<TelegramSettings>;
   appPublicUrl: string;
   logger: Logger;
+  driveFileSyncStore?: DriveFileSyncStorePort;
 }
 
 export interface SendTelegramDigestInput {
@@ -256,6 +264,45 @@ export class SendTelegramDigestUseCase {
       }
     } else {
       lines.push("• <b>Red OLT / Fibra Óptica:</b> 🟢 Sin incidentes masivos reportados");
+    }
+
+    const driveSettings = settings.driveMonitor ?? DEFAULT_TELEGRAM_DRIVE_MONITOR;
+    if (driveSettings.enabled && this.deps.driveFileSyncStore) {
+      try {
+        const syncState = await this.deps.driveFileSyncStore.getState();
+        const enabledFiles = driveSettings.files.filter((f) => f.enabled);
+        if (enabledFiles.length > 0) {
+          lines.push("");
+          lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+          lines.push("📁 <b>ARCHIVOS EN GOOGLE DRIVE</b>");
+          lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+          for (const fileCfg of enabledFiles) {
+            const record = syncState.records[fileCfg.key];
+            if (!record?.lastModifiedTime) {
+              lines.push(
+                `• <b>${escapeTelegramHtml(fileCfg.expectedFileName)}:</b> ⚪ Sin reporte de n8n aún`,
+              );
+              continue;
+            }
+            const thresholdHours =
+              fileCfg.staleThresholdHours ?? driveSettings.staleThresholdHours ?? 24;
+            const { elapsedHours, isStale } = computeDriveFileStaleness(
+              record.lastModifiedTime,
+              thresholdHours,
+            );
+            const icon = isStale ? "⚠️" : "🟢";
+            const ageText =
+              elapsedHours !== null ? formatElapsedHoursLabel(elapsedHours) : "N/D";
+            const modifiedFormatted = formatDriveTimestamp(record.lastModifiedTime, timeZone);
+            const editor = record.lastModifiedBy || record.lastModifiedByEmail || "N/D";
+            lines.push(
+              `• ${icon} <b>${escapeTelegramHtml(record.fileName)}:</b> <code>${escapeTelegramHtml(modifiedFormatted)}</code> (hace ${ageText}, por ${escapeTelegramHtml(editor)})`,
+            );
+          }
+        }
+      } catch (err) {
+        this.deps.logger.warn({ err }, "error al consultar driveFileSyncStore para digest");
+      }
     }
 
     lines.push("");

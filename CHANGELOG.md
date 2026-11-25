@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added & Changed
+- **Monitor de archivos en Google Drive (`CONTRATOS` / `CARTERA`), alertas en Telegram y cooldown persistente en Redis (`drive-file-sync.entity.ts`, `report-drive-file-sync.use-case.ts`, `drive-sync-integration.router.ts`, `system-settings-drive-file-sync.store.ts`, `check-system-alerts.use-case.ts`, `send-telegram-digest.use-case.ts`, `send-telegram-alert.use-case.ts`, `alert-cooldown-cache.service.ts`, `settings.router.ts`, `n8n/monitor-drive-files.json`)**:
+  - Agregado esquema `driveMonitor` configurable en `TelegramSettings` (`enabled`, `staleThresholdHours` global de 1 a 720 h y override por archivo, `notifyOnModification`, `notifyOnStale`) junto con el store `SystemSettingsDriveFileSyncStore` persistido en `system_setting` (`key: "drive.file_sync"`).
+  - Creado el endpoint interno `POST /api/integrations/drive-files/report` (autenticado con `X-Internal-Api-Key` vía `timingSafeEqual`) consumido por el workflow `n8n/monitor-drive-files.json` cada 5 minutos. Registra el baseline inicial en la primera captura y, cada vez que cambia `modifiedTime`, envía una alerta inmediata a Telegram con fecha/hora local, editor (`lastModifyingUser.displayName` / email) y enlace a Drive.
+  - Extendido `CheckSystemAlertsUseCase` y `SendTelegramDigestUseCase` para evaluar frescura de `CONTRATOS` y `CARTERA` contra el temporizador en horas configurado y mostrar duraciones legibles en días, horas y minutos (`formatDurationMinutes`) para SLA, cola de espera y Drive.
+  - Agregado `GET /api/admin/settings/telegram/drive-files` y soporte de simulación `DRIVE_SYNC` en `POST /api/admin/settings/telegram/test-alert`.
+  - Respaldado `AlertCooldownCacheService` con Redis (`SET ... PX ... NX`) en `container.ts` para evitar reenvíos de alertas tras reinicios del backend, y filtrados botones `inline_keyboard` con URLs locales (`localhost`/`127.0.0.1`) en `SendTelegramAlertUseCase`.
 - **Búsqueda normalizada de teléfonos y conversaciones vinculadas en Contactos (`customer.repository.pg.ts`, `customer-search.helper.ts`)**:
   - Se normalizan los dígitos de búsqueda en `GET /api/customers` (`+593...`, `5939...`, `09...`) sin alterar la parametrización SQL.
   - Se extiende el filtro de búsqueda hacia las conversaciones vinculadas al contacto (`conversation.customer_id = c.id` por `wa_phone` y `wa_profile_name`), permitiendo ubicar al cliente aunque su conversación haya iniciado desde un número secundario de WhatsApp.

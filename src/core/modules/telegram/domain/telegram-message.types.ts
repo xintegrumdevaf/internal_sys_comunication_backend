@@ -19,7 +19,14 @@ export type TelegramAlertSeverity = "INFO" | "WARNING" | "CRITICAL";
 /**
  * Categorías de alertas que pueden enrutarse a topics separados.
  */
-export type TelegramAlertCategory = "SLA" | "INFRASTRUCTURE" | "QUEUE" | "QUALITY" | "DIGEST" | "SYSTEM";
+export type TelegramAlertCategory =
+  | "SLA"
+  | "INFRASTRUCTURE"
+  | "QUEUE"
+  | "QUALITY"
+  | "DIGEST"
+  | "DRIVE_SYNC"
+  | "SYSTEM";
 
 /**
  * Parámetros para emitir un mensaje o alerta a Telegram.

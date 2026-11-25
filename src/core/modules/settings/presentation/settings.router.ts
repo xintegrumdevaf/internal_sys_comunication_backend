@@ -13,6 +13,13 @@ import type { CheckSystemAlertsUseCase } from "../../telegram/application/use-ca
 import type { SendTelegramDigestUseCase } from "../../telegram/application/use-cases/send-telegram-digest.use-case";
 import type { SendTelegramAlertUseCase } from "../../telegram/application/use-cases/send-telegram-alert.use-case";
 import type { TelegramGatewayPort } from "../../telegram/application/ports/telegram-gateway.port";
+import type { DriveFileSyncStorePort } from "../../telegram/application/ports/drive-file-sync.store.port";
+import {
+  DEFAULT_TELEGRAM_DRIVE_MONITOR,
+  computeDriveFileStaleness,
+  formatDriveTimestamp,
+  formatElapsedHoursLabel,
+} from "../../telegram/domain/drive-file-sync.entity";
 
 const uploadTopology = multer({
   storage: multer.memoryStorage(),
@@ -28,6 +35,7 @@ export interface SettingsRouterDeps {
   sendTelegramDigest?: SendTelegramDigestUseCase;
   sendTelegramAlert?: SendTelegramAlertUseCase;
   telegramGateway?: TelegramGatewayPort;
+  driveFileSyncStore?: DriveFileSyncStorePort;
   appPublicUrl?: string;
 }
 
@@ -52,6 +60,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
     sendTelegramDigest,
     sendTelegramAlert,
     telegramGateway,
+    driveFileSyncStore,
     appPublicUrl,
   } = deps;
 
@@ -269,7 +278,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       }
 
       const settings = await settingsService.getTelegramSettings();
-      const category = (req.body?.category || "SLA") as "SLA" | "INFRASTRUCTURE" | "QUEUE";
+      const category = (req.body?.category || "SLA") as "SLA" | "INFRASTRUCTURE" | "QUEUE" | "DRIVE_SYNC";
       const chatId =
         typeof req.body?.chatId === "string" && req.body.chatId.trim() !== ""
           ? req.body.chatId.trim()
@@ -294,6 +303,12 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         body = "Simulación de advertencia: clientes esperando superan el umbral con agentes libres insuficientes.";
         metadata["Departamento"] = "Soporte Técnico";
         metadata["En espera"] = "12 clientes";
+      } else if (category === "DRIVE_SYNC") {
+        title = "📁 ALERTA DE PRUEBA: Monitor de Archivos en Drive";
+        body = "Simulación de control de actualización para archivos CONTRATOS / CARTERA en Google Drive.";
+        metadata["Archivo"] = "CONTRATOS (ReporteContratos)";
+        metadata["Modificado por"] = "Responsable Operativo (prueba@isp.local)";
+        metadata["Temporizador"] = `${settings.driveMonitor?.staleThresholdHours ?? 24} h`;
       } else {
         metadata["Caso"] = "CASO-9999 (Juan Pérez)";
         metadata["Tiempo de espera"] = "18 min (Umbral: 15m)";
@@ -301,7 +316,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
 
       const result = await sendTelegramAlert.execute({
         category,
-        severity: category === "QUEUE" ? "WARNING" : "CRITICAL",
+        severity: category === "QUEUE" || category === "DRIVE_SYNC" ? "WARNING" : "CRITICAL",
         title,
         body,
         metadata,
@@ -469,6 +484,70 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       res.json({
         success: true,
         data: { chats },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /api/admin/settings/telegram/drive-files
+   * Devuelve el estado actual de actualización de archivos supervisados en Google Drive (CONTRATOS / CARTERA).
+   * Exclusivo para administradores.
+   */
+  router.get("/api/admin/settings/telegram/drive-files", async (req, res, next) => {
+    try {
+      requireRole(req, ["admin"]);
+      const settings = await settingsService.getTelegramSettings();
+      const driveSettings = settings.driveMonitor ?? DEFAULT_TELEGRAM_DRIVE_MONITOR;
+      const syncState = driveFileSyncStore
+        ? await driveFileSyncStore.getState()
+        : { updatedAt: null, records: {} };
+      const timeZone = settings.timeZone || "America/Guayaquil";
+
+      const files = driveSettings.files.map((cfg) => {
+        const record = syncState.records[cfg.key];
+        const thresholdHours =
+          cfg.staleThresholdHours ?? driveSettings.staleThresholdHours ?? 24;
+        const { elapsedHours, isStale } = computeDriveFileStaleness(
+          record?.lastModifiedTime,
+          thresholdHours,
+        );
+
+        return {
+          fileKey: cfg.key,
+          label: cfg.label,
+          expectedFileName: cfg.expectedFileName,
+          expectedSheetName: cfg.expectedSheetName ?? null,
+          enabled: cfg.enabled,
+          thresholdHours,
+          fileId: record?.fileId ?? cfg.fileId ?? null,
+          fileName: record?.fileName ?? cfg.expectedFileName,
+          lastModifiedTime: record?.lastModifiedTime ?? null,
+          formattedModifiedTime: record?.lastModifiedTime
+            ? formatDriveTimestamp(record.lastModifiedTime, timeZone)
+            : null,
+          previousModifiedTime: record?.previousModifiedTime ?? null,
+          lastModifiedBy: record?.lastModifiedBy ?? null,
+          lastModifiedByEmail: record?.lastModifiedByEmail ?? null,
+          webViewLink: record?.webViewLink ?? null,
+          version: record?.version ?? null,
+          lastReportedAt: record?.lastReportedAt ?? null,
+          elapsedHours,
+          elapsedLabel: elapsedHours !== null ? formatElapsedHoursLabel(elapsedHours) : null,
+          isStale,
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          enabled: driveSettings.enabled,
+          staleThresholdHours: driveSettings.staleThresholdHours,
+          updatedAt: syncState.updatedAt,
+          timeZone,
+          files,
+        },
       });
     } catch (err) {
       next(err);

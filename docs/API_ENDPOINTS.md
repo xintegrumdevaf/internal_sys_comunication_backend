@@ -419,9 +419,11 @@ Gestión ejecutiva por Telegram Bot API (alertas reactivas de SLA/OLT/cola, puls
 | `POST` | `/api/admin/settings/telegram/detect-chat` | `admin` | Consulta actualizaciones recientes (`getUpdates`) para detectar grupos/supergrupos candidatos |
 | `POST` | `/api/admin/settings/telegram/test` | `admin` | Valida el bot vía `getMe` y envía mensaje opcional de prueba (auto-persiste `migratedToChatId` si el grupo migró a supergrupo) |
 | `POST` | `/api/admin/settings/telegram/test-topic` | `admin` | Envía mensaje de prueba a un `threadId` específico dentro de un supergrupo con Temas (Forum Topics) |
-| `POST` | `/api/admin/settings/telegram/send-digest` | `admin` | Dispara envío manual inmediato (`timeLabel: "Manual"`) del Pulso Operativo Ejecutivo |
-| `POST` | `/api/admin/settings/telegram/check-alerts` | `admin` | Ejecuta una evaluación inmediata del Centinela Reactivo (brechas SLA, cortes OLT, saturación de cola) |
-| `POST` | `/api/admin/settings/telegram/test-alert` | `admin` | Envía una alerta simulada (`category`: `SLA` \| `INFRASTRUCTURE` \| `QUEUE`) sin esperar incidente real |
+| `POST` | `/api/admin/settings/telegram/send-digest` | `admin` | Dispara envío manual inmediato (`timeLabel: "Manual"`) del Pulso Operativo Ejecutivo (incluye estado de Drive) |
+| `POST` | `/api/admin/settings/telegram/check-alerts` | `admin` | Ejecuta una evaluación inmediata del Centinela Reactivo (brechas SLA, cortes OLT, saturación de cola y atraso en Drive) |
+| `POST` | `/api/admin/settings/telegram/test-alert` | `admin` | Envía una alerta simulada (`category`: `SLA` \| `INFRASTRUCTURE` \| `QUEUE` \| `DRIVE_SYNC`) sin esperar incidente real |
+| `GET` | `/api/admin/settings/telegram/drive-files` | `admin` | Consulta el estado en vivo de modificación y último editor de `CONTRATOS` / `CARTERA` en Google Drive |
+| `POST` | `/api/integrations/drive-files/report` | `X-Internal-Api-Key` | Endpoint interno llamado periódicamente por n8n (`monitor-drive-files.json`) para registrar metadatos de Drive y alertar modificaciones en Telegram |
 | `POST` | `/api/admin/settings/telegram/set-webhook` | `admin` | Registra la URL del webhook en `api.telegram.org` con `secretToken` (`webhookSecret`) |
 | `POST` | `/api/v1/telegram/webhook` | `x-telegram-bot-api-secret-token` | Receptor público de updates de Telegram (comandos `/resumen`, `/sla`, `/agentes`, callbacks y Copilot IA) |
 | `GET` | `/analitica` (`/analitica/snapshot`) | público | Snapshot Ejecutivo Web HTML responsivo en vivo (`?format=json` o `Accept: application/json` retorna payload JSON) |

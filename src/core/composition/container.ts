@@ -274,6 +274,9 @@ import { TelegramAiCopilotAdapter } from "../modules/telegram/infrastructure/ai/
 import { createTelegramRouter } from "../modules/telegram/presentation/telegram.router";
 import { createTelegramSnapshotRouter } from "../modules/telegram/presentation/telegram-snapshot.router";
 import type { TelegramGatewayPort } from "../modules/telegram/application/ports/telegram-gateway.port";
+import { SystemSettingsDriveFileSyncStore } from "../modules/telegram/infrastructure/postgres/system-settings-drive-file-sync.store";
+import { ReportDriveFileSyncUseCase } from "../modules/telegram/application/use-cases/report-drive-file-sync.use-case";
+import { createDriveSyncIntegrationRouter } from "../modules/telegram/presentation/drive-sync-integration.router";
 
 /**
  * Composition root unico del sistema (AGENTS.md - convenciones tecnicas).
@@ -1152,6 +1155,56 @@ export function createContainer(): Container {
     }),
   );
 
+  const effectiveFrontendUrl = (
+    env.FRONTEND_URL ||
+    (env.CORS_ALLOWED_ORIGINS ? env.CORS_ALLOWED_ORIGINS.split(",")[0]?.trim() || "" : "") ||
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
+
+  const telegramLogger = logger.child({ module: "telegram" });
+  const telegramGateway = new TelegramGatewayHttp({
+    logger: telegramLogger,
+    defaultBotToken: env.TELEGRAM_BOT_TOKEN,
+    defaultChatId: env.TELEGRAM_DEFAULT_CHAT_ID,
+    getToken: async () => (await systemSettingsService.getTelegramSettings().catch(() => null))?.botToken,
+  });
+  const sendTelegramAlert = new SendTelegramAlertUseCase({
+    gateway: telegramGateway,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    logger: telegramLogger,
+  });
+  const alertCooldownCache = new AlertCooldownCacheService(30 * 60 * 1000, {
+    tryAcquire: async (key, cooldownMs) => {
+      const ok = await redisClient.set(
+        `telegram:alert-cooldown:${key}`,
+        "1",
+        "PX",
+        cooldownMs,
+        "NX",
+      );
+      return ok === "OK";
+    },
+    release: async (key) => {
+      await redisClient.del(`telegram:alert-cooldown:${key}`);
+    },
+  });
+  const driveFileSyncStore = new SystemSettingsDriveFileSyncStore(systemSettingsRepo);
+  const reportDriveFileSync = new ReportDriveFileSyncUseCase({
+    driveFileSyncStore,
+    sendTelegramAlert,
+    getSettings: () => systemSettingsService.getTelegramSettings(),
+    cooldownCache: alertCooldownCache,
+    frontendUrl: effectiveFrontendUrl,
+    logger: telegramLogger,
+  });
+  app.use(
+    createDriveSyncIntegrationRouter({
+      env,
+      reportDriveFileSync,
+      logger: telegramLogger,
+    }),
+  );
+
   // A partir de aqui toda request pasa por la sesion real (docs/spec/06_BACKEND_GAPS.md
   // §1.b) — health, metrics y el webhook de WhatsApp quedan afuera a proposito (no
   // tienen identidad de agente; usan su propia verificacion).
@@ -1213,29 +1266,10 @@ export function createContainer(): Container {
       listCases: listDepartmentCases,
     }),
   );
-  const telegramLogger = logger.child({ module: "telegram" });
-  const telegramGateway = new TelegramGatewayHttp({
-    logger: telegramLogger,
-    defaultBotToken: env.TELEGRAM_BOT_TOKEN,
-    defaultChatId: env.TELEGRAM_DEFAULT_CHAT_ID,
-    getToken: async () => (await systemSettingsService.getTelegramSettings().catch(() => null))?.botToken,
-  });
   const testTelegramConnection = new TestTelegramConnectionUseCase({
     gateway: telegramGateway,
     logger: telegramLogger,
   });
-  const sendTelegramAlert = new SendTelegramAlertUseCase({
-    gateway: telegramGateway,
-    getSettings: () => systemSettingsService.getTelegramSettings(),
-    logger: telegramLogger,
-  });
-  const effectiveFrontendUrl = (
-    env.FRONTEND_URL ||
-    (env.CORS_ALLOWED_ORIGINS ? env.CORS_ALLOWED_ORIGINS.split(",")[0]?.trim() || "" : "") ||
-    "http://localhost:8080"
-  ).replace(/\/$/, "");
-
-  const alertCooldownCache = new AlertCooldownCacheService();
   const checkSystemAlerts = new CheckSystemAlertsUseCase({
     caseRepo,
     escalationRepo,
@@ -1247,6 +1281,7 @@ export function createContainer(): Container {
     frontendUrl: effectiveFrontendUrl,
     logger: telegramLogger,
     broadcaster,
+    driveFileSyncStore,
   });
   const telegramAlertWatcher = new TelegramAlertWatcherService({
     checkAlertsUseCase: checkSystemAlerts,
@@ -1262,6 +1297,7 @@ export function createContainer(): Container {
     getSettings: () => systemSettingsService.getTelegramSettings(),
     appPublicUrl: env.APP_PUBLIC_URL,
     logger: telegramLogger,
+    driveFileSyncStore,
   });
   const telegramDigestScheduler = new TelegramDigestSchedulerService({
     sendDigestUseCase: sendTelegramDigest,
@@ -1371,6 +1407,7 @@ export function createContainer(): Container {
       sendTelegramDigest,
       sendTelegramAlert,
       telegramGateway,
+      driveFileSyncStore,
       appPublicUrl: env.APP_PUBLIC_URL,
     }),
   );

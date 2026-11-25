@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { isMaskedValue } from "../../settings/domain/system-settings.entity";
+import {
+  DEFAULT_TELEGRAM_DRIVE_MONITOR,
+  TelegramDriveMonitorSettingsSchema,
+} from "./drive-file-sync.entity";
 
 /**
  * Categorías admitidas para enrutamiento de temas (Forum Topics) en Telegram.
@@ -10,6 +14,7 @@ export const TelegramTopicCategorySchema = z.enum([
   "DIGEST",
   "QUEUE",
   "QUALITY",
+  "DRIVE_SYNC",
   "GENERAL",
 ]);
 export type TelegramTopicCategory = z.infer<typeof TelegramTopicCategorySchema>;
@@ -123,6 +128,9 @@ export const TelegramSettingsSchema = z.object({
 
   // Copilot con IA en grupo (consultas en lenguaje natural)
   aiCopilotEnabled: z.boolean().default(false),
+
+  // Monitor de actualización de archivos operativos en Google Drive (CONTRATOS / CARTERA)
+  driveMonitor: TelegramDriveMonitorSettingsSchema.default(DEFAULT_TELEGRAM_DRIVE_MONITOR),
 
   // URL del frontend para botones de acción en alertas
   frontendUrl: z.string().default("").optional(),

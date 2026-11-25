@@ -80,11 +80,15 @@ export class SendTelegramAlertUseCase {
       }
     }
 
+    const validActions = (alert.actions ?? []).filter(
+      (act) => act.callbackData || (act.url && isValidTelegramButtonUrl(act.url)),
+    );
+
     const replyMarkup: TelegramInlineKeyboard | undefined =
-      alert.actions && alert.actions.length > 0
+      validActions.length > 0
         ? {
             inline_keyboard: [
-              alert.actions.map((act) => ({
+              validActions.map((act) => ({
                 text: act.label,
                 url: act.url,
                 callback_data: act.callbackData,
@@ -129,6 +133,19 @@ export class SendTelegramAlertUseCase {
     );
 
     return result;
+  }
+}
+
+function isValidTelegramButtonUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    return host !== "localhost" && host !== "127.0.0.1" && host !== "0.0.0.0";
+  } catch {
+    return false;
   }
 }
 

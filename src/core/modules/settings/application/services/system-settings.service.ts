@@ -26,6 +26,7 @@ import {
   DEFAULT_TELEGRAM_TOPICS,
   DEFAULT_TELEGRAM_ALERT_RULES,
 } from "../../../telegram/domain/telegram-config.entity";
+import { DEFAULT_TELEGRAM_DRIVE_MONITOR } from "../../../telegram/domain/drive-file-sync.entity";
 
 const CHANNEL_SETTINGS_KEY = "channels.whatsapp";
 const AI_SETTINGS_KEY = "ai.provider";
@@ -297,6 +298,7 @@ export class SystemSettingsService {
         webhookSecret: "",
         commandsEnabled: true,
         aiCopilotEnabled: false,
+        driveMonitor: DEFAULT_TELEGRAM_DRIVE_MONITOR,
       };
 
       const resolved = TelegramSettingsSchema.parse({
@@ -327,6 +329,7 @@ export class SystemSettingsService {
         webhookSecret: "",
         commandsEnabled: true,
         aiCopilotEnabled: false,
+        driveMonitor: DEFAULT_TELEGRAM_DRIVE_MONITOR,
       };
     }
   }
@@ -368,6 +371,7 @@ export class SystemSettingsService {
           : current.webhookSecret,
       commandsEnabled: input.commandsEnabled !== undefined ? input.commandsEnabled : current.commandsEnabled,
       aiCopilotEnabled: input.aiCopilotEnabled !== undefined ? input.aiCopilotEnabled : current.aiCopilotEnabled,
+      driveMonitor: input.driveMonitor !== undefined ? input.driveMonitor : current.driveMonitor,
     };
 
     const validated = TelegramSettingsSchema.parse(merged);

@@ -1,0 +1,192 @@
+{
+  "id": "mDrVMon1t0rF1l3s",
+  "name": "monitor-drive-files",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule-drive",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-480, 0]
+    },
+    {
+      "parameters": {},
+      "id": "trigger-manual-drive",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-480, 200]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "(name contains 'CONTRATOS' or name contains 'CARTERA' or name contains 'ReporteContratos' or name contains 'reporte_contratos')",
+        "returnAll": false,
+        "limit": 20,
+        "filter": {
+          "whatToSearch": "files",
+          "includeTrashed": false
+        },
+        "options": {
+          "fields": [
+            "*"
+          ]
+        }
+      },
+      "id": "gdrive-search-files",
+      "name": "Search Tracked Drive Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-200, 80],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst latestByKey = new Map();\n\nfunction resolveKey(name, id) {\n  if (id === '1wFaJYgCPCLmN3nPEah_NFNaS3l4XQccJJ8i9D48bsMo') return 'CONTRATOS';\n  if (id === '1_kI__kiJjHEWoaC6YKtH1Bm1Yc6ZylWEAj_8rb7pbKY') return 'CARTERA';\n  const norm = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n  if (norm.includes('contrato')) return 'CONTRATOS';\n  if (norm.includes('cartera') || norm.includes('saldo')) return 'CARTERA';\n  return null;\n}\n\nfor (const item of items) {\n  const raw = item.json || {};\n  if (!raw.id || !raw.name || !raw.modifiedTime || raw.error) continue;\n  const fileKey = resolveKey(raw.name, raw.id);\n  if (!fileKey) continue;\n\n  const existing = latestByKey.get(fileKey);\n  const ts = Date.parse(raw.modifiedTime) || 0;\n  const existingTs = existing ? (Date.parse(existing.modifiedTime) || 0) : -1;\n  if (ts < existingTs) continue;\n\n  latestByKey.set(fileKey, {\n    fileKey,\n    fileId: raw.id,\n    fileName: raw.name,\n    mimeType: raw.mimeType || null,\n    modifiedTime: raw.modifiedTime,\n    modifiedBy: raw.lastModifyingUser?.displayName || null,\n    modifiedByEmail: raw.lastModifyingUser?.emailAddress || null,\n    webViewLink: raw.webViewLink || null,\n    version: raw.version !== undefined && raw.version !== null ? String(raw.version) : null,\n    sizeBytes: raw.size ? Number(raw.size) : null\n  });\n}\n\nconst files = Array.from(latestByKey.values());\nreturn [{ json: { files } }];"
+      },
+      "id": "code-format-drive-sync",
+      "name": "Build Drive Sync Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-files-check",
+              "leftValue": "={{ Array.isArray($json.files) && $json.files.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-files",
+      "name": "Has Tracked Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [300, 80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.BACKEND_API_URL || 'http://host.docker.internal:4200').replace(/\\/$/, '') + '/api/integrations/drive-files/report' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Api-Key",
+              "value": "={{ $env.API_INTERNAL_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { source: 'n8n-drive-monitor', files: $json.files } }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "http-report-drive-sync",
+      "name": "Report To ISP Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 0]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Search Tracked Drive Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Search Tracked Drive Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Tracked Drive Files": {
+      "main": [
+        [
+          {
+            "node": "Build Drive Sync Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Drive Sync Payload": {
+      "main": [
+        [
+          {
+            "node": "Has Tracked Files?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tracked Files?": {
+      "main": [
+        [
+          {
+            "node": "Report To ISP Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "tags": []
+}

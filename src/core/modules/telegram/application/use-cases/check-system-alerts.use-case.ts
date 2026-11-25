@@ -4,6 +4,14 @@ import type { EscalationRepositoryPort } from "../../../escalation/application/p
 import type { AnalyticsRepositoryPort } from "../../../analytics/application/ports/analytics.repository.port";
 import type { SendTelegramAlertUseCase } from "./send-telegram-alert.use-case";
 import type { TelegramSettings } from "../../domain/telegram-config.entity";
+import {
+  DEFAULT_TELEGRAM_DRIVE_MONITOR,
+  computeDriveFileStaleness,
+  formatDriveTimestamp,
+  formatDurationMinutes,
+  formatElapsedHoursLabel,
+} from "../../domain/drive-file-sync.entity";
+import type { DriveFileSyncStorePort } from "../ports/drive-file-sync.store.port";
 import type { AlertCooldownCacheService } from "../services/alert-cooldown-cache.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 
@@ -18,6 +26,7 @@ export interface CheckSystemAlertsDeps {
   frontendUrl?: string;
   logger: Logger;
   broadcaster?: RealtimeBroadcaster;
+  driveFileSyncStore?: DriveFileSyncStorePort;
 }
 
 export interface CheckSystemAlertsResult {
@@ -25,6 +34,7 @@ export interface CheckSystemAlertsResult {
   slaBreachesCount: number;
   queueDelaysCount: number;
   infraAlertsCount: number;
+  driveAlertsCount: number;
   alerts: Array<{ category: string; title: string; targetId: string }>;
 }
 
@@ -40,6 +50,7 @@ export class CheckSystemAlertsUseCase {
         slaBreachesCount: 0,
         queueDelaysCount: 0,
         infraAlertsCount: 0,
+        driveAlertsCount: 0,
         alerts: [],
       };
     }
@@ -48,6 +59,7 @@ export class CheckSystemAlertsUseCase {
     let slaBreachesCount = 0;
     let queueDelaysCount = 0;
     let infraAlertsCount = 0;
+    let driveAlertsCount = 0;
 
     const effectiveFrontendUrl = (
       (settings.frontendUrl && settings.frontendUrl.trim() !== "")
@@ -82,16 +94,21 @@ export class CheckSystemAlertsUseCase {
           const isUnassigned = !item.assignedAgentId;
           const cooldownKey = `sla:case:${item.caseId}`;
           // Cooldown de 30 minutos por caso demorado
-          if (!this.deps.cooldownCache.shouldAlert(cooldownKey, 30 * 60 * 1000)) {
+          const canAlert =
+            typeof this.deps.cooldownCache.shouldAlertAsync === "function"
+              ? await this.deps.cooldownCache.shouldAlertAsync(cooldownKey, 30 * 60 * 1000)
+              : this.deps.cooldownCache.shouldAlert(cooldownKey, 30 * 60 * 1000);
+          if (!canAlert) {
             continue;
           }
 
+          const waitLabel = formatDurationMinutes(item.waitMinutes);
           const title = isUnassigned
-            ? `⚠️ Caso SIN ASIGNAR con demora excesiva (${item.waitMinutes}m)`
-            : `Demora excesiva en atención humana (${item.waitMinutes}m)`;
+            ? `⚠️ Caso SIN ASIGNAR con demora excesiva (${waitLabel})`
+            : `Demora excesiva en atención humana (${waitLabel})`;
           const body = isUnassigned
-            ? `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando atención en ${item.departmentName || "General / Sin área"}. Ningún asesor ha tomado el caso.`
-            : `El cliente ${item.customerName} (${item.customerPhone}) lleva ${item.waitMinutes} minutos esperando respuesta del asesor.`;
+            ? `El cliente ${item.customerName} (${item.customerPhone}) lleva ${waitLabel} esperando atención en ${item.departmentName || "General / Sin área"}. Ningún asesor ha tomado el caso.`
+            : `El cliente ${item.customerName} (${item.customerPhone}) lleva ${waitLabel} esperando respuesta del asesor.`;
           const actionUrl = item.conversationId
             ? `${effectiveFrontendUrl}/bandeja?conversationId=${item.conversationId}&status=open`
             : `${effectiveFrontendUrl}/bandeja?tab=unassigned`;
@@ -106,7 +123,7 @@ export class CheckSystemAlertsUseCase {
               "Estado": isUnassigned ? "Sin asignar (En cola)" : "Asignado",
               "Asesor": item.assignedAgentName || "Sin asignar",
               "Departamento": item.departmentName || "General",
-              "Tiempo de espera": `${item.waitMinutes} minutos`,
+              "Tiempo de espera": waitLabel,
               "Cliente": item.customerName,
             },
             actions: [{ label: isUnassigned ? "Tomar / Atender caso" : "Abrir caso en Panel", url: actionUrl }],
@@ -144,11 +161,16 @@ export class CheckSystemAlertsUseCase {
 
         for (const item of pendingQueue) {
           const cooldownKey = `sla:queue:${item.escalationId}`;
-          if (!this.deps.cooldownCache.shouldAlert(cooldownKey, 30 * 60 * 1000)) {
+          const canAlert =
+            typeof this.deps.cooldownCache.shouldAlertAsync === "function"
+              ? await this.deps.cooldownCache.shouldAlertAsync(cooldownKey, 30 * 60 * 1000)
+              : this.deps.cooldownCache.shouldAlert(cooldownKey, 30 * 60 * 1000);
+          if (!canAlert) {
             continue;
           }
 
-          const title = `Cliente en cola de espera sin asignar (${item.waitMinutes}m)`;
+          const queueWaitLabel = formatDurationMinutes(item.waitMinutes);
+          const title = `Cliente en cola de espera sin asignar (${queueWaitLabel})`;
           const body = `El cliente ${item.customerName} (${item.customerPhone}) aguarda en la cola de ${item.departmentName || "Triage"} sin ser tomado por un asesor.`;
           const actionUrl = `${effectiveFrontendUrl}/bandeja?tab=unassigned${item.departmentId ? `&departmentId=${item.departmentId}` : ""}`;
 
@@ -160,7 +182,7 @@ export class CheckSystemAlertsUseCase {
             metadata: {
               "Departamento": item.departmentName || "Triage",
               "Prioridad": item.priority.toUpperCase(),
-              "Tiempo en cola": `${item.waitMinutes} minutos`,
+              "Tiempo en cola": queueWaitLabel,
             },
             actions: [{ label: "Atender caso", url: actionUrl }],
           });
@@ -191,7 +213,11 @@ export class CheckSystemAlertsUseCase {
 
         const cooldownKey = `infra:${item.sector}:${item.oltName || "none"}`;
         // Cooldown de 45 minutos por sector
-        if (!this.deps.cooldownCache.shouldAlert(cooldownKey, 45 * 60 * 1000)) {
+        const canAlertInfra =
+          typeof this.deps.cooldownCache.shouldAlertAsync === "function"
+            ? await this.deps.cooldownCache.shouldAlertAsync(cooldownKey, 45 * 60 * 1000)
+            : this.deps.cooldownCache.shouldAlert(cooldownKey, 45 * 60 * 1000);
+        if (!canAlertInfra) {
           continue;
         }
 
@@ -224,10 +250,93 @@ export class CheckSystemAlertsUseCase {
     }
   }
 
-    const dispatchedCount = slaBreachesCount + queueDelaysCount + infraAlertsCount;
+    // 4. Detección de archivos desactualizados en Google Drive según temporizador configurable (horas)
+    const driveSettings = settings.driveMonitor ?? DEFAULT_TELEGRAM_DRIVE_MONITOR;
+    if (driveSettings.enabled && driveSettings.notifyOnStale && this.deps.driveFileSyncStore) {
+      try {
+        const syncState = await this.deps.driveFileSyncStore.getState();
+        const timeZone = settings.timeZone || "America/Guayaquil";
+
+        for (const fileCfg of driveSettings.files) {
+          if (!fileCfg.enabled) continue;
+          const record = syncState.records[fileCfg.key];
+          if (!record?.lastModifiedTime) continue;
+
+          const thresholdHours =
+            fileCfg.staleThresholdHours ?? driveSettings.staleThresholdHours ?? 24;
+          const { elapsedHours, isStale } = computeDriveFileStaleness(
+            record.lastModifiedTime,
+            thresholdHours,
+          );
+          if (!isStale || elapsedHours === null) continue;
+
+          const cooldownMs = Math.max(60, Math.min(thresholdHours * 60, 360)) * 60 * 1000;
+          const cooldownKey = `drive:stale:${fileCfg.key}`;
+          const canAlertDrive =
+            typeof this.deps.cooldownCache.shouldAlertAsync === "function"
+              ? await this.deps.cooldownCache.shouldAlertAsync(cooldownKey, cooldownMs)
+              : this.deps.cooldownCache.shouldAlert(cooldownKey, cooldownMs);
+          if (!canAlertDrive) {
+            continue;
+          }
+
+          const elapsedLabel = formatElapsedHoursLabel(elapsedHours);
+          const thresholdLabel = formatElapsedHoursLabel(thresholdHours);
+          const formattedModified = formatDriveTimestamp(record.lastModifiedTime, timeZone);
+          const editorDisplay =
+            record.lastModifiedBy ||
+            record.lastModifiedByEmail ||
+            "Usuario no reportado por Drive";
+          const title = `Archivo sin actualizar en Drive: ${record.fileName} (${elapsedLabel})`;
+          const body = `El archivo ${fileCfg.label} (${record.fileName}) lleva ${elapsedLabel} sin modificaciones en Google Drive, superando el temporizador configurado de ${thresholdLabel}.`;
+
+          await this.deps.sendTelegramAlert.execute({
+            category: "DRIVE_SYNC",
+            severity: "WARNING",
+            title,
+            body,
+            metadata: {
+              "Archivo": `${fileCfg.label} (${fileCfg.key})`,
+              "Nombre en Drive": record.fileName,
+              "Tiempo sin cambios": elapsedLabel,
+              "Temporizador configurado": thresholdLabel,
+              "Última modificación": formattedModified,
+              "Último editor": editorDisplay,
+            },
+            actions: [
+              ...(record.webViewLink
+                ? [{ label: "📄 Abrir archivo en Drive", url: record.webViewLink }]
+                : []),
+              {
+                label: "⚙️ Ajustar Monitor en Panel",
+                url: `${effectiveFrontendUrl}/configuracion`,
+              },
+            ],
+          });
+
+          driveAlertsCount++;
+          alerts.push({
+            category: "DRIVE_SYNC",
+            title,
+            targetId: fileCfg.key,
+          });
+        }
+      } catch (err) {
+        this.deps.logger.warn({ err }, "error al evaluar frescura de archivos en Google Drive");
+      }
+    }
+
+    const dispatchedCount =
+      slaBreachesCount + queueDelaysCount + infraAlertsCount + driveAlertsCount;
     if (dispatchedCount > 0) {
       this.deps.logger.info(
-        { dispatchedCount, slaBreachesCount, queueDelaysCount, infraAlertsCount },
+        {
+          dispatchedCount,
+          slaBreachesCount,
+          queueDelaysCount,
+          infraAlertsCount,
+          driveAlertsCount,
+        },
         "centinela de Telegram despachó alertas reactivas",
       );
     }
@@ -237,6 +346,7 @@ export class CheckSystemAlertsUseCase {
       slaBreachesCount,
       queueDelaysCount,
       infraAlertsCount,
+      driveAlertsCount,
       alerts,
     };
   }
