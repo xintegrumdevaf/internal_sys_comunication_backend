@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added & Changed
+- **Búsqueda normalizada de teléfonos y conversaciones vinculadas en Contactos (`customer.repository.pg.ts`, `customer-search.helper.ts`)**:
+  - Se normalizan los dígitos de búsqueda en `GET /api/customers` (`+593...`, `5939...`, `09...`) sin alterar la parametrización SQL.
+  - Se extiende el filtro de búsqueda hacia las conversaciones vinculadas al contacto (`conversation.customer_id = c.id` por `wa_phone` y `wa_profile_name`), permitiendo ubicar al cliente aunque su conversación haya iniciado desde un número secundario de WhatsApp.
 - **Enriquecimiento y deduplicación de eventos `HUMAN_ASSIGNED` en tiempo real (`cases.router.ts`, `escalation.service.ts`, `drain-department-queue.service.ts`, `escalated-queue-overflow.service.ts`, `take-control.use-case.ts`, `transfer-case.use-case.ts`)**:
   - Se eliminaron las emisiones duplicadas de `HUMAN_ASSIGNED` sin datos de cliente en `/api/cases/:id/claim`, `/assign` y `/reassign`.
   - Se enriquecieron todos los publicadores de `HUMAN_ASSIGNED` (`tryAutoAssign`, `DrainDepartmentQueueService`, `EscalatedQueueOverflowService`, `TakeControlUseCase` y `TransferCaseUseCase`) con `conversationId`, `customerName` y `customerPhone` para evitar notificaciones vacías en la campana.

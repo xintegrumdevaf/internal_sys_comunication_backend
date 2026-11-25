@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { Contract, Customer, CustomerWithDetails } from "../../domain/customer.entity";
+import { buildPhoneDigitVariants } from "./customer-search.helper";
 import type { Tag } from "../../../tags/domain/tag.entity";
 import type {
   CreateCustomerInput,
@@ -257,11 +258,42 @@ export class CustomerRepositoryPg implements CustomerRepositoryPort {
 
     if (filter.search) {
       const searchPattern = `%${filter.search}%`;
-      whereClauses.push(
-        `(c.full_name ILIKE $${idx} OR c.wa_phone ILIKE $${idx} OR c.national_id ILIKE $${idx} OR c.email ILIKE $${idx} OR EXISTS (SELECT 1 FROM contract ct WHERE ct.customer_id = c.id AND ct.contract_number ILIKE $${idx}))`,
-      );
+      const searchIdx = idx++;
       params.push(searchPattern);
-      idx++;
+
+      const digitPatterns = buildPhoneDigitVariants(filter.search);
+      const digitsIdx = digitPatterns.length > 0 ? idx++ : null;
+      if (digitsIdx !== null) {
+        params.push(digitPatterns);
+      }
+
+      const customerDigitsSql =
+        digitsIdx !== null
+          ? `\n            OR regexp_replace(COALESCE(c.wa_phone, ''), '\\D', '', 'g') ILIKE ANY($${digitsIdx}::text[])\n            OR regexp_replace(COALESCE(c.national_id, ''), '\\D', '', 'g') ILIKE ANY($${digitsIdx}::text[])`
+          : "";
+      const convDigitsSql =
+        digitsIdx !== null
+          ? `\n                  OR regexp_replace(COALESCE(conv.wa_phone, ''), '\\D', '', 'g') ILIKE ANY($${digitsIdx}::text[])`
+          : "";
+
+      whereClauses.push(
+        `(c.full_name ILIKE $${searchIdx}
+            OR c.wa_phone ILIKE $${searchIdx}
+            OR c.national_id ILIKE $${searchIdx}
+            OR c.email ILIKE $${searchIdx}${customerDigitsSql}
+            OR EXISTS (
+              SELECT 1 FROM contract ct
+              WHERE ct.customer_id = c.id AND ct.contract_number ILIKE $${searchIdx}
+            )
+            OR EXISTS (
+              SELECT 1 FROM conversation conv
+              WHERE conv.customer_id = c.id
+                AND (
+                  conv.wa_phone ILIKE $${searchIdx}
+                  OR conv.wa_profile_name ILIKE $${searchIdx}${convDigitsSql}
+                )
+            ))`,
+      );
     }
 
     if (filter.tagId) {
