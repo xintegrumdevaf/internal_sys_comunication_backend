@@ -8,6 +8,8 @@ const BY_REASON: Record<string, string> = {
     "Estamos revisando tu caso en nuestro sistema y te confirmamos por aquí mismo en cuanto quede listo.",
   AI_ERROR: "¡Recibido, gracias! 🙌 Estamos revisando la información y te confirmamos por aquí mismo en breve.",
   UNSUPPORTED: "¡Recibido, gracias! 🙌 Estamos revisando tu solicitud y te confirmamos por este mismo chat en breve.",
+  MEDIA_UNAVAILABLE:
+    "¡Recibido, gracias! 🙌 Un asesor de nuestro equipo está revisando tu mensaje y te atenderá por aquí mismo en breve.",
   REQUEST_HUMAN: "¡Con gusto! 🙌 Estamos revisando los detalles para ayudarte por aquí mismo. ¡Un momento por favor!",
   TRIAGE: "¡Recibido, gracias! 🙌 Estamos verificando tu información y te confirmamos por aquí mismo en cuanto quede listo. ¡Gracias por tu confianza!",
   TECHNICAL: "¡Recibido, gracias! 🙌 Estamos revisando la información y te confirmamos por aquí mismo en cuanto quede listo.",

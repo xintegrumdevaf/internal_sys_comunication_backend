@@ -1,7 +1,7 @@
 import { notFound } from "../../../../../shared/errors/domain-errors";
 import type { Logger } from "../../../../../shared/logging/logger";
 import type { Case } from "../../../cases/domain/case.entity";
-import { emptyContextFor } from "../../../cases/domain/contexts/case-context";
+import { emptyContextFor, type CaseContext } from "../../../cases/domain/contexts/case-context";
 import type { CaseRepositoryPort } from "../../../cases/application/ports/case.repository.port";
 import type { WorkflowExecutionRepositoryPort } from "../../../cases/application/ports/workflow-execution.repository.port";
 import type { ConversationRepositoryPort } from "../../../conversations/application/ports/conversation.repository.port";
@@ -163,6 +163,8 @@ export class EscalationService {
     reason: string;
     correlationId: string;
     departmentId?: string | null;
+    workflowType?: string;
+    priority?: "low" | "normal" | "high" | "urgent";
   }): Promise<{ case: Case; escalation: Escalation; customerMessage: string }> {
     const { caseRepo, conversationRepo, departmentRepo } = this.deps;
     const log = this.deps.logger.child({
@@ -175,13 +177,28 @@ export class EscalationService {
       : null;
     const targetDepartmentId = input.departmentId ?? resolvedGeneral?.id ?? null;
     const routedToGeneralFallback = !input.departmentId && Boolean(resolvedGeneral);
-    const workflowType = routedToGeneralFallback ? "GENERAL_INQUIRY" : "UNCLASSIFIED";
+    const workflowType =
+      input.workflowType ?? (routedToGeneralFallback ? "GENERAL_INQUIRY" : "UNCLASSIFIED");
+    const knownWorkflowTypes = new Set<CaseContext["workflowType"]>([
+      "SUPPORT_INTERNET",
+      "BILLING_BALANCE",
+      "SALES",
+      "SALES_PACKAGES",
+      "HOME_RELOCATION",
+      "UNCLASSIFIED",
+      "GENERAL_INQUIRY",
+    ]);
+    const contextWorkflowType: CaseContext["workflowType"] = knownWorkflowTypes.has(
+      workflowType as CaseContext["workflowType"],
+    )
+      ? (workflowType as CaseContext["workflowType"])
+      : "GENERAL_INQUIRY";
 
     const aggregate = await caseRepo.create({
       conversationId: input.conversationId,
       workflowType,
       departmentId: targetDepartmentId,
-      context: emptyContextFor(workflowType),
+      context: emptyContextFor(contextWorkflowType),
       initialState: "TRIAGE",
       expiresAt: null,
     });
@@ -208,7 +225,7 @@ export class EscalationService {
     const { escalation, caseEntity } = await this.persistEscalation(
       transitioned.case,
       input.reason,
-      "normal",
+      input.priority ?? "normal",
     );
     const customerMessage = routedToGeneralFallback
       ? businessReplyForReason(input.reason, resolvedGeneral?.slug ?? null)

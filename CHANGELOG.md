@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added & Changed
+- **Diferenciación y escalación contextual de mensajes `unsupported` de WhatsApp (`unsupported-message.ts`, `parse-zernio-webhook.ts`, `parse-whatsapp-webhook.ts`, `zernio-history-sync.worker.ts`, `interpret-message.prompt.ts`, `process-buffered-messages.use-case.ts`, `escalation.service.ts`, `business-reply-catalog.ts`)**:
+  - Se normalizan los eventos `unsupported` de Meta Cloud API / Zernio (p. ej. códigos `131051`, `131052`, `131060` o `text: "[Unsupported message]"` sin adjuntos) con `type: "unsupported"`, `body: "[unsupported]"` y detalle saneado en `caption`, evitando que se mezclen como texto del cliente o disparen cierres erróneos.
+  - Se descarta el stub `[unsupported]` cuando en el mismo lote llegan adjuntos multimedia válidos.
+  - Ante un elemento no legible por API (`unsupported`), el procesador lee el contexto reciente de la conversación (hasta 15 mensajes) e interpreta mediante NLU si corresponde derivar al área inferida o escalar por defecto al departamento `General`, enviando al cliente una confirmación amable (`MEDIA_UNAVAILABLE`) sin pedirle reenvío ni mencionar detalles técnicos internos.
 - **Módulo de Analíticas Gerenciales, Trazabilidad Multi-Agente y Exportación Streaming a Excel (`analytics.repository.pg.ts`, `analytics-detail.queries.ts`, `analytics.router.ts`, `analytics-excel-stream.builder.ts`, `analytics-labels.ts`, `migrations/0052_analytics_performance_indexes.sql`)**:
   - Agregada atribución en tres planos para asesores (`casesTouched`, `casesResolved`, `casesTransferred`, `uniqueCustomersCount`, `lastCaseAt`), corrección de `fromAgentId` en eventos `CASE_TRANSFERRED` (`transfer-case.use-case.ts`) y filtrado de usuarios sin actividad ajena en reportes por área.
   - Nuevos endpoints paginados y exportables: `GET /api/analytics/departments-summary`, `GET /api/analytics/cases`, `GET /api/analytics/customers`, `GET /api/analytics/export/estimate` y `GET /api/analytics/export/excel` (streaming real con `exceljs@4.4.0` en 4 hojas con etiquetas en español de negocio y fechas 24h `America/Guayaquil`).

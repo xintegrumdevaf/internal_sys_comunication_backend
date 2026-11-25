@@ -235,6 +235,41 @@ describe("parseZernioWebhookPayload", () => {
     expect(normalized!.type).toBe("sticker");
     expect(normalized!.body).toBe("[sticker]");
   });
+
+  it("diferencia [Unsupported message] con metadata.unsupported como type='unsupported' sin mezclarlo con texto del cliente", async () => {
+    const payload = {
+      id: "evt_unsupp",
+      event: "message.received",
+      message: {
+        id: "msg_unsupp_1",
+        conversationId: "conv_xyz",
+        platform: "whatsapp",
+        platformMessageId: "wamid.UNSUPP_1",
+        direction: "incoming",
+        text: "[Unsupported message]",
+        attachments: [],
+        metadata: {
+          unsupported: {
+            code: 131060,
+            details: "Message currently unavailable from Zernio sync",
+          },
+        },
+        sender: {
+          id: "593980600635",
+          name: "AVOR",
+        },
+      },
+    };
+
+    const [normalized] = await parseZernioWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized!.type).toBe("unsupported");
+    expect(normalized!.body).toBe("[unsupported]");
+    expect(normalized!.mediaId).toBeNull();
+    expect(normalized!.caption).toContain("sincronizado");
+    expect(normalized!.caption).toContain("WhatsApp Web");
+    expect(normalized!.caption?.toLowerCase()).not.toContain("zernio");
+  });
 });
 
 describe("verifyZernioSignature", () => {

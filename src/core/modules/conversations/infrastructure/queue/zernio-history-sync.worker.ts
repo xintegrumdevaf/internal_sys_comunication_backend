@@ -9,6 +9,10 @@ import type {
   ZernioSyncProgress,
 } from "../../domain/zernio-history.types";
 import type { MessageAuthor } from "../../domain/message.entity";
+import {
+  UNSUPPORTED_INTERNAL_BODY,
+  extractUnsupportedDetail,
+} from "../../domain/unsupported-message";
 
 export const ZERNIO_HISTORY_QUEUE_KEY = "queue:zernio:history_sync";
 export const ZERNIO_HISTORY_STATUS_KEY = "sync:zernio:history:status";
@@ -225,7 +229,21 @@ export class ZernioHistorySyncWorker {
       let body = msg.message || (firstAttachment ? `[${type}]` : "");
       let mediaId: string | null = firstAttachment?.url ?? null;
       const mimeType: string | null = firstAttachment?.mimeType ?? null;
+      let caption: string | null = null;
       let filename: string | null = firstAttachment?.filename ?? null;
+
+      const unsupportedInfo = extractUnsupportedDetail({
+        text: msg.message,
+        metadata: msg.metadata ?? null,
+        attachments: msg.attachments,
+      });
+      if (unsupportedInfo.isUnsupported) {
+        type = "unsupported";
+        body = UNSUPPORTED_INTERNAL_BODY;
+        mediaId = null;
+        filename = null;
+        caption = unsupportedInfo.label;
+      }
 
       // Detección de ubicación geográfica en historial de Zernio
       const metaLoc = (msg.metadata?.location || msg.location) as Record<string, unknown> | undefined;
@@ -273,6 +291,7 @@ export class ZernioHistorySyncWorker {
         type,
         mediaId,
         mimeType,
+        caption,
         filename,
         status: msg.status,
         errorMessage: msg.errorMessage,

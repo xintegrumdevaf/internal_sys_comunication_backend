@@ -5,6 +5,11 @@
  * del payload de Meta directamente.
  */
 
+import {
+  UNSUPPORTED_INTERNAL_BODY,
+  extractUnsupportedDetail,
+} from "../../domain/unsupported-message";
+
 type WhatsAppMediaObject = {
   id: string;
   mime_type: string;
@@ -50,6 +55,7 @@ type WhatsAppInboundMessage = {
   interactive?: WhatsAppInteractiveReply;
   location?: WhatsAppLocationObject;
   edit?: WhatsAppEditObject;
+  errors?: Array<{ code?: number | string; title?: string; message?: string; error_data?: { details?: string } }>;
   context?: {
     id?: string;
     from?: string;
@@ -223,6 +229,21 @@ function normalizeMessage(raw: WhatsAppInboundMessage, waProfileName: string | n
         caption: null,
         filename: "sticker.webp",
       };
+    case "unsupported": {
+      const info = extractUnsupportedDetail({
+        type: "unsupported",
+        errors: raw.errors,
+      });
+      return {
+        ...base,
+        type: "unsupported",
+        body: UNSUPPORTED_INTERNAL_BODY,
+        mediaId: null,
+        mimeType: null,
+        caption: info.label,
+        filename: null,
+      };
+    }
     default:
       return { ...base, body: "", mediaId: null, mimeType: null, caption: null, filename: null };
   }

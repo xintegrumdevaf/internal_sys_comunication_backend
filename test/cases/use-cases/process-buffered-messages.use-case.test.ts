@@ -2246,4 +2246,260 @@ describe("ProcessBufferedMessagesUseCase (docs/spec/05_BUILD_PLAN.md Etapa 2+5)"
     expect(cases).toHaveLength(1);
     expect(cases[0]!.workflowType).toBe("SUPPORT_INTERNET");
   });
+
+  it("diferencia [unsupported] de texto del cliente, usa contexto para catalogar (Facturación) y escala sin pedir reenvío", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentRepo,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const billingDept = await departmentRepo.findBySlug("billing");
+    const conversation = conversationRepo.createOpen();
+
+    messageRepo.seedText(conversation.id, "Ok. Gracias");
+    await messageRepo.insertOutbound({
+      conversationId: conversation.id,
+      author: "agent",
+      body: "¡Buenos días! Quedamos pendientes del depósito para el lunes, por favor.",
+      status: "sent",
+    });
+
+    let triageInput: {
+      conversationId: string;
+      reason: string;
+      departmentId?: string | null;
+      workflowType?: string;
+    } | null = null;
+
+    const escalationService = {
+      sendToTriage: async (input: {
+        conversationId: string;
+        reason: string;
+        departmentId?: string | null;
+        workflowType?: string;
+      }) => {
+        triageInput = input;
+        return {
+          case: {} as never,
+          escalation: {} as never,
+          customerMessage:
+            "¡Recibido, gracias! 🙌 Un asesor de nuestro equipo está revisando tu mensaje y te atenderá por aquí mismo en breve.",
+        };
+      },
+      escalateExistingCase: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    let capturedAiInput: InterpretMessageInput | null = null;
+    const interpretationProvider: InterpretationPort = {
+      interpretMessage: async (input) => {
+        capturedAiInput = input;
+        return {
+          type: "REQUEST_HUMAN",
+          intent: "billing.record_payment",
+          entities: {},
+          confidence: 0.9,
+        };
+      },
+    };
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const msgThanks = messageRepo.seedText(conversation.id, "Gracias");
+    const msgUnsupported = messageRepo.seedText(conversation.id, "[unsupported]", {
+      type: "unsupported",
+      caption: "Mensaje temporalmente no sincronizado",
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-unsupp-context-billing",
+      messages: [msgThanks, msgUnsupported],
+    });
+
+    expect(capturedAiInput).not.toBeNull();
+    expect(capturedAiInput!.text).toContain("Gracias");
+    expect(capturedAiInput!.text).toContain(
+      "[El cliente envió un archivo o imagen en WhatsApp no visible aquí]",
+    );
+    expect(capturedAiInput!.text).not.toContain("[Unsupported message]");
+    expect(triageInput).not.toBeNull();
+    expect(triageInput!.departmentId).toBe(billingDept!.id);
+    expect(triageInput!.workflowType).toBe("BILLING_BALANCE");
+    expect(triageInput!.reason).toContain("MEDIA_UNAVAILABLE");
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).not.toMatch(/reenví|ver una vez|zernio/i);
+  });
+
+  it("si tras revisar el contexto la intención con [unsupported] sigue ambigua, deriva a departamento General", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let triageInput: {
+      conversationId: string;
+      reason: string;
+      departmentId?: string | null;
+      workflowType?: string;
+    } | null = null;
+
+    const escalationService = {
+      sendToTriage: async (input: {
+        conversationId: string;
+        reason: string;
+        departmentId?: string | null;
+        workflowType?: string;
+      }) => {
+        triageInput = input;
+        return {
+          case: {} as never,
+          escalation: {} as never,
+          customerMessage:
+            "¡Recibido, gracias! 🙌 Un asesor de nuestro equipo está revisando tu mensaje y te atenderá por aquí mismo en breve.",
+        };
+      },
+      escalateExistingCase: async () => ({ customerMessage: "" }),
+    } as unknown as EscalationService;
+
+    const interpretationProvider = new QueuedInterpretationProvider([
+      { type: "UNCLEAR", intent: "unknown", entities: {}, confidence: 0.2 },
+    ]);
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData,
+      escalationService,
+      logger: silentLogger,
+    });
+
+    const msgUnsupported = messageRepo.seedText(conversation.id, "[unsupported]", {
+      type: "unsupported",
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-unsupp-ambiguous-general",
+      messages: [msgUnsupported],
+    });
+
+    expect(triageInput).not.toBeNull();
+    expect(triageInput!.departmentId).toBeNull();
+    expect(triageInput!.workflowType).toBeUndefined();
+    expect(whatsappSender.sent).toHaveLength(1);
+    expect(whatsappSender.sent[0]!.body).not.toMatch(/reenví|no entend/i);
+  });
+
+  it("si llega un stub unsupported en el mismo lote junto con una imagen real válida, ignora el stub y procesa la imagen", async () => {
+    const scenario = buildScenario();
+    const {
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+    } = scenario;
+
+    const conversation = conversationRepo.createOpen();
+    let aiText = "";
+    const interpretationProvider: InterpretationPort = {
+      interpretMessage: async (input) => {
+        aiText = input.text;
+        return {
+          type: "NEW_INTENT",
+          intent: "billing.record_payment",
+          entities: {},
+          confidence: 0.95,
+        };
+      },
+    };
+    const fakeAi = new FakeAIProvider();
+    fakeAi.extractReceiptImpl = async () => ({
+      isReceipt: true,
+      description: "comprobante válido de Banco Pichincha",
+    });
+
+    const useCase = new ProcessBufferedMessagesUseCase({
+      caseRepo,
+      conversationRepo,
+      messageRepo,
+      whatsappSender,
+      departmentResolver,
+      arbitrationService,
+      interpretationProvider,
+      engine,
+      advanceCase,
+      composeReply,
+      transcribeAudio,
+      extractReceiptData: new ExtractReceiptDataUseCase(fakeAi),
+      logger: silentLogger,
+    });
+
+    const stubMsg = messageRepo.seedText(conversation.id, "[unsupported]", { type: "unsupported" });
+    const validImg = messageRepo.seedText(conversation.id, "", {
+      type: "image",
+      mediaId: "media-valid-1",
+      mimeType: "image/jpeg",
+    });
+
+    await useCase.execute({
+      conversationId: conversation.id,
+      correlationId: "corr-unsupp-with-valid-media",
+      messages: [stubMsg, validImg],
+    });
+
+    expect(aiText).not.toContain("no visible aquí");
+    expect(aiText).toContain("comprobante válido de Banco Pichincha");
+  });
 });

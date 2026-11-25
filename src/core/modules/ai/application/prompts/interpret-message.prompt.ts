@@ -159,6 +159,14 @@ Regla de intent prioritario: si el mensaje toca más de un tema, identifica el \
   → Su intención es referirse y hacer valer el comprobante ya entregado.
   → Clasifícalo SIEMPRE como type="CONTINUE" (si hay caso activo) o type="NEW_INTENT", intent="billing.record_payment", con confianza alta (0.95).
   → NUNCA lo clasifiques como UNCLEAR, saludo ni general.inquiry.
+- ADJUNTO / IMAGEN NO VISIBLE EN EL CANAL ([El cliente envió un archivo o imagen en WhatsApp no visible aquí]):
+  Significa que el cliente envió una foto, comprobante o documento real en WhatsApp, pero la plataforma de entrada no pudo descargar el archivo hacia el sistema (NO es un texto escrito por el cliente).
+  → NUNCA clasifiques este lote como despedida (CANCEL), cierre ni cortesía, incluso si viene acompañado de "Gracias", "Ok" o "Listo": el envío de una imagen reactiva o continúa la atención.
+  → Lee cuidadosamente TODO el "historial reciente", el "caso activo" y el "caso previo resuelto recientemente" para catalogar a qué área o flujo corresponde esa imagen:
+    * Si en los mensajes anteriores quedaron pendientes de un pago/lunes/depósito, hablaron de saldo/cuentas o hubo un caso de facturación → clasifica con intent="billing.record_payment" (confidence >= 0.85) y type="CONTINUE" (si hay caso activo) o "REQUEST_HUMAN".
+    * Si venían revisando una falla de internet, luces del router, cobertura o cambio de clave → clasifica con intent="support.internet" y type="CONTINUE" o "REQUEST_HUMAN".
+    * Si venían cotizando servicio, instalación o traslado → clasifica con el intent de ventas ("sales.new_contract" / "sales.plans") o traslado ("support.home_relocation") correspondiente.
+  → Solo si tras revisar todo el historial reciente no hay pistas claras para descartar la ambigüedad, clasifica con type="UNCLEAR", intent="unknown".
 
 ## Uso del "historial reciente" para mantener el hilo de la conversación y reformular preguntas:
 - REFORMULACIÓN CONTEXTUAL DE PREGUNTAS (CRÍTICO): Usa el historial de mensajes recientes para resolver referencias implícitas, elipsis y anáforas, generando siempre una pregunta completa, autónoma y rica en \`entities.question\`.

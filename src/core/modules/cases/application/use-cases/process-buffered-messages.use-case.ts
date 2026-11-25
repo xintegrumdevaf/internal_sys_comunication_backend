@@ -17,7 +17,8 @@ import type { TranscribeAudioUseCase } from "../../../ai/application/use-cases/t
 import type { EscalationService } from "../../../escalation/application/services/escalation.service";
 import type { RealtimeBroadcaster } from "../../../realtime/application/realtime-broadcaster";
 import type { CaseRepositoryPort } from "../ports/case.repository.port";
-import type { InterpretationPort } from "../ports/interpretation.port";
+import type { Interpretation, InterpretationPort } from "../ports/interpretation.port";
+import { businessReplyForReason } from "../../../escalation/application/services/business-reply-catalog";
 import { type CaseArbitrationService } from "../services/case-arbitration.service";
 import { type DepartmentResolverService } from "../services/department-resolver.service";
 import { resolveReplyTemplate } from "../services/resolve-reply-template";
@@ -28,6 +29,8 @@ import type { DepartmentRoutingService } from "../../../departments/application/
 import { ExpirationService } from "../services/expiration.service";
 import { checkCustomerGuardrails } from "../../domain/guardrails";
 import type { ConversationIdentityPort } from "../../../customers/application/ports/conversation-identity.port";
+import { isUnsupportedMessageRecord } from "../../../conversations/domain/unsupported-message";
+import { mapIntentToWorkflowType } from "../services/intent-workflow-mapper";
 
 export type ProcessBufferedMessagesDeps = {
   caseRepo: CaseRepositoryPort;
@@ -287,6 +290,15 @@ export class ProcessBufferedMessagesUseCase {
 
       const { text, receiptEntities, primaryMessageId } = await this.prepareText(messages, log);
 
+      const hasUnsupportedMedia = messages.some(isUnsupportedMessageRecord);
+      const hasValidMediaInBatch = messages.some(
+        (m) =>
+          !isUnsupportedMessageRecord(m) &&
+          ["image", "document", "video", "audio", "voice"].includes(m.type.toLowerCase()) &&
+          Boolean(m.mediaId),
+      );
+      const requiresUnsupportedMediaRouting = hasUnsupportedMedia && !hasValidMediaInBatch;
+
       const hasDocumentAttachment = messages.some(
         (m) =>
           m.type === "document" ||
@@ -369,6 +381,7 @@ export class ProcessBufferedMessagesUseCase {
       // reacciona con otro emoji o sticker sin contenido verbal, guardar silencio absoluto sin llamar a NLU.
       if (
         !activeAggregate &&
+        !requiresUnsupportedMediaRouting &&
         hasAlreadySentPostCloseAck(priorChronological, lastCompletedCase) &&
         isNonVerbalPostCloseMessage(text, messages)
       ) {
@@ -387,7 +400,9 @@ export class ProcessBufferedMessagesUseCase {
       const recentMessages = priorChronological
         .map((m) => {
           let bodyText = m.body?.trim() ?? "";
-          if (!bodyText) {
+          if (isUnsupportedMessageRecord(m)) {
+            bodyText = "[El cliente envió un archivo o imagen en WhatsApp no visible aquí]";
+          } else if (!bodyText) {
             const mType = m.type.toLowerCase();
             if (mType === "image") {
               bodyText = m.caption?.trim()
@@ -414,7 +429,7 @@ export class ProcessBufferedMessagesUseCase {
           };
         })
         .filter((m) => m.body.trim().length > 0)
-        .slice(-10);
+        .slice(requiresUnsupportedMediaRouting ? -15 : -10);
 
       let interpretation = await this.deps.interpretationProvider.interpretMessage({
         correlationId,
@@ -514,7 +529,7 @@ export class ProcessBufferedMessagesUseCase {
         interpretation.type === "CANCEL",
       );
 
-      if (isClosingOrThankYou && !activeAggregate && !reportsOutage && !visualReceipt) {
+      if (isClosingOrThankYou && !activeAggregate && !reportsOutage && !visualReceipt && !requiresUnsupportedMediaRouting) {
         interpretation = {
           ...interpretation,
           type: "CANCEL",
@@ -528,7 +543,7 @@ export class ProcessBufferedMessagesUseCase {
       //    guardar silencio absoluto y no reabrir la conversación cerrada.
       // 2) Si ya se envió un acuse/despedida previa tras el cierre de un caso, guardar silencio absoluto.
       // 3) Caso contrario, componer una despedida 100% natural con composeReply (sin plantilla mecánica).
-      if (!activeAggregate && isClosingOrThankYou) {
+      if (!activeAggregate && isClosingOrThankYou && !requiresUnsupportedMediaRouting) {
         const isPostCampaignAck =
           lastOutboundWasTemplate &&
           (!lastCompletedCase ||
@@ -698,6 +713,18 @@ export class ProcessBufferedMessagesUseCase {
         },
         "unidad de trabajo interpretada",
       );
+
+      if (requiresUnsupportedMediaRouting) {
+        await this.handleUnsupportedMediaEscalation({
+          conversationId,
+          correlationId,
+          activeAggregate,
+          interpretation,
+          isConvClosedOrResolved,
+          log,
+        });
+        return;
+      }
 
       const decision = await this.deps.arbitrationService.decide({ conversationId, interpretation });
       log.info({ decision: decision.action }, "arbitraje de caso decidido");
@@ -1231,6 +1258,12 @@ export class ProcessBufferedMessagesUseCase {
     const parts: string[] = [];
     const receiptEntities: Record<string, unknown> = {};
     const primaryMessageId = messages[0]?.id ?? "unknown";
+    const batchHasValidMedia = messages.some(
+      (m) =>
+        !isUnsupportedMessageRecord(m) &&
+        ["image", "document", "video", "audio", "voice"].includes(m.type.toLowerCase()) &&
+        Boolean(m.mediaId),
+    );
 
     for (const message of messages) {
       if (message.replyTo) {
@@ -1250,6 +1283,12 @@ export class ProcessBufferedMessagesUseCase {
       }
 
       const type = message.type.toLowerCase();
+      if (isUnsupportedMessageRecord(message)) {
+        if (!batchHasValidMedia) {
+          parts.push("[El cliente envió un archivo o imagen en WhatsApp no visible aquí]");
+        }
+        continue;
+      }
       if (type === "audio" || type === "voice") {
         try {
           const mediaUrl = message.mediaId ?? "";
@@ -1397,6 +1436,98 @@ export class ProcessBufferedMessagesUseCase {
     }
 
     return { text: parts.join("\n"), receiptEntities, primaryMessageId };
+  }
+
+  private async handleUnsupportedMediaEscalation(input: {
+    conversationId: string;
+    correlationId: string;
+    activeAggregate: Awaited<ReturnType<CaseRepositoryPort["findActiveByConversation"]>>;
+    interpretation: Interpretation;
+    isConvClosedOrResolved: boolean;
+    log: Logger;
+  }): Promise<void> {
+    const {
+      conversationId,
+      correlationId,
+      activeAggregate,
+      interpretation,
+      isConvClosedOrResolved,
+      log,
+    } = input;
+    await this.reopenIfClosed(conversationId, isConvClosedOrResolved, log);
+
+    const escalationReason =
+      "MEDIA_UNAVAILABLE:Cliente envió imagen o archivo en WhatsApp no visible en bandeja (revisar en WhatsApp Web o teléfono)";
+
+    const normalizedIntent = (interpretation.intent ?? "").trim().toLowerCase();
+    const isSpecificIntent =
+      interpretation.type !== "UNCLEAR" &&
+      Boolean(normalizedIntent) &&
+      normalizedIntent !== "unknown" &&
+      normalizedIntent !== "general.inquiry";
+
+    let targetDepartmentId: string | null = null;
+    let resolvedWorkflow: string | undefined;
+
+    if (isSpecificIntent) {
+      const dynamicRouting = this.deps.routingService
+        ? await this.deps.routingService.resolveByIntent(interpretation.intent)
+        : null;
+      const mappedWorkflow =
+        dynamicRouting?.workflowType || mapIntentToWorkflowType(interpretation.intent);
+      resolvedWorkflow = mappedWorkflow ?? "GENERAL_INQUIRY";
+      targetDepartmentId =
+        dynamicRouting?.departmentId ??
+        (mappedWorkflow
+          ? await this.deps.departmentResolver.resolveDepartmentId(
+              mappedWorkflow,
+              interpretation.intent,
+            )
+          : null);
+    }
+
+    let customerMessage = businessReplyForReason("MEDIA_UNAVAILABLE");
+
+    if (activeAggregate) {
+      if (this.deps.escalationService) {
+        const res = await this.deps.escalationService.escalateExistingCase({
+          caseId: activeAggregate.case.id,
+          reason: escalationReason,
+          priority: "high",
+          correlationId,
+        });
+        customerMessage = res.customerMessage;
+      } else {
+        await this.escalateToHuman(activeAggregate.case.id, log);
+      }
+    } else if (this.deps.escalationService) {
+      const res = await this.deps.escalationService.sendToTriage({
+        conversationId,
+        reason: escalationReason,
+        correlationId,
+        departmentId: targetDepartmentId,
+        workflowType: targetDepartmentId ? resolvedWorkflow : undefined,
+        priority: "high",
+      });
+      customerMessage = res.customerMessage;
+    }
+
+    log.info(
+      {
+        conversationId,
+        inferredIntent: interpretation.intent,
+        targetDepartmentId: targetDepartmentId ?? "general_fallback",
+        hadActiveCase: Boolean(activeAggregate),
+      },
+      "Adjunto no disponible por canal catalogado por contexto y derivado sin pedir reenvío al cliente",
+    );
+
+    await this.deliverFixedReply({
+      conversationId,
+      correlationId,
+      body: customerMessage,
+      log,
+    });
   }
 
   private async reopenIfClosed(
@@ -1904,6 +2035,9 @@ function looksLikeClosingAckBody(body: string): boolean {
 }
 
 function isNonVerbalPostCloseMessage(text: string, messages: Message[]): boolean {
+  if (messages.some(isUnsupportedMessageRecord)) {
+    return false;
+  }
   if (messages.length > 0 && messages.every((m) => m.type.toLowerCase() === "sticker")) {
     return true;
   }

@@ -177,6 +177,42 @@ describe("parseWhatsAppWebhookPayload — contacts[].profile.name", () => {
     expect(normalized?.mimeType).toBe("image/webp");
     expect(normalized?.filename).toBe("sticker.webp");
   });
+
+  it("diferencia mensajes entrantes de tipo unsupported (Meta Cloud API) con su código en caption", () => {
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                contacts: [{ wa_id: "593980600635", profile: { name: "AVOR" } }],
+                messages: [
+                  {
+                    from: "593980600635",
+                    id: "wamid.UNSUPP_META_1",
+                    type: "unsupported",
+                    timestamp: "1732386900",
+                    errors: [
+                      {
+                        code: 131052,
+                        title: "Media download failed",
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [normalized] = parseWhatsAppWebhookPayload(payload);
+    expect(normalized).toBeDefined();
+    expect(normalized?.type).toBe("unsupported");
+    expect(normalized?.body).toBe("[unsupported]");
+    expect(normalized?.caption).toContain("No se pudo descargar la imagen");
+  });
 });
 
 describe("parseWhatsAppWebhookEdits", () => {

@@ -1,4 +1,8 @@
 import type { NormalizedInboundMessage } from "../whatsapp/parse-whatsapp-webhook";
+import {
+  UNSUPPORTED_INTERNAL_BODY,
+  extractUnsupportedDetail,
+} from "../../domain/unsupported-message";
 
 /**
  * Payload estructurado de eventos de webhook de Zernio (Inbox).
@@ -17,10 +21,12 @@ export type ZernioWebhookMessage = {
   conversationId: string;
   platform?: string;
   platformMessageId?: string;
+  type?: string;
   direction?: "incoming" | "outgoing";
   fromMe?: boolean;
   text?: string | null;
   caption?: string | null;
+  errors?: Array<{ code?: number | string; title?: string; message?: string; error_data?: { details?: string } }>;
   attachments?: ZernioWebhookAttachment[];
   sender?: {
     id?: string;
@@ -256,6 +262,14 @@ export async function parseZernioWebhookPayload(
     }
   }
 
+  const unsupportedCheck = extractUnsupportedDetail({
+    type: msg.type,
+    text: rawText,
+    metadata: typeof rawMetadata === "object" && rawMetadata !== null ? (rawMetadata as Record<string, unknown>) : null,
+    errors: msg.errors,
+    attachments: msg.attachments,
+  });
+
   if (latCandidate !== undefined && lngCandidate !== undefined) {
     type = "location";
     const googleMapsUrl = locUrl || `https://maps.google.com/?q=${latCandidate},${lngCandidate}`;
@@ -267,7 +281,7 @@ export async function parseZernioWebhookPayload(
     caption = locName || locAddress || (rawText.length > 0 && rawText !== "📍 Location" ? rawText : "Ubicación compartida");
     filename = `${latCandidate},${lngCandidate}`;
     mediaId = googleMapsUrl;
-  } else if (firstAttachment) {
+  } else if (firstAttachment && !unsupportedCheck.isUnsupported) {
     const rawType = (firstAttachment.type || "").toLowerCase();
     const mime = (firstAttachment.mimeType || "").toLowerCase();
     const fname = (firstAttachment.filename || firstAttachment.name || firstAttachment.url || "").toLowerCase();
@@ -288,10 +302,18 @@ export async function parseZernioWebhookPayload(
     mimeType = firstAttachment.mimeType || null;
     caption = firstAttachment.caption || msg.caption || null;
     filename = firstAttachment.filename || firstAttachment.name || null;
+  } else if (unsupportedCheck.isUnsupported) {
+    type = "unsupported";
+    mediaId = null;
+    mimeType = null;
+    filename = null;
+    caption = unsupportedCheck.label;
   }
 
   let body = "";
-  if (type === "location" && latCandidate !== undefined && lngCandidate !== undefined) {
+  if (type === "unsupported") {
+    body = UNSUPPORTED_INTERNAL_BODY;
+  } else if (type === "location" && latCandidate !== undefined && lngCandidate !== undefined) {
     const googleMapsUrl = locUrl || `https://maps.google.com/?q=${latCandidate},${lngCandidate}`;
     const parts: string[] = [`Ubicación GPS: ${latCandidate}, ${lngCandidate}`];
     if (locName) parts.push(locName);
